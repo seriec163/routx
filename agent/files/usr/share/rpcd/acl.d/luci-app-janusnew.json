@@ -1,0 +1,16 @@
+{
+	"luci-app-janusnew": {
+		"description": "Статус агента JanusNew",
+		"read": {
+			"file": {
+				"/var/run/janusnew/status.json": [ "read" ]
+			}
+		},
+		"write": {
+			"file": {
+				"/etc/init.d/janusnew restart": [ "exec" ],
+				"/usr/bin/janusnew rotate": [ "exec" ]
+			}
+		}
+	}
+}

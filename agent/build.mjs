@@ -1,0 +1,153 @@
+import { mkdir, copyFile, writeFile, readFile, chmod, cp, rm } from 'node:fs/promises';
+import { join, dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { execSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const root = __dirname;
+const files = join(root, 'files');
+const dist = join(root, 'dist');
+
+const version = (await readFile(join(root, 'VERSION'), 'utf8')).trim();
+
+await mkdir(dist, { recursive: true });
+
+// Бит исполнения должен быть в архиве, независимо от файловой системы сборки.
+for (const relative of [
+  'etc/init.d/janusnew',
+  'etc/uci-defaults/90-janusnew',
+  'usr/bin/janusnew',
+  'usr/libexec/janusnew-exec',
+]) {
+  await chmod(join(files, relative), 0o755);
+}
+
+// tar.gz (primary for apk/fallback)
+execSync(`tar -C "${files}" -czf "${join(dist, 'janusnew.tar.gz')}" .`, { stdio: 'inherit' });
+
+// OpenWrt 24.10+ принимает ipk как gzip-tar с debian-binary + control.tar.gz + data.tar.gz.
+try {
+  const ipkdir = join(dist, 'ipk');
+  const staging = join(ipkdir, 'staging');
+  await mkdir(join(ipkdir, 'CONTROL'), { recursive: true });
+  await mkdir(staging, { recursive: true });
+
+  execSync(`tar -C "${files}" -cf "${join(ipkdir, 'data.tar.gz')}" --gzip .`, { stdio: 'inherit' });
+
+  const control = `Package: janusnew\nVersion: ${version}-1\nDepends: ucode, ucode-mod-fs, ucode-mod-uci, ucode-mod-digest, coreutils-timeout, curl\nSection: net\nArchitecture: all\nMaintainer: Router Control\nDescription: JanusNew agent for Router Control\n`;
+  await writeFile(join(ipkdir, 'CONTROL', 'control'), control);
+  await writeFile(join(ipkdir, 'CONTROL', 'conffiles'), '/etc/config/janusnew\n');
+  await writeFile(
+    join(ipkdir, 'CONTROL', 'postinst'),
+    [
+      '#!/bin/sh',
+      '[ -x /etc/uci-defaults/90-janusnew ] && /etc/uci-defaults/90-janusnew',
+      '/etc/init.d/janusnew enable 2>/dev/null',
+      '# opkg кладёт сюда свою копию conffile при каждом обновлении.',
+      'rm -f /etc/config/janusnew-opkg',
+      '# LuCI читает menu.d при загрузке, а ACL кэширует rpcd.',
+      'rm -f /tmp/luci-indexcache* 2>/dev/null',
+      '[ -x /etc/init.d/rpcd ] && /etc/init.d/rpcd reload 2>/dev/null',
+      'exit 0',
+      '',
+    ].join('\n'),
+  );
+  await writeFile(
+    join(ipkdir, 'CONTROL', 'prerm'),
+    '#!/bin/sh\n/etc/init.d/janusnew stop 2>/dev/null\n/etc/init.d/janusnew disable 2>/dev/null\nexit 0\n',
+  );
+  await chmod(join(ipkdir, 'CONTROL', 'postinst'), 0o755);
+  await chmod(join(ipkdir, 'CONTROL', 'prerm'), 0o755);
+
+  execSync(`tar -C "${join(ipkdir, 'CONTROL')}" -cf "${join(ipkdir, 'control.tar.gz')}" --gzip .`, {
+    stdio: 'inherit',
+  });
+  await writeFile(join(staging, 'debian-binary'), '2.0\n');
+  await copyFile(join(ipkdir, 'control.tar.gz'), join(staging, 'control.tar.gz'));
+  await copyFile(join(ipkdir, 'data.tar.gz'), join(staging, 'data.tar.gz'));
+
+  const target = join(dist, `janusnew_${version}_all.ipk`);
+  execSync(`tar -C "${staging}" -czf "${target}" ./debian-binary ./control.tar.gz ./data.tar.gz`, {
+    stdio: 'inherit',
+  });
+  await copyFile(target, join(dist, 'janusnew.ipk'));
+} catch (error) {
+  console.log('ipk build skipped:', error.message);
+}
+
+// OpenWrt 25+ uses apk-tools. Package data excludes /etc/config/janusnew:
+// the config is created by 90-janusnew and must survive agent upgrades.
+try {
+  const apkRoot = join(dist, 'apk-root');
+  await rm(apkRoot, { recursive: true, force: true });
+  await cp(files, apkRoot, { recursive: true });
+  await rm(join(apkRoot, 'etc/config/janusnew'), { force: true });
+
+  const postInstall = join(dist, 'apk-post-install.sh');
+  const preDeinstall = join(dist, 'apk-pre-deinstall.sh');
+  await writeFile(
+    postInstall,
+    [
+      '#!/bin/sh',
+      '[ -x /etc/uci-defaults/90-janusnew ] && /etc/uci-defaults/90-janusnew',
+      '/etc/init.d/janusnew enable 2>/dev/null',
+      'rm -f /tmp/luci-indexcache* 2>/dev/null',
+      '[ -x /etc/init.d/rpcd ] && /etc/init.d/rpcd reload 2>/dev/null',
+      'exit 0',
+      '',
+    ].join('\n'),
+  );
+  await writeFile(
+    preDeinstall,
+    [
+      '#!/bin/sh',
+      '/etc/init.d/janusnew stop 2>/dev/null',
+      '/etc/init.d/janusnew disable 2>/dev/null',
+      'exit 0',
+      '',
+    ].join('\n'),
+  );
+  await chmod(postInstall, 0o755);
+  await chmod(preDeinstall, 0o755);
+
+  execSync(
+    [
+      'apk mkpkg',
+      '--compat 3.0',
+      `--output ${JSON.stringify(join(dist, 'janusnew.apk'))}`,
+      `--files ${JSON.stringify(apkRoot)}`,
+      '--info name:janusnew',
+      `--info version:${version}-r0`,
+      '--info "description:JanusNew agent for Router Control"',
+      '--info arch:noarch',
+      '--info license:GPL-2.0',
+      '--info origin:janusnew',
+      '--info maintainer:Router-Control',
+      '--info "depends:ucode ucode-mod-fs ucode-mod-uci ucode-mod-digest coreutils-timeout curl"',
+      `--script post-install:${JSON.stringify(postInstall)}`,
+      `--script post-upgrade:${JSON.stringify(postInstall)}`,
+      `--script pre-deinstall:${JSON.stringify(preDeinstall)}`,
+    ].join(' '),
+    { stdio: 'inherit' },
+  );
+  await rm(apkRoot, { recursive: true, force: true });
+} catch (error) {
+  console.log('apk build skipped:', error.message);
+}
+
+const sums = [];
+const ipkData = await readFile(join(dist, 'janusnew.ipk')).catch(() => null);
+if (ipkData) {
+  sums.push(`${createHash('sha256').update(ipkData).digest('hex')}  janusnew.ipk`);
+}
+const apkData = await readFile(join(dist, 'janusnew.apk')).catch(() => null);
+if (apkData) {
+  sums.push(`${createHash('sha256').update(apkData).digest('hex')}  janusnew.apk`);
+}
+const tarData = await readFile(join(dist, 'janusnew.tar.gz'));
+sums.push(`${createHash('sha256').update(tarData).digest('hex')}  janusnew.tar.gz`);
+await writeFile(join(dist, 'janusnew.sha256'), `${sums.join('\n')}\n`);
+await writeFile(join(dist, 'SHA256SUMS'), `${sums.join('\n')}\n`);
+
+console.log('built janusnew ' + version);

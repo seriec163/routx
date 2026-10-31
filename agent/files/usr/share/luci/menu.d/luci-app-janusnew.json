@@ -1,0 +1,13 @@
+{
+	"admin/services/janusnew": {
+		"title": "JanusNew",
+		"order": 61,
+		"action": {
+			"type": "view",
+			"path": "janusnew/status"
+		},
+		"depends": {
+			"acl": [ "luci-app-janusnew" ]
+		}
+	}
+}
