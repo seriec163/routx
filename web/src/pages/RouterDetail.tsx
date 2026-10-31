@@ -683,10 +683,17 @@ export function RouterDetailPage({ id }: { id: string }) {
   const sectionNames = routerSectionNames;
   const managedSectionName =
     connections.data?.managed_section ?? router?.managed_section ?? 'router_control';
-  const sectionDisplay = (name: string): string => {
+  const sectionLabel = (name: string): string => {
     const raw = state?.managed?.[`section.${name}.label`];
     const label = typeof raw === 'string' ? raw.trim() : '';
-    return label && label !== name ? `${name} (${label})` : name;
+    return label || name;
+  };
+  // В Prokop пользователь видит label секции, а не физическое имя UCI.
+  // Панель должна показывать то же самое; физическое имя — только в подсказке.
+  const sectionDisplay = (name: string): string => sectionLabel(name);
+  const sectionTitle = (name: string): string | undefined => {
+    const label = sectionLabel(name);
+    return label !== name ? `UCI-секция: ${name}` : undefined;
   };
   const sectionSubscriptionPaths = Object.entries(state?.managed ?? {}).filter(
     ([path, value]) =>
@@ -1113,7 +1120,14 @@ export function RouterDetailPage({ id }: { id: string }) {
       const existing = assignment.section_map ?? {};
       const targets: Record<string, string> = {};
       for (const source of sources) {
-        if (existing[source]) targets[source] = existing[source]!;
+        if (existing[source]) {
+          targets[source] = existing[source]!;
+          continue;
+        }
+        // Шаблон хранит логическое имя, Prokop показывает label секции.
+        // Сначала ищем секцию с таким label, потом — с таким физическим именем.
+        const byLabel = routerSectionNames.find((name) => sectionLabel(name) === source);
+        if (byLabel) targets[source] = byLabel;
         else if (routerSectionNames.includes(source)) targets[source] = source;
         else if (routerSectionNames.length === 1) targets[source] = routerSectionNames[0]!;
         else targets[source] = '';
@@ -1390,7 +1404,7 @@ export function RouterDetailPage({ id }: { id: string }) {
         <div className="grid-2">
           <Panel
             title="Управляемые параметры"
-            subtitle={`${Object.keys(state?.managed ?? {}).length} путей в снимке состояния`}
+            subtitle={`${Object.keys(state?.managed ?? {}).length} путей в снимке состояния. Это технические пути UCI: секции в Prokop и панели показываются по label.`}
             actions={
               <TextInput
                 value={stateQuery}
@@ -1932,7 +1946,9 @@ export function RouterDetailPage({ id }: { id: string }) {
                           <td className="mono small">
                             {item.host ? `${item.host}/…${item.tail}` : item.name}
                           </td>
-                          <td>{sectionDisplay(managedSectionName)}</td>
+                          <td title={sectionTitle(managedSectionName)}>
+                            {sectionDisplay(managedSectionName)}
+                          </td>
                           <td>
                             {item.managed ? 'Router Control' : 'вне Router Control'}
                             {item.matchLabel ? ` · совпадает с «${item.matchLabel}»` : ''}
@@ -1975,7 +1991,7 @@ export function RouterDetailPage({ id }: { id: string }) {
             <Field label="Секция">
               <Select value={extraSection} onChange={changeExtraSection}>
                 {sectionNames.map((item) => (
-                  <option key={item} value={item}>
+                  <option key={item} value={item} title={sectionTitle(item)}>
                     {sectionDisplay(item)}
                     {item === (extras.data?.managed_section ?? router.managed_section)
                       ? ' · Router Control'
@@ -2090,12 +2106,20 @@ export function RouterDetailPage({ id }: { id: string }) {
                           <Link to={`/templates/${assignment.template_id}`}>{assignment.template_name}</Link>
                         </td>
                         <td>{assignment.revision}</td>
-                        <td className="small">
+                        <td
+                          className="small"
+                          title={
+                            assignment.section_map &&
+                            Object.keys(assignment.section_map).length > 0
+                              ? Object.entries(assignment.section_map)
+                                  .map(([from, to]) => `${from}: UCI ${to}`)
+                                  .join('\n')
+                              : undefined
+                          }
+                        >
                           {assignment.section_map &&
                           Object.keys(assignment.section_map).length > 0
-                            ? Object.entries(assignment.section_map)
-                                .map(([from, to]) => `${from} → ${to}`)
-                                .join(', ')
+                            ? Object.keys(assignment.section_map).join(', ')
                             : 'по имени'}
                         </td>
                         <td>
@@ -3069,8 +3093,9 @@ export function RouterDetailPage({ id }: { id: string }) {
         >
           <p>
             Секции шаблона — логические. Выберите, к какой секции роутера применять каждую из них.
-            Например, <code>router_control</code> можно привязать к существующей секции{' '}
-            <code>gga</code>.
+            В списке показаны названия так, как их видно в Prokop; физическое имя UCI —
+            в подсказке. Например, логическую <code>router_control</code> можно привязать к
+            секции, которая в Prokop тоже называется <code>router_control</code>.
           </p>
           {mappingBusy && mappingSources.length === 0 ? <Spinner /> : null}
           {mappingSources.map((source) => (

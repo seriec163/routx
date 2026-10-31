@@ -359,7 +359,7 @@ export function creatableSections(payload: TemplatePayload): string[] {
   return [...names];
 }
 
-const CONNECTION_ACTIONS = new Set(['connection', 'proxy', 'outbound', 'vpn']);
+export const CONNECTION_ACTIONS = new Set(['connection', 'proxy', 'outbound', 'vpn']);
 
 export interface SectionMappingResult {
   payload: TemplatePayload;

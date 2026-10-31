@@ -127,13 +127,21 @@ export function TemplateEditorPage({ id }: { id: string }) {
   const actions = catalog.data?.actions ?? [];
   const discoveredSections = routerSections.data?.sections ?? [];
   const sectionOptions = useMemo(() => {
-    const names = new Set([...Object.keys(payload.sections), ...payload.create_sections]);
-    for (const item of routerSections.data?.sections ?? []) names.add(item.name);
+    const byName = new Map(
+      (routerSections.data?.sections ?? []).map((item) => [item.name, item.label || item.name]),
+    );
+    const canonical = (name: string) => byName.get(name) ?? name;
+    const names = new Set([
+      ...Object.keys(payload.sections).map(canonical),
+      ...payload.create_sections.map(canonical),
+    ]);
+    for (const item of routerSections.data?.sections ?? []) names.add(item.label || item.name);
     return [...names].sort((a, b) => a.localeCompare(b));
   }, [payload.sections, payload.create_sections, routerSections.data]);
   const sectionPayload = payload.sections[section] ?? {};
   const sectionInTemplate = Boolean(payload.sections[section]);
-  const discoveredCurrent = discoveredSections.find((item) => item.name === section) ?? null;
+  const discoveredCurrent =
+    discoveredSections.find((item) => (item.label || item.name) === section) ?? null;
   const selectedServices = asStringList(sectionPayload.community_lists);
   const manual = payload.manual_entries[section] ?? { domains: [], ips: [] };
 
@@ -172,7 +180,7 @@ export function TemplateEditorPage({ id }: { id: string }) {
     if (values.action == null) values.action = target.action ?? 'connection';
     if (values.enabled == null) values.enabled = target.enabled ?? '1';
     if (values.label == null) values.label = target.label ?? target.name;
-    const name = target.name;
+    const name = target.label || target.name;
     setPayload((current) => ({
       ...current,
       sections: { ...current.sections, [name]: values },
@@ -182,6 +190,53 @@ export function TemplateEditorPage({ id }: { id: string }) {
     setValidation(null);
     toast.info(`Значения секции «${name}» загружены в шаблон`);
   }
+
+  // Старые шаблоны могли сохранить физическое имя UCI (gga), а Prokop
+  // показывает label (router_control). Переводим ключи на label, чтобы
+  // панель и роутер называли секцию одинаково.
+  useEffect(() => {
+    if (!routerSections.data) return;
+    const byName = new Map(
+      routerSections.data.sections.map((item) => [item.name, item.label || item.name]),
+    );
+    setPayload((current) => {
+      let changed = false;
+      const sections = { ...current.sections };
+      const manualEntries = { ...current.manual_entries };
+      const createSections = [...current.create_sections];
+
+      for (const [physical, canonical] of byName) {
+        if (physical === canonical) continue;
+        if (sections[physical] && !sections[canonical]) {
+          sections[canonical] = { ...sections[physical], label: canonical };
+          delete sections[physical];
+          if (manualEntries[physical]) {
+            manualEntries[canonical] = manualEntries[physical];
+            delete manualEntries[physical];
+          }
+          const index = createSections.indexOf(physical);
+          if (index >= 0) createSections[index] = canonical;
+          else if (!createSections.includes(canonical)) createSections.push(canonical);
+          changed = true;
+        }
+      }
+
+      return changed
+        ? {
+            ...current,
+            sections,
+            manual_entries: manualEntries,
+            create_sections: [...new Set(createSections)],
+          }
+        : current;
+    });
+  }, [routerSections.data]);
+
+  useEffect(() => {
+    if (!routerSections.data) return;
+    const current = routerSections.data.sections.find((item) => item.name === section);
+    if (current?.label && current.label !== current.name) setSection(current.label);
+  }, [routerSections.data, section]);
 
   function updateSection(patch: Record<string, string | string[] | null>) {
     setPayload((current) => {
@@ -472,7 +527,9 @@ export function TemplateEditorPage({ id }: { id: string }) {
                 <Select value={section} onChange={(value) => setSection(value)}>
                   {sectionOptions.length === 0 ? <option value="router_control">router_control</option> : null}
                   {sectionOptions.map((item) => {
-                    const found = discoveredSections.some((entry) => entry.name === item);
+                    const found = discoveredSections.some(
+                      (entry) => (entry.label || entry.name) === item,
+                    );
                     return (
                       <option key={item} value={item}>
                         {item}
@@ -987,13 +1044,14 @@ export function TemplateEditorPage({ id }: { id: string }) {
                     </thead>
                     <tbody>
                       {discoveredSections.map((item) => {
-                        const inTemplate = Boolean(payload.sections[item.name]);
+                        const canonical = item.label || item.name;
+                        const inTemplate = Boolean(payload.sections[canonical]);
                         return (
                           <tr key={item.name}>
                             <td>
-                              <code>{item.name}</code>
-                              {item.label ? (
-                                <div className="muted-text small">{item.label}</div>
+                              <code>{canonical}</code>
+                              {item.label && item.label !== item.name ? (
+                                <div className="muted-text small">UCI: {item.name}</div>
                               ) : null}
                             </td>
                             <td>{item.action ?? '—'}</td>
@@ -1005,7 +1063,7 @@ export function TemplateEditorPage({ id }: { id: string }) {
                                 size="sm"
                                 variant={inTemplate ? 'ghost' : 'subtle'}
                                 onClick={() => {
-                                  if (inTemplate) setSection(item.name);
+                                  if (inTemplate) setSection(canonical);
                                   else loadSectionFromRouter(item);
                                 }}
                               >

@@ -12,6 +12,7 @@ import { createBindingToken, rotateRouterCredential } from './binding.js';
 import { loadSettings } from '../settings.js';
 import {
   applySectionMap,
+  CONNECTION_ACTIONS,
   mapTemplateSections,
   sanitizeAgentState,
   templatePayloadSchema,
@@ -774,13 +775,22 @@ export async function registerRouterRoutes(app: FastifyInstance, ctx: RouteConte
 
     // Если шаблон привязан к существующей физической секции (например,
     // router_control → gga), Router Control должен писать подключения именно
-    // в неё. Иначе появится вторая секция с тем же подключением.
+    // в неё. Иначе появится вторая секция с тем же подключением. Берём
+    // физическую секцию из уже сопоставленного payload, а не угадываем по
+    // старому managed_section.
+    const connectionTargets = Object.entries(mappedPayload.sections)
+      .filter(
+        ([, options]) =>
+          typeof options.action === 'string' && CONNECTION_ACTIONS.has(options.action),
+      )
+      .map(([name]) => name);
     const currentManaged = router.managed_section ?? 'router_control';
-    const mappedManaged = sectionMap[currentManaged];
-    if (mappedManaged && mappedManaged !== currentManaged) {
+    const targetManaged =
+      connectionTargets.length === 1 ? connectionTargets[0]! : sectionMap[currentManaged];
+    if (targetManaged && targetManaged !== currentManaged) {
       await pool.query(
         'update routers set managed_section = $2, updated_at = now() where id = $1',
-        [params.id, mappedManaged],
+        [params.id, targetManaged],
       );
       await audit(pool, {
         actorId: auth.userId,
@@ -792,7 +802,7 @@ export async function registerRouterRoutes(app: FastifyInstance, ctx: RouteConte
         result: 'ok',
         ip: request.ip,
         userAgent: request.headers['user-agent'],
-        metadata: { from: currentManaged, to: mappedManaged, template_id: params.templateId },
+        metadata: { from: currentManaged, to: targetManaged, template_id: params.templateId },
       });
     }
 
