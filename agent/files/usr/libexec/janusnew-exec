@@ -1,0 +1,11 @@
+#!/bin/sh
+# JanusNew helper: run command with clean env and timeouts
+# Usage: janusnew-exec <timeout> <stdout> <stderr> -- <argv...>
+TIMEOUT="$1"
+OUT="$2"
+ERR="$3"
+shift 3
+[ "$1" = "--" ] && shift
+export PATH=/usr/sbin:/usr/bin:/sbin:/bin
+export HOME=/root
+exec timeout "$TIMEOUT" "$@" >"$OUT" 2>"$ERR"

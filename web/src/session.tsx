@@ -1,0 +1,119 @@
+import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
+import { api, errorMessage } from './lib/api';
+
+export interface SessionUser {
+  id: string;
+  email: string;
+  role: 'superadmin' | 'user';
+  status: string;
+  totp_enabled: boolean;
+  first_name?: string | null;
+  middle_name?: string | null;
+  last_name?: string | null;
+  created_at?: string;
+  last_login_at?: string | null;
+}
+
+export interface Me {
+  user: SessionUser;
+  csrf_token: string | null;
+  mfa_policy: 'all' | 'admins';
+  enrollment_required: boolean;
+  mfa_passed: boolean;
+  permissions: {
+    is_superadmin: boolean;
+    can_manage_users: boolean;
+    can_manage_settings: boolean;
+    can_rollout: boolean;
+  };
+}
+
+interface SessionContextValue {
+  me: Me | null;
+  loading: boolean;
+  error: string | null;
+  reload: () => Promise<Me | null>;
+  setMe: (me: Me | null) => void;
+  logout: () => Promise<void>;
+}
+
+const SessionContext = createContext<SessionContextValue | null>(null);
+
+export function SessionProvider({ children }: { children: ReactNode }) {
+  const [me, setMe] = useState<Me | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  const reload = useCallback(async (): Promise<Me | null> => {
+    try {
+      const payload = await api<Me>('/api/v1/auth/me');
+      setMe(payload);
+      setError(null);
+      return payload;
+    } catch (caught) {
+      const message = errorMessage(caught);
+      setMe(null);
+      // 401/unauthorized means not logged in - not an error to show
+      if (message.toLowerCase().includes('вход') || message.toLowerCase().includes('авториз')) {
+        setError(null);
+      } else {
+        setError(message);
+      }
+      return null;
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void reload();
+  }, [reload]);
+
+  const logout = useCallback(async () => {
+    try {
+      await api('/api/v1/auth/logout', { method: 'POST' });
+    } catch {
+      // Сессия могла уже истечь — это не мешает выйти локально.
+    }
+    setMe(null);
+    setError(null);
+  }, []);
+
+  const value = useMemo<SessionContextValue>(
+    () => ({ me, loading, error, reload, setMe, logout }),
+    [me, loading, error, reload, logout],
+  );
+
+  return <SessionContext.Provider value={value}>{children}</SessionContext.Provider>;
+}
+
+export function useSession(): SessionContextValue {
+  const context = useContext(SessionContext);
+  if (!context) throw new Error('useSession требует SessionProvider');
+  return context;
+}
+
+export function canManageUsers(me: Me | null): boolean {
+  return me?.permissions.can_manage_users === true;
+}
+
+export function canManageSettings(me: Me | null): boolean {
+  return me?.permissions.can_manage_settings === true;
+}
+
+/** Полное имя для интерфейса; e-mail — запасной вариант. */
+export function displayName(user: SessionUser | null | undefined): string {
+  const parts = [user?.last_name, user?.first_name, user?.middle_name].filter(
+    (value): value is string => Boolean(value && value.trim()),
+  );
+  return parts.length > 0 ? parts.join(' ') : user?.email ?? '';
+}
+
+/** Имя и отчество для приветствия: «Артур Николаевич». */
+export function greetingName(user: SessionUser | null | undefined): string {
+  const parts = [user?.first_name, user?.middle_name].filter(
+    (value): value is string => Boolean(value && value.trim()),
+  );
+  if (parts.length > 0) return parts.join(' ');
+  return user?.email?.split('@')[0] ?? '';
+}

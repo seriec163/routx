@@ -1,0 +1,301 @@
+// JanusNew: мониторинг прокси через штатный Clash API Prokop/Forkop.
+// Секреты Clash API не читаются и не передаются: CLI продукта сам делает
+// запросы, а наружу уходят только задержки и количество живых тегов.
+const uci = require("uci");
+const util = require("jn_util");
+const run = require("jn_run");
+
+const OUTBOUND_ACTIONS = {
+	connection: true,
+	proxy: true,
+	outbound: true,
+	vpn: true
+};
+
+const ACTIVE_TEST_TTL = 180; // секунд между активными замерами одной группы
+const MAX_ACTIVE_TAGS = 30;
+const ACTIVE_TEST_TIMEOUT_MS = "2500";
+
+let active_cache = {};
+
+function cli(product, args, timeout) {
+	let res = run.run_product(product, args, timeout);
+	if (!res.ok)
+		return { ok: false, error: run.error_text(res) };
+	let value = util.json_parse(res.stdout);
+	if (type(value) != "object")
+		return { ok: false, error: "invalid_json" };
+	return { ok: true, value: value };
+}
+
+function enabled_sections(product) {
+	let names = {};
+	let cursor = uci.cursor();
+	let all = cursor.get_all(product);
+	if (type(all) != "object")
+		return names;
+	for (let sname in all) {
+		let sect = all[sname];
+		if (type(sect) != "object" || sect[".type"] != "section")
+			continue;
+		if (util.as_string(sect.enabled) == "0")
+			continue;
+		if (!OUTBOUND_ACTIONS[util.as_string(sect.action)])
+			continue;
+		let name = util.as_string(sect[".name"]);
+		names[name == "" ? sname : name] = true;
+	}
+	return names;
+}
+
+function is_group(proxy) {
+	if (type(proxy) != "object")
+		return false;
+	let kind = lc(util.as_string(proxy.type));
+	return kind == "selector" || kind == "urltest" || kind == "fallback";
+}
+
+function pick_group(proxies, sections) {
+	if (type(proxies) != "object")
+		return "";
+	let fallback = "";
+	for (let tag, proxy in proxies) {
+		if (!is_group(proxy))
+			continue;
+		if (length(tag) <= 4 || substr(tag, length(tag) - 4) != "-out")
+			continue;
+		let section = substr(tag, 0, length(tag) - 4);
+		if (sections[section] === true)
+			return tag;
+		if (fallback == "")
+			fallback = tag;
+	}
+	return fallback;
+}
+
+function measured(value) {
+	return (type(value) == "int" || type(value) == "double") && value > 0;
+}
+
+function median(values) {
+	if (length(values) == 0)
+		return null;
+	let items = [];
+	for (let value in values)
+		push(items, value);
+	for (let i = 1; i < length(items); i++) {
+		let item = items[i];
+		let j = i - 1;
+		while (j >= 0 && items[j] > item) {
+			items[j + 1] = items[j];
+			j--;
+		}
+		items[j + 1] = item;
+	}
+	return items[int(length(items) / 2)];
+}
+
+function last_history_delay(proxy) {
+	if (type(proxy) != "object" || type(proxy.history) != "array")
+		return null;
+	for (let i = length(proxy.history) - 1; i >= 0; i--) {
+		let item = proxy.history[i];
+		if (type(item) == "object" && measured(item.delay))
+			return item.delay;
+	}
+	return null;
+}
+
+// Активный замер группы: не чаще раза в ACTIVE_TEST_TTL секунд.
+// Если группа большая или замер не удался, используем историю sing-box.
+function active_delays(product, group, members) {
+	let now = util.now_epoch();
+	let cached = active_cache[group];
+	if (cached != null && now - cached.at < ACTIVE_TEST_TTL)
+		return { ok: true, delays: cached.delays };
+
+	if (length(members) > MAX_ACTIVE_TAGS)
+		return { ok: false, error: "group_too_large" };
+
+	let res = cli(product, [ "clash_api", "get_group_latency", group, ACTIVE_TEST_TIMEOUT_MS ], 30);
+	if (!res.ok || res.value.success === false)
+		return { ok: false, error: res.ok ? util.as_string(res.value.error) : res.error };
+
+	let delays = {};
+	for (let tag in members) {
+		let value = res.value[tag];
+		if (measured(value))
+			delays[tag] = value;
+	}
+	active_cache[group] = { at: now, delays: delays };
+	return { ok: true, delays: delays };
+}
+
+function probe_proxy(product) {
+	let result = {
+		proxy_health: "unknown",
+		latency_ms: null,
+		failed_tags: null,
+		total_tags: null,
+		detail: ""
+	};
+
+	let proxies = cli(product, [ "clash_api", "get_proxies" ], 20);
+	if (!proxies.ok || type(proxies.value.proxies) != "object") {
+		result.detail = "Clash API недоступен";
+		return result;
+	}
+
+	let sections = enabled_sections(product);
+	let group = pick_group(proxies.value.proxies, sections);
+	if (group == "") {
+		result.detail = "нет группы прокси";
+		return result;
+	}
+
+	let info = proxies.value.proxies[group];
+	let members = type(info) == "object" && type(info.all) == "array" ? info.all : [];
+	if (length(members) == 0) {
+		result.detail = "группа " + group + " пуста";
+		return result;
+	}
+
+	let active = active_delays(product, group, members);
+	if (!active.ok && active.error == "latency_failed") {
+		result.proxy_health = "dead";
+		result.total_tags = length(members);
+		result.failed_tags = length(members);
+		result.detail = "группа " + group + ": ни один тег не ответил";
+		return result;
+	}
+	let delays = active.ok ? active.delays : {};
+	let use_history = !active.ok;
+
+	let alive = 0;
+	let failed = 0;
+	let latencies = [];
+	let failed_names = [];
+	for (let tag in members) {
+		let delay = delays[tag];
+		if (!measured(delay) && use_history)
+			delay = last_history_delay(proxies.value.proxies[tag]);
+		if (measured(delay)) {
+			alive++;
+			push(latencies, delay);
+		}
+		else {
+			failed++;
+			push(failed_names, util.as_string(tag));
+		}
+	}
+
+	result.total_tags = length(members);
+	result.failed_tags = failed;
+	result.latency_ms = median(latencies);
+	result.detail = "группа " + group + ": " + alive + "/" + length(members) + " живых";
+	if (failed > 0 && length(failed_names) <= 3)
+		result.detail = result.detail + " (" + join(", ", failed_names) + ")";
+
+	if (alive == 0)
+		result.proxy_health = "dead";
+	else if (failed > 0)
+		result.proxy_health = "degraded";
+	else
+		result.proxy_health = "healthy";
+
+	return result;
+}
+
+function access_check(product, target) {
+	target = trim(util.as_string(target));
+	if (target == "")
+		target = "https://www.youtube.com/generate_204";
+	if (match(target, /^https?:\/\/[^ \t\r\n]+$/) == null)
+		return { ok: false, error: "invalid_target", message: "Некорректный адрес проверки" };
+
+	let proxies = cli(product, [ "clash_api", "get_proxies" ], 20);
+	if (!proxies.ok || type(proxies.value.proxies) != "object")
+		return { ok: false, error: "clash_api_unavailable", message: "Clash API недоступен" };
+
+	let sections = enabled_sections(product);
+	let group = pick_group(proxies.value.proxies, sections);
+	if (group == "")
+		return { ok: false, error: "no_proxy_group", message: "На роутере нет группы прокси" };
+
+	let info = proxies.value.proxies[group];
+	let tag = type(info) == "object" ? util.as_string(info.now) : "";
+	if (tag == "")
+		return { ok: false, error: "no_active_proxy", message: "Не выбран активный прокси" };
+
+	let res = cli(product, [ "clash_api", "get_proxy_latency", tag, "5000", target ], 20);
+	if (!res.ok)
+		return { ok: false, error: "proxy_check_failed", message: res.error };
+	if (res.value.success === false) {
+		return {
+			ok: false,
+			error: util.as_string(res.value.error) || "access_failed",
+			message: util.as_string(res.value.message) || "Запрос через прокси не прошёл"
+		};
+	}
+	if (!measured(res.value.delay))
+		return { ok: false, error: "access_failed", message: "Прокси не вернул задержку" };
+
+	return {
+		ok: true,
+		target: target,
+		group: group,
+		proxy_tag: tag,
+		latency_ms: res.value.delay
+	};
+}
+
+function probe(product) {	let result = {
+		reachable: true,
+		service_state: "",
+		health: "",
+		proxy_health: "unknown",
+		latency_ms: null,
+		failed_tags: null,
+		total_tags: null,
+		detail: ""
+	};
+
+	// Роутер доступен уже потому, что агент выполнил эту команду.
+	// health_status даёт состояние службы, а не только признак ответа.
+	let health = cli(product, [ "get_health_status" ], 20);
+	if (health.ok) {
+		result.service_state = util.as_string(health.value.overall);
+		result.health = result.service_state;
+	}
+
+	// get_health_status считает общий health «ok», даже когда служба запущена,
+	// но автозапуск выключен. Для мониторинга это важное отличие.
+	let status = cli(product, [ "get_status" ], 15);
+	if (status.ok) {
+		let running = status.value.running === 1;
+		let enabled = status.value.enabled === 1;
+		if (!running) {
+			result.service_state = util.as_string(status.value.status) || "stopped";
+			result.health = "failed";
+		}
+		else if (!enabled) {
+			result.service_state = util.as_string(status.value.status) || "running but disabled";
+			result.health = "degraded";
+		}
+	}
+	else if (result.health == "") {
+		result.service_state = "unknown";
+		result.health = "unknown";
+	}
+
+	let proxy = probe_proxy(product);
+	result.proxy_health = proxy.proxy_health;
+	result.latency_ms = proxy.latency_ms;
+	result.failed_tags = proxy.failed_tags;
+	result.total_tags = proxy.total_tags;
+	result.detail = proxy.detail;
+
+	return result;
+}
+
+return { probe, access_check };

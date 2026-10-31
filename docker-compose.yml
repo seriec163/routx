@@ -1,0 +1,76 @@
+name: router-control
+
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-router_control}
+      POSTGRES_USER: ${POSTGRES_USER:-router_control}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Задайте POSTGRES_PASSWORD в .env}
+    ports:
+      # Только loopback: PostgreSQL не должен быть доступен из сети.
+      - "127.0.0.1:${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\""]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    security_opt:
+      - no-new-privileges:true
+
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      HOST: 0.0.0.0
+      PORT: 3000
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      DATABASE_URL: postgres://${POSTGRES_USER:-router_control}:${POSTGRES_PASSWORD:?Задайте POSTGRES_PASSWORD в .env}@db:5432/${POSTGRES_DB:-router_control}
+      RC_MASTER_KEY: ${RC_MASTER_KEY:?Задайте RC_MASTER_KEY в .env (минимум 32 символа)}
+      RC_PUBLIC_URL: ${RC_PUBLIC_URL:-http://localhost:3000}
+      RC_COOKIE_SECURE: ${RC_COOKIE_SECURE:-auto}
+      MIGRATE_ON_START: "false"
+      TRUST_PROXY: ${TRUST_PROXY:-false}
+    ports:
+      - "${RC_BIND_ADDR:-127.0.0.1}:${RC_PORT:-3000}:3000"
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+
+  caddy:
+    image: caddy:2-alpine
+    profiles: ["proxy"]
+    restart: unless-stopped
+    depends_on:
+      app:
+        condition: service_healthy
+    environment:
+      RC_DOMAIN: ${RC_DOMAIN:-localhost}
+      RC_TLS_MODE: ${RC_TLS_MODE:-internal}
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    security_opt:
+      - no-new-privileges:true
+
+volumes:
+  pgdata:
+  caddy_data:
+  caddy_config:

@@ -1,0 +1,6 @@
+#!/bin/sh
+# apk-пакет не содержит conffile: создаём дефолтный конфиг, если его ещё нет.
+[ -f /etc/config/janusnew ] || \
+  /usr/bin/ucode -L /usr/lib/janusnew -e 'require("jn_config").ensure_file();' 2>/dev/null || true
+chmod 600 /etc/config/janusnew 2>/dev/null
+exit 0
