@@ -85,9 +85,11 @@ describe('план шаблона', () => {
     );
 
     expect(plan.localLists[0]?.entries).toEqual(['203.0.113.10', 'example.com']);
-    expect(plan.desired.get('section.router_control.domain')).toEqual(['api.example.com']);
-    expect(plan.desired.get('section.router_control.domain_keyword')).toEqual(['htv-hydaelyn']);
-    expect(plan.desired.get('section.router_control.domain_regex')).toEqual(['^ads\\.']);
+    expect(plan.desired.get('section.router_control.domain')).toBe(
+      'full:api.example.com\nkeyword:htv-hydaelyn\nregex:^ads\\.',
+    );
+    expect(plan.desired.has('section.router_control.domain_keyword')).toBe(false);
+    expect(plan.desired.has('section.router_control.domain_regex')).toBe(false);
   });
 
   it('отклоняет неизвестный список сообщества', () => {
@@ -264,5 +266,48 @@ describe('план шаблона', () => {
     expect(plan.items).toEqual([
       { op: 'delete', path: 'settings.log_level', before: 'warn', after: null },
     ]);
+  });
+
+  it('переводит legacy domain_keyword/domain_regex в combined domain и удаляет старые опции', () => {
+    const plan = computePlan(
+      payload({
+        sections: {
+          gga: {
+            action: 'connection',
+            domain_keyword: ['freebuff', 'adtng'],
+            domain_regex: ['\\.ai$'],
+          },
+        },
+        create_sections: [],
+        manual_entries: {},
+      }),
+      {
+        'section.gga.action': 'connection',
+        'section.gga.domain_keyword': ['freebuff', 'adtng'],
+        'section.gga.domain_regex': ['\\.ai$'],
+      },
+      [],
+    );
+
+    expect(plan.items.find((item) => item.path === 'section.gga.domain')?.after).toBe(
+      'keyword:freebuff\nkeyword:adtng\nregex:\\.ai$',
+    );
+    expect(plan.items.find((item) => item.path === 'section.gga.domain_keyword')?.op).toBe(
+      'delete',
+    );
+    expect(plan.items.find((item) => item.path === 'section.gga.domain_regex')?.op).toBe('delete');
+  });
+
+  it('переводит старый list domain в full:-строки нового формата', () => {
+    const plan = buildPlan(
+      payload({
+        sections: { gga: { action: 'connection', domain: ['api.example.com'] } },
+        create_sections: [],
+        manual_entries: {},
+      }),
+      [],
+    );
+
+    expect(plan.desired.get('section.gga.domain')).toBe('full:api.example.com');
   });
 });

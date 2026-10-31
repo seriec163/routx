@@ -693,6 +693,24 @@ export function RouterDetailPage({ id }: { id: string }) {
       /^subscription_url\.[A-Za-z0-9_.-]{1,64}\.section$/.test(path) &&
       value === managedSectionName,
   );
+  const sectionSubscriptions = sectionSubscriptionPaths.map(([path]) => {
+    const name = path.slice('subscription_url.'.length, -'.section'.length);
+    const host = state?.managed?.[`subscription_url.${name}.url_host`];
+    const tail = state?.managed?.[`subscription_url.${name}.url_tail`];
+    const managed = name.startsWith('rc_sub_');
+    const match = (connections.data?.items ?? []).find((item) => {
+      const maskedTail = (item.masked ?? '').slice(-4);
+      return typeof tail === 'string' && tail !== '' && maskedTail === tail;
+    });
+    return {
+      name,
+      host: typeof host === 'string' ? host : '',
+      tail: typeof tail === 'string' ? tail : '',
+      managed,
+      matchLabel: match?.label ?? null,
+    };
+  });
+  const hasSubscriptionMetadata = sectionSubscriptions.some((item) => item.tail || item.host);
   const managedSubscriptionsOnRouter = sectionSubscriptionPaths.filter(([path]) =>
     /^subscription_url\.rc_sub_/.test(path),
   ).length;
@@ -1797,7 +1815,7 @@ export function RouterDetailPage({ id }: { id: string }) {
             {connectionsOutOfSync ? (
               <InfoBanner tone={connectionsMissing ? 'warn' : 'info'}>
                 {externalSubscriptionsOnRouter > 0
-                  ? `В секции ${sectionDisplay(managedSectionName)} есть ${externalSubscriptionsOnRouter} ${externalSubscriptionsOnRouter === 1 ? 'подписка' : 'подписки'}, добавленные вне Router Control. Router Control их не изменяет и не удаляет — они просто не отображаются в списке ниже. `
+                  ? `В секции ${sectionDisplay(managedSectionName)} есть ${externalSubscriptionsOnRouter} ${externalSubscriptionsOnRouter === 1 ? 'подписка' : 'подписки'}, добавленные вне Router Control. Router Control их не изменяет и не удаляет — они показаны отдельной таблицей ниже. `
                   : ''}
                 {connectionsMissing
                   ? `В Router Control сохранено ${controlSubscriptions} ${controlSubscriptions === 1 ? 'подключение' : 'подключений'}, но записей Router Control в секции найдено ${managedSubscriptionsOnRouter}. Возможно, они были удалены вручную. При следующем изменении Router Control применит свои подключения; если такая ссылка уже есть в секции, дубликат не создаётся.`
@@ -1887,6 +1905,49 @@ export function RouterDetailPage({ id }: { id: string }) {
                 </table>
               </div>
             )}
+            {sectionSubscriptions.length > 0 ? (
+              <div style={{ marginTop: 18 }}>
+                <h3 style={{ margin: '0 0 6px', fontSize: '0.95rem' }}>
+                  Подписки в секции {sectionDisplay(managedSectionName)}
+                </h3>
+                <p className="muted-text small" style={{ marginTop: 0 }}>
+                  Показаны все subscription_url на роутере. Внешние подписки добавлены в
+                  Prokop/LuCI: Router Control их не изменяет и не удаляет.
+                  {!hasSubscriptionMetadata
+                    ? ' Обновите агент до 1.1.5, чтобы видеть хост и хвост ссылки.'
+                    : ''}
+                </p>
+                <div className="table-wrap">
+                  <table className="table">
+                    <thead>
+                      <tr>
+                        <th>Ссылка</th>
+                        <th>Секция</th>
+                        <th>Статус</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {sectionSubscriptions.map((item) => (
+                        <tr key={item.name}>
+                          <td className="mono small">
+                            {item.host ? `${item.host}/…${item.tail}` : item.name}
+                          </td>
+                          <td>{sectionDisplay(managedSectionName)}</td>
+                          <td>
+                            {item.managed ? 'Router Control' : 'вне Router Control'}
+                            {item.matchLabel ? ` · совпадает с «${item.matchLabel}»` : ''}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                <p className="muted-text small">
+                  «Совпадает с …» означает, что такая ссылка уже сохранена в Router Control,
+                  но на роутере лежит как внешняя. Router Control не создаёт для неё дубликат.
+                </p>
+              </div>
+            ) : null}
           </Panel>
           <Panel title="Как это работает">
             <ol className="steps">

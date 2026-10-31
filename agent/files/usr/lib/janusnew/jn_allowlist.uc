@@ -39,7 +39,7 @@ const SECTION_OPTIONS = set_of([
 
 const SECTION_LIST_OPTIONS = set_of([
 	"community_lists", "rule_set", "rule_set_with_subnets", "fully_routed_ips",
-	"excluded_source_ip_cidr", "domain", "domain_suffix", "domain_keyword",
+	"excluded_source_ip_cidr", "domain_suffix", "domain_keyword",
 	"domain_regex", "domain_ip_lists", "remote_domain_lists",
 	"remote_subnet_lists"
 ]);
@@ -68,7 +68,7 @@ const SUBSCRIPTION_OPTIONS = set_of([
 	"section", "user_agent", "subscription_update_enabled",
 	"subscription_update_interval", "download_via_proxy_enabled",
 	"show_dashboard_metadata", "prefix_nodes", "node_prefix",
-	"include_urltest_groups"
+	"include_urltest_groups", "url_tail", "url_host"
 ]);
 
 const FORBIDDEN_TYPES = set_of(["server"]);

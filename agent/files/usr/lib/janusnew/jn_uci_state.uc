@@ -68,6 +68,30 @@ function read_state(product) {
 				continue;
 			managed[path] = value;
 		}
+
+		// Метаданные подписки без секрета: только хост и последние 4 символа.
+		// Нужны панели, чтобы показать внешние подписки, не раскрывая URL.
+		if (stype == "subscription_url") {
+			let url = util.as_string(sect.url);
+			if (url != "") {
+				if (length(url) > 4)
+					managed["subscription_url." + secname + ".url_tail"] = substr(url, length(url) - 4);
+				let scheme = index(url, "://");
+				let rest = scheme >= 0 ? substr(url, scheme + 3) : url;
+				let stop = length(rest);
+				for (let sep in [ "/", "?", "#" ]) {
+					let pos = index(rest, sep);
+					if (pos >= 0 && pos < stop)
+						stop = pos;
+				}
+				let host = substr(rest, 0, stop);
+				let at = rindex(host, "@");
+				if (at >= 0)
+					host = substr(host, at + 1);
+				if (host != "")
+					managed["subscription_url." + secname + ".url_host"] = host;
+			}
+		}
 	}
 
 	let state_hash = util.sha256_hex(util.canonical_json(managed));

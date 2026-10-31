@@ -83,13 +83,24 @@ export const SECTION_LIST_OPTIONS = new Set([
   'rule_set_with_subnets',
   'fully_routed_ips',
   'excluded_source_ip_cidr',
-  'domain',
   'domain_suffix',
   'domain_keyword',
   'domain_regex',
   'domain_ip_lists',
   'remote_domain_lists',
   'remote_subnet_lists',
+]);
+
+/**
+ * Домены в Prokop/Forkop теперь хранятся в одном текстовом option `domain`
+ * с префиксами full:/keyword:/regex:. Старые list-опции остаются только для
+ * чтения и удаления при следующем apply.
+ */
+export const LEGACY_DOMAIN_OPTIONS = new Set([
+  'domain',
+  'domain_suffix',
+  'domain_keyword',
+  'domain_regex',
 ]);
 
 export const URLTEST_OPTIONS = new Set([
@@ -136,6 +147,8 @@ export const SUBSCRIPTION_OPTIONS = new Set([
   'prefix_nodes',
   'node_prefix',
   'include_urltest_groups',
+  'url_tail',
+  'url_host',
 ]);
 
 /** Полностью запрещённые типы секций и опции (fail closed). */
@@ -282,6 +295,55 @@ function pushListValue(desired: Map<string, UciValue>, path: string, values: str
   const existing = Array.isArray(current) ? current : current == null ? [] : [String(current)];
   const merged = [...new Set([...existing, ...values])];
   desired.set(path, merged);
+}
+
+/**
+ * Добавляет строки в текстовый option (не list). Нужно для нового формата
+ * `domain`, где строки разделены переводом строки и имеют префиксы
+ * full:/keyword:/regex:.
+ */
+function pushTextValue(desired: Map<string, UciValue>, path: string, values: string[]) {
+  const clean = values.map((value) => value.trim()).filter(Boolean);
+  if (clean.length === 0) return;
+  const current = desired.get(path);
+  const existing =
+    current == null
+      ? []
+      : Array.isArray(current)
+        ? current.map((item) => String(item).trim())
+        : String(current)
+            .split('\n')
+            .map((item) => item.trim());
+  const merged = [...new Set([...existing.filter(Boolean), ...clean])];
+  if (merged.length > 0) desired.set(path, merged.join('\n'));
+}
+
+const DOMAIN_PREFIX_RE = /^(full|keyword|regex):/i;
+
+function textLines(value: UciValue): string[] {
+  if (value == null) return [];
+  if (Array.isArray(value)) return value.map((item) => String(item).trim()).filter(Boolean);
+  return String(value)
+    .split('\n')
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function domainOptionLines(option: string, value: UciValue): string[] {
+  const lines = textLines(value);
+  if (option === 'domain_suffix') return lines;
+  if (option === 'domain_keyword') {
+    return lines.map((line) => (line.startsWith('keyword:') ? line : `keyword:${line}`));
+  }
+  if (option === 'domain_regex') {
+    return lines.map((line) => (line.startsWith('regex:') ? line : `regex:${line}`));
+  }
+  // option === 'domain': массив — старый точный list, строка — новый
+  // combined-текст с префиксами.
+  if (Array.isArray(value)) {
+    return lines.map((line) => (DOMAIN_PREFIX_RE.test(line) ? line : `full:${line}`));
+  }
+  return lines;
 }
 
 /**
@@ -493,13 +555,9 @@ export function buildPlan(
       if (parsed.kind === 'suffix') {
         target.domains.add(parsed.value);
       } else {
-        const option =
-          parsed.kind === 'full'
-            ? 'domain'
-            : parsed.kind === 'keyword'
-              ? 'domain_keyword'
-              : 'domain_regex';
-        pushListValue(desired, `section.${section}.${option}`, [parsed.value]);
+        const prefix =
+          parsed.kind === 'full' ? 'full:' : parsed.kind === 'keyword' ? 'keyword:' : 'regex:';
+        pushTextValue(desired, `section.${section}.domain`, [`${prefix}${parsed.value}`]);
       }
     }
     for (const raw of ips) {
@@ -780,6 +838,10 @@ export function templateToDesired(payload: TemplatePayload): Map<string, UciValu
       for (const [option, value] of Object.entries(options as Record<string, UciValue>)) {
         const path = `${type}.${section}.${option}`;
         const rule = assertAllowedPath(path);
+        if (type === 'section' && LEGACY_DOMAIN_OPTIONS.has(option)) {
+          pushTextValue(desired, `section.${section}.domain`, domainOptionLines(option, value));
+          continue;
+        }
         let normalized: UciValue = normalizeValue(value, rule.list);
         if (type === 'section' && rule.list && Array.isArray(normalized)) {
           normalized = normalized.filter((item) => !isCommentLine(item));
@@ -856,7 +918,11 @@ export function deletionCandidates(
     } else if (parsed.type === 'section' && parsed.section && sections.has(parsed.section)) {
       // Скалярные опции секции (action, label, enabled, sort_by_latency…)
       // не удаляются «по умолчанию»: шаблон списков не должен их терять.
-      if (SECTION_LIST_OPTIONS.has(parsed.option)) candidates.add(path);
+      // Домены — исключение: старые list-опции и combined `domain`
+      // удаляются, если их нет в желаемом наборе.
+      if (SECTION_LIST_OPTIONS.has(parsed.option) || LEGACY_DOMAIN_OPTIONS.has(parsed.option)) {
+        candidates.add(path);
+      }
     } else if (parsed.type === 'urltest' && parsed.section && urltests.has(parsed.section)) {
       candidates.add(path);
     } else if (

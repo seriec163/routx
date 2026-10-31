@@ -1,4 +1,4 @@
-import { mkdir, copyFile, writeFile, readFile, chmod, cp, rm } from 'node:fs/promises';
+import { mkdir, copyFile, writeFile, readFile, chmod, cp, rm, readdir } from 'node:fs/promises';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { execSync } from 'node:child_process';
@@ -8,10 +8,33 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const root = __dirname;
 const files = join(root, 'files');
 const dist = join(root, 'dist');
+const stage = join(dist, 'stage');
 
 const version = (await readFile(join(root, 'VERSION'), 'utf8')).trim();
 
 await mkdir(dist, { recursive: true });
+
+// Все файлы агента — текст. На Windows рабочие копии могут быть с CRLF:
+// пакет с CRLF ломает shebang /bin/sh и init-скрипты. Собираем из staging
+// с принудительно LF, чтобы пакет был одинаковым на любой ОС.
+async function normalizeTextTree(dir) {
+  for (const entry of await readdir(dir, { withFileTypes: true })) {
+    const path = join(dir, entry.name);
+    if (entry.isDirectory()) {
+      await normalizeTextTree(path);
+      continue;
+    }
+    if (!entry.isFile()) continue;
+    const data = await readFile(path);
+    if (data.includes(0)) continue;
+    const text = data.toString('utf8');
+    if (text.includes('\r\n')) await writeFile(path, text.replace(/\r\n/g, '\n'));
+  }
+}
+
+await rm(stage, { recursive: true, force: true });
+await cp(files, stage, { recursive: true });
+await normalizeTextTree(stage);
 
 // Бит исполнения должен быть в архиве, независимо от файловой системы сборки.
 for (const relative of [
@@ -20,11 +43,11 @@ for (const relative of [
   'usr/bin/janusnew',
   'usr/libexec/janusnew-exec',
 ]) {
-  await chmod(join(files, relative), 0o755);
+  await chmod(join(stage, relative), 0o755);
 }
 
 // tar.gz (primary for apk/fallback)
-execSync(`tar -C "${files}" -czf "${join(dist, 'janusnew.tar.gz')}" .`, { stdio: 'inherit' });
+execSync(`tar -C "${stage}" -czf "${join(dist, 'janusnew.tar.gz')}" .`, { stdio: 'inherit' });
 
 // OpenWrt 24.10+ принимает ipk как gzip-tar с debian-binary + control.tar.gz + data.tar.gz.
 try {
@@ -33,7 +56,7 @@ try {
   await mkdir(join(ipkdir, 'CONTROL'), { recursive: true });
   await mkdir(staging, { recursive: true });
 
-  execSync(`tar -C "${files}" -cf "${join(ipkdir, 'data.tar.gz')}" --gzip .`, { stdio: 'inherit' });
+  execSync(`tar -C "${stage}" -cf "${join(ipkdir, 'data.tar.gz')}" --gzip .`, { stdio: 'inherit' });
 
   const control = `Package: janusnew\nVersion: ${version}-1\nDepends: ucode, ucode-mod-fs, ucode-mod-uci, ucode-mod-digest, coreutils-timeout, curl\nSection: net\nArchitecture: all\nMaintainer: Router Control\nDescription: JanusNew agent for Router Control\n`;
   await writeFile(join(ipkdir, 'CONTROL', 'control'), control);
@@ -81,7 +104,7 @@ try {
 try {
   const apkRoot = join(dist, 'apk-root');
   await rm(apkRoot, { recursive: true, force: true });
-  await cp(files, apkRoot, { recursive: true });
+  await cp(stage, apkRoot, { recursive: true });
   await rm(join(apkRoot, 'etc/config/janusnew'), { force: true });
 
   const postInstall = join(dist, 'apk-post-install.sh');
@@ -149,5 +172,7 @@ const tarData = await readFile(join(dist, 'janusnew.tar.gz'));
 sums.push(`${createHash('sha256').update(tarData).digest('hex')}  janusnew.tar.gz`);
 await writeFile(join(dist, 'janusnew.sha256'), `${sums.join('\n')}\n`);
 await writeFile(join(dist, 'SHA256SUMS'), `${sums.join('\n')}\n`);
+
+await rm(stage, { recursive: true, force: true });
 
 console.log('built janusnew ' + version);
