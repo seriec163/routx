@@ -69,6 +69,16 @@ function handle_command(cmd) {
 			if (!res.ok) return { status: "failed", error: { code: "connections_failed", message: res.error } };
 			return { status: "success", result: res };
 		}
+		if (op == "list_connections") {
+			let res = ops.list_connections(product, args);
+			if (!res.ok) return { status: "failed", error: { code: "list_connections_failed", message: res.error } };
+			return { status: "success", result: res };
+		}
+		if (op == "manage_connection") {
+			let res = ops.manage_connection(product, args);
+			if (!res.ok) return { status: "failed", error: { code: "manage_connection_failed", message: res.error } };
+			return { status: "success", result: res };
+		}
 		if (op == "sb_check_update") {
 			let res = runner.run_product(product, [ "component_action", "sing_box", "check_update" ], 120);
 			let parsed = util.json_parse(res.stdout);

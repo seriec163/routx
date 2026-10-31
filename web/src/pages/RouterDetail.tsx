@@ -48,6 +48,9 @@ import type {
   DnsBenchmarkState,
   DnsCandidateResult,
   DnsStatus,
+  ExternalConnections,
+  ExternalLink,
+  ExternalSubscription,
   Job,
   MetricSample,
   MetricsResponse,
@@ -600,6 +603,18 @@ export function RouterDetailPage({ id }: { id: string }) {
     connectionOpen && connectionKind === 'subscription' ? '/api/v1/subscriptions' : null,
   );
   const [deletingConnection, setDeletingConnection] = useState<RouterConnection | null>(null);
+  const [externalConnections, setExternalConnections] = useState<ExternalConnections | null>(null);
+  const [externalBusy, setExternalBusy] = useState(false);
+  const [externalError, setExternalError] = useState<string | null>(null);
+  const [manageTarget, setManageTarget] = useState<{
+    action: 'delete' | 'replace';
+    kind: 'subscription' | 'link';
+    name?: string;
+    hash?: string;
+    label: string;
+  } | null>(null);
+  const [manageValue, setManageValue] = useState('');
+  const [manageBusy, setManageBusy] = useState(false);
   const [extraSection, setExtraSection] = useState('router_control');
   const [extraRuleSet, setExtraRuleSet] = useState('');
   const [extraDomainLists, setExtraDomainLists] = useState('');
@@ -700,24 +715,6 @@ export function RouterDetailPage({ id }: { id: string }) {
       /^subscription_url\.[A-Za-z0-9_.-]{1,64}\.section$/.test(path) &&
       value === managedSectionName,
   );
-  const sectionSubscriptions = sectionSubscriptionPaths.map(([path]) => {
-    const name = path.slice('subscription_url.'.length, -'.section'.length);
-    const host = state?.managed?.[`subscription_url.${name}.url_host`];
-    const tail = state?.managed?.[`subscription_url.${name}.url_tail`];
-    const managed = name.startsWith('rc_sub_');
-    const match = (connections.data?.items ?? []).find((item) => {
-      const maskedTail = (item.masked ?? '').slice(-4);
-      return typeof tail === 'string' && tail !== '' && maskedTail === tail;
-    });
-    return {
-      name,
-      host: typeof host === 'string' ? host : '',
-      tail: typeof tail === 'string' ? tail : '',
-      managed,
-      matchLabel: match?.label ?? null,
-    };
-  });
-  const hasSubscriptionMetadata = sectionSubscriptions.some((item) => item.tail || item.host);
   const managedSubscriptionsOnRouter = sectionSubscriptionPaths.filter(([path]) =>
     /^subscription_url\.rc_sub_/.test(path),
   ).length;
@@ -778,6 +775,12 @@ export function RouterDetailPage({ id }: { id: string }) {
     applyExtrasToForm(extras.data.extras[section]);
   }, [extras.data]);
 
+  useEffect(() => {
+    if (tab === 'connections' && router?.status === 'online') {
+      void loadExternalConnections();
+    }
+  }, [tab, router?.status, id]);
+
   function applyExtrasToForm(entry: RouterListExtras | undefined): void {
     setExtraRuleSet((entry?.rule_set ?? []).join('\n'));
     setExtraDomainLists((entry?.remote_domain_lists ?? []).join('\n'));
@@ -811,6 +814,100 @@ export function RouterDetailPage({ id }: { id: string }) {
       toast.error(errorMessage(caught));
     } finally {
       setExtrasBusy(false);
+    }
+  }
+
+  async function waitJob(job: Job, timeoutMs = 180_000): Promise<Job> {
+    let current = job;
+    const deadline = Date.now() + timeoutMs;
+    while (
+      (current.status === 'queued' || current.status === 'running') &&
+      Date.now() < deadline
+    ) {
+      await new Promise((resolve) => window.setTimeout(resolve, 1000));
+      current = (await api<{ job: Job }>(`/api/v1/jobs/${current.id}`)).job;
+    }
+    return current;
+  }
+
+  async function loadExternalConnections(): Promise<void> {
+    setExternalBusy(true);
+    setExternalError(null);
+    try {
+      const response = await api<{ job: Job }>(
+        `/api/v1/routers/${id}/connections/list`,
+        { method: 'POST' },
+      );
+      const job = await waitJob(response.job);
+      if (job.status !== 'success') {
+        throw new Error(job.error?.message ?? 'Не удалось прочитать подключения с роутера');
+      }
+      setExternalConnections(job.result as unknown as ExternalConnections);
+    } catch (caught) {
+      setExternalError(errorMessage(caught));
+    } finally {
+      setExternalBusy(false);
+    }
+  }
+
+  function startReplace(target: {
+    kind: 'subscription' | 'link';
+    name?: string;
+    hash?: string;
+    label: string;
+  }): void {
+    setManageTarget({ action: 'replace', ...target });
+    setManageValue('');
+  }
+
+  function startDelete(target: {
+    kind: 'subscription' | 'link';
+    name?: string;
+    hash?: string;
+    label: string;
+  }): void {
+    setManageTarget({ action: 'delete', ...target });
+    setManageValue('');
+  }
+
+  async function submitManage(): Promise<void> {
+    if (!manageTarget) return;
+    if (manageTarget.action === 'replace' && manageValue.trim().length < 8) {
+      toast.error('Укажите новую ссылку');
+      return;
+    }
+    setManageBusy(true);
+    try {
+      const response = await api<{ job: Job }>(
+        `/api/v1/routers/${id}/connections/manage`,
+        {
+          method: 'POST',
+          body: {
+            action: manageTarget.action,
+            kind: manageTarget.kind,
+            name: manageTarget.name,
+            hash: manageTarget.hash,
+            value:
+              manageTarget.action === 'replace' ? manageValue.trim() : undefined,
+          },
+        },
+      );
+      const job = await waitJob(response.job);
+      if (job.status !== 'success') {
+        throw new Error(job.error?.message ?? 'Не удалось изменить подключение');
+      }
+      toast.success(
+        manageTarget.action === 'delete'
+          ? 'Подключение удалено с роутера'
+          : 'Подключение заменено',
+      );
+      setManageTarget(null);
+      setManageValue('');
+      await Promise.all([loadExternalConnections(), connections.reload(), detail.reload()]);
+    } catch (caught) {
+      toast.error(errorMessage(caught));
+    } finally {
+      setManageBusy(false);
     }
   }
 
@@ -1920,48 +2017,172 @@ export function RouterDetailPage({ id }: { id: string }) {
                 </table>
               </div>
             )}
-            {sectionSubscriptions.length > 0 ? (
-              <div style={{ marginTop: 18 }}>
-                <h3 style={{ margin: '0 0 6px', fontSize: '0.95rem' }}>
-                  Подписки в секции {sectionDisplay(managedSectionName)}
-                </h3>
-                <p className="muted-text small" style={{ marginTop: 0 }}>
-                  Показаны все subscription_url на роутере. Внешние подписки добавлены в
-                  Prokop/LuCI: Router Control их не изменяет и не удаляет.
-                  {!hasSubscriptionMetadata
-                    ? ' Обновите агент до 1.1.5, чтобы видеть хост и хвост ссылки.'
-                    : ''}
-                </p>
-                <div className="table-wrap">
-                  <table className="table">
-                    <thead>
-                      <tr>
-                        <th>Ссылка</th>
-                        <th>Секция</th>
-                        <th>Статус</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {sectionSubscriptions.map((item) => (
-                        <tr key={item.name}>
-                          <td className="mono small">
-                            {item.host ? `${item.host}/…${item.tail}` : item.name}
-                          </td>
-                          <td title={sectionTitle(managedSectionName)}>
-                            {sectionDisplay(managedSectionName)}
-                          </td>
-                          <td>
-                            {item.managed ? 'Router Control' : 'вне Router Control'}
-                            {item.matchLabel ? ` · совпадает с «${item.matchLabel}»` : ''}
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
+          </Panel>
+          <Panel
+            title="Все подключения на роутере"
+            subtitle="Подписки и прямые ссылки в секции Router Control. Замена и удаление выполняются через агент, со снимком и откатом."
+            actions={
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={() => void loadExternalConnections()}
+                busy={externalBusy}
+                disabled={!canMutate}
+              >
+                Обновить
+              </Button>
+            }
+          >
+            {externalError ? (
+              <ErrorBanner
+                message={externalError}
+                onRetry={() => void loadExternalConnections()}
+              />
+            ) : null}
+            {externalBusy && !externalConnections ? <Spinner /> : null}
+            {externalConnections ? (
+              <div className="stack">
+                <div>
+                  <h3 style={{ margin: '0 0 6px', fontSize: '0.95rem' }}>
+                    Подписки в секции {sectionDisplay(managedSectionName)}
+                  </h3>
+                  {externalConnections.subscriptions.length === 0 ? (
+                    <Empty>Подписок нет.</Empty>
+                  ) : (
+                    <div className="table-wrap">
+                      <table className="table">
+                        <thead>
+                          <tr>
+                            <th>Подписка</th>
+                            <th>Секция</th>
+                            <th>Статус</th>
+                            <th />
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {externalConnections.subscriptions.map((item) => {
+                            const match = (connections.data?.items ?? []).find(
+                              (entry) =>
+                                entry.kind === 'subscription' &&
+                                entry.masked.slice(-4) === item.tail,
+                            );
+                            const label = item.host
+                              ? `${item.host}/…${item.tail}`
+                              : item.name;
+                            return (
+                              <tr key={item.name}>
+                                <td className="mono small">{label}</td>
+                                <td title={sectionTitle(managedSectionName)}>
+                                  {sectionDisplay(managedSectionName)}
+                                </td>
+                                <td>
+                                  вне Router Control
+                                  {match ? ` · совпадает с «${match.label}»` : ''}
+                                </td>
+                                <td className="row-actions">
+                                  <Button
+                                    size="sm"
+                                    variant="ghost"
+                                    disabled={!canMutate || manageBusy}
+                                    onClick={() =>
+                                      startReplace({
+                                        kind: 'subscription',
+                                        name: item.name,
+                                        label,
+                                      })
+                                    }
+                                  >
+                                    Заменить
+                                  </Button>
+                                  <Button
+                                    size="sm"
+                                    variant="subtle"
+                                    disabled={!canMutate || manageBusy}
+                                    onClick={() =>
+                                      startDelete({
+                                        kind: 'subscription',
+                                        name: item.name,
+                                        label,
+                                      })
+                                    }
+                                  >
+                                    Удалить
+                                  </Button>
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </div>
+
+                <div>
+                  <h3 style={{ margin: '0 0 6px', fontSize: '0.95rem' }}>
+                    Прямые ссылки
+                  </h3>
+                  {externalConnections.links.length === 0 ? (
+                    <Empty>Прямых ссылок нет.</Empty>
+                  ) : (
+                    <div className="table-wrap">
+                      <table className="table">
+                        <thead>
+                          <tr>
+                            <th>Ссылка</th>
+                            <th>Метка</th>
+                            <th />
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {externalConnections.links.map((item) => {
+                            const label = `${item.scheme || 'link'}://…${item.tail}`;
+                            return (
+                              <tr key={item.hash}>
+                                <td className="mono small">{label}</td>
+                                <td className="small">{item.label || '—'}</td>
+                                <td className="row-actions">
+                                  <Button
+                                    size="sm"
+                                    variant="ghost"
+                                    disabled={!canMutate || manageBusy}
+                                    onClick={() =>
+                                      startReplace({
+                                        kind: 'link',
+                                        hash: item.hash,
+                                        label,
+                                      })
+                                    }
+                                  >
+                                    Заменить
+                                  </Button>
+                                  <Button
+                                    size="sm"
+                                    variant="subtle"
+                                    disabled={!canMutate || manageBusy}
+                                    onClick={() =>
+                                      startDelete({
+                                        kind: 'link',
+                                        hash: item.hash,
+                                        label,
+                                      })
+                                    }
+                                  >
+                                    Удалить
+                                  </Button>
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
                 </div>
                 <p className="muted-text small">
-                  «Совпадает с …» означает, что такая ссылка уже сохранена в Router Control,
-                  но на роутере лежит как внешняя. Router Control не создаёт для неё дубликат.
+                  «Совпадает с …» означает, что такая подписка уже сохранена в Router
+                  Control, но на роутере лежит как внешняя. Замена и удаление действуют
+                  на роутере; перед изменением создаётся снимок.
                 </p>
               </div>
             ) : null}
@@ -2798,7 +3019,7 @@ export function RouterDetailPage({ id }: { id: string }) {
                 hint={
                   connectionKind === 'subscription'
                     ? 'http(s)://… или готовый rc1.… секрет. Значение будет сохранено зашифрованным.'
-                    : 'vless://…, vmess://…, trojan://…, ss://…, hysteria2://…, tuic://… или rc1.… секрет.'
+                    : 'vless://, vmess://, trojan://, ss://, ssr://, hysteria2://, hy2://, tuic://, anytls://, socks:// или rc1.… секрет.'
                 }
               >
                 <textarea
@@ -2879,7 +3100,7 @@ export function RouterDetailPage({ id }: { id: string }) {
               rows={4}
               value={editValue}
               onChange={(event) => setEditValue(event.target.value)}
-              placeholder="vless://… или rc1.…"
+              placeholder="vless://…, vmess://…, trojan://…, ss://…, hysteria2://…, tuic://…, anytls://…, socks://… или rc1.…"
             />
           </Field>
         </Modal>
@@ -2898,6 +3119,88 @@ export function RouterDetailPage({ id }: { id: string }) {
               Подключение <strong>{deletingConnection.label}</strong> будет удалено из секции Router
               Control. Ваши собственные секции не изменятся.
             </p>
+          }
+        />
+      ) : null}
+
+      {manageTarget?.action === 'replace' ? (
+        <Modal
+          title={
+            manageTarget.kind === 'subscription'
+              ? 'Заменить подписку'
+              : 'Заменить ссылку'
+          }
+          onClose={() => setManageTarget(null)}
+          footer={
+            <>
+              <Button
+                variant="ghost"
+                onClick={() => setManageTarget(null)}
+                disabled={manageBusy}
+              >
+                Отмена
+              </Button>
+              <Button
+                onClick={() => void submitManage()}
+                busy={manageBusy}
+                disabled={manageValue.trim().length < 8}
+              >
+                Сохранить
+              </Button>
+            </>
+          }
+        >
+          <p>
+            Текущее значение: <code>{manageTarget.label}</code>
+          </p>
+          <Field
+            label={
+              manageTarget.kind === 'subscription'
+                ? 'Новая ссылка на подписку'
+                : 'Новая ссылка'
+            }
+          >
+            <textarea
+              className="input code-area"
+              rows={3}
+              value={manageValue}
+              onChange={(event) => setManageValue(event.target.value)}
+              placeholder={
+                manageTarget.kind === 'subscription'
+                  ? 'https://example.com/sub/...'
+                  : 'vless://…, vmess://…, trojan://…, ss://…, hysteria2://…, tuic://…, anytls://…'
+              }
+            />
+          </Field>
+          <p className="muted-text small">
+            Перед изменением создаётся снимок. Если применение не удастся, Router Control
+            попробует вернуть предыдущую конфигурацию.
+          </p>
+        </Modal>
+      ) : null}
+
+      {manageTarget?.action === 'delete' ? (
+        <ConfirmDialog
+          title={
+            manageTarget.kind === 'subscription'
+              ? 'Удалить подписку?'
+              : 'Удалить ссылку?'
+          }
+          danger
+          busy={manageBusy}
+          confirmLabel="Удалить"
+          onCancel={() => setManageTarget(null)}
+          onConfirm={() => void submitManage()}
+          message={
+            <>
+              <p>
+                Будет удалено: <code>{manageTarget.label}</code>.
+              </p>
+              <p className="muted-text">
+                Перед удалением создаётся снимок. Если в секции не останется подключений,
+                она будет выключена.
+              </p>
+            </>
           }
         />
       ) : null}

@@ -133,6 +133,27 @@ export interface RouterConnection {
   updated_at: string;
 }
 
+export interface ExternalSubscription {
+  name: string;
+  host: string;
+  tail: string;
+}
+
+export interface ExternalLink {
+  index: number;
+  hash: string;
+  scheme: string;
+  host: string;
+  tail: string;
+  label: string;
+}
+
+export interface ExternalConnections {
+  section: string;
+  subscriptions: ExternalSubscription[];
+  links: ExternalLink[];
+}
+
 export type DnsProtocol = 'udp' | 'doh';
 
 export interface DnsCandidateResult {

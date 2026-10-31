@@ -1145,6 +1145,137 @@ export async function applyRouterConnections(ctx: HandlerContext, job: JobRow): 
   };
 }
 
+export async function listConnections(ctx: HandlerContext, job: JobRow): Promise<Json> {
+  requireRouter(job);
+  const section = asString(job.payload.section) || 'router_control';
+  return runCommand(ctx, job, 'list_connections', { section }, 30_000);
+}
+
+export async function manageConnection(ctx: HandlerContext, job: JobRow): Promise<Json> {
+  const routerId = requireRouter(job);
+  const action = asString(job.payload.action);
+  const kind = asString(job.payload.kind);
+  if (action !== 'delete' && action !== 'replace') {
+    throw new JobFailure('invalid_payload', 'Не указано действие с подключением');
+  }
+  if (kind !== 'subscription' && kind !== 'link') {
+    throw new JobFailure('invalid_payload', 'Не указан тип подключения');
+  }
+
+  const routerResult = await ctx.pool.query<{ managed_section: string | null }>(
+    'select managed_section from routers where id = $1',
+    [routerId],
+  );
+  const section = routerResult.rows[0]?.managed_section || 'router_control';
+  const name = asString(job.payload.name);
+  const hash = asString(job.payload.hash);
+  const editId = asString(job.payload.edit_id);
+
+  let value: string | null = null;
+  try {
+    if (editId) {
+      const edit = await ctx.pool.query<{ secret_enc: string }>(
+        'select secret_enc from connection_edits where id = $1 and router_id = $2',
+        [editId, routerId],
+      );
+      if (!edit.rows[0]) {
+        throw new JobFailure('edit_missing', 'Новое значение подключения не найдено');
+      }
+      value = decryptSecret(edit.rows[0].secret_enc, ctx.masterKey);
+    }
+
+    let snapshotRef: string | null = null;
+    try {
+      const snapshot = await runCommand(ctx, job, 'snapshot_create', { reason: 'connection_manage' }, 90_000);
+      snapshotRef =
+        asString(snapshot.external_id) ?? asString(snapshot.id) ?? `local-${Date.now()}`;
+      await ctx.pool.query(
+        `insert into router_snapshots
+           (id, router_id, kind, external_id, reason, sha256, size_bytes, product_version, expires_at)
+         values ($1,$2,$3,$4,'connection_manage',$5,$6,$7, now() + ($8 || ' days')::interval)`,
+        [
+          uuidv7(),
+          routerId,
+          asString(snapshot.kind) === 'native' ? 'native' : 'local',
+          snapshotRef,
+          asString(snapshot.sha256),
+          asNumber(snapshot.size_bytes),
+          asString(snapshot.product_version),
+          ctx.settings.retention.days,
+        ],
+      );
+    } catch (error) {
+      throw new JobFailure(
+        'backup_failed',
+        `Не удалось создать снимок перед изменением подключения: ${(error as Error).message}`,
+      );
+    }
+
+    try {
+      const applied = await runCommand(
+        ctx,
+        job,
+        'manage_connection',
+        { section, action, kind, name, hash, value },
+        60_000,
+      );
+      await runCommand(ctx, job, 'reload', {}, 90_000);
+      const raw = await runCommand(ctx, job, 'read_state', {}, 60_000);
+      await saveState(ctx.pool, routerId, raw, 'connection_manage');
+
+      // Для удаления проверяем, что элемент действительно исчез.
+      if (action === 'delete') {
+        const listed = await runCommand(ctx, job, 'list_connections', { section }, 30_000);
+        const subscriptions = Array.isArray(listed.subscriptions) ? listed.subscriptions : [];
+        const links = Array.isArray(listed.links) ? listed.links : [];
+        if (kind === 'subscription' && subscriptions.some((item) => asString((item as Json).name) === name)) {
+          throw new JobFailure('verify_mismatch', 'Подписка осталась на роутере после удаления');
+        }
+        if (kind === 'link' && links.some((item) => asString((item as Json).hash) === hash)) {
+          throw new JobFailure('verify_mismatch', 'Ссылка осталась на роутере после удаления');
+        }
+      }
+
+      await ctx.pool.query('update routers set last_error = null, updated_at = now() where id = $1', [
+        routerId,
+      ]);
+      return {
+        action,
+        kind,
+        section,
+        snapshot: snapshotRef,
+        disabled: applied.disabled === true,
+      };
+    } catch (error) {
+      let rollback: 'ok' | 'failed' = 'failed';
+      if (snapshotRef) {
+        try {
+          await runCommand(ctx, job, 'snapshot_restore', { snapshot: snapshotRef, kind: 'local' }, 180_000);
+          await runCommand(ctx, job, 'reload', {}, 90_000);
+          const raw = await runCommand(ctx, job, 'read_state', {}, 60_000);
+          await saveState(ctx.pool, routerId, raw, 'connection_manage_rollback');
+          rollback = 'ok';
+        } catch {
+          rollback = 'failed';
+        }
+      }
+      const failure = error as JobFailure;
+      await ctx.pool.query(
+        `update routers set last_error = $2, updated_at = now() where id = $1`,
+        [routerId, failure.message?.slice(0, 500) ?? 'Ошибка изменения подключения'],
+      );
+      throw new JobFailure(
+        failure.code ?? 'connection_manage_failed',
+        `${failure.message} (${rollback === 'ok' ? 'изменения откачены' : 'требуется ручная проверка'})`,
+      );
+    }
+  } finally {
+    if (editId) {
+      await ctx.pool.query('delete from connection_edits where id = $1', [editId]).catch(() => undefined);
+    }
+  }
+}
+
 export async function dnsBenchmark(ctx: HandlerContext, job: JobRow): Promise<Json> {
   requireRouter(job);
   let state: Json = {};
@@ -1207,5 +1338,7 @@ export const HANDLERS: Record<string, JobHandler> = {
   service_action: serviceAction,
   dns_benchmark: dnsBenchmark,
   connections_apply: applyRouterConnections,
+  list_connections: listConnections,
+  manage_connection: manageConnection,
   reconcile,
 };

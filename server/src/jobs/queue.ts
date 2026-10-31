@@ -19,6 +19,8 @@ export type JobType =
   | 'service_action'
   | 'dns_benchmark'
   | 'connections_apply'
+  | 'list_connections'
+  | 'manage_connection'
   | 'rollout'
   | 'retention'
   | 'reconcile';

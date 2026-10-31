@@ -22,7 +22,7 @@ interface RouteContext {
   masterKey: string;
 }
 
-const VLESS_RE = /^(vless|vmess|trojan|ss|ssr|hysteria2?|tuic):\/\/\S+$/i;
+const VLESS_RE = /^(vless|vmess|trojan|ss|ssr|hysteria|hysteria2|hy2|tuic|anytls|socks|socks4|socks4a|socks5|socks5h):\/\/\S+$/i;
 const SUBSCRIPTION_RE = /^https?:\/\/\S+$/i;
 
 const connectionSecretSchema = z
@@ -55,7 +55,10 @@ function validateValue(kind: 'subscription' | 'vless', value: string): string {
       throw badRequest('invalid_subscription', 'Ссылка на подписку должна начинаться с http:// или https://');
     }
   } else if (!VLESS_RE.test(text)) {
-    throw badRequest('invalid_vless', 'Поддерживаются ссылки vless://, vmess://, trojan://, ss://, hysteria2://, tuic://');
+    throw badRequest(
+      'invalid_vless',
+      'Поддерживаются ссылки vless://, vmess://, trojan://, ss://, ssr://, hysteria2://, hy2://, tuic://, anytls://, socks://',
+    );
   }
   return text;
 }
@@ -138,6 +141,121 @@ export async function registerRouterConnectionRoutes(
       })),
     };
   });
+
+  app.post(
+    '/api/v1/routers/:id/connections/list',
+    async (request, reply) => {
+      const auth = requireUser(request);
+      const params = z.object({ id: z.string().uuid() }).parse(request.params);
+      const router = await getRouterForMutation(pool, auth, params.id);
+      assertOnline(router);
+      const job = await enqueueJob(pool, {
+        type: 'list_connections',
+        routerId: router.id,
+        requestedBy: auth.userId,
+        timeoutSeconds: 60,
+        payload: { section: router.managed_section ?? 'router_control' },
+      });
+      reply.code(202);
+      return { job: jobJson(job) };
+    },
+  );
+
+  app.post(
+    '/api/v1/routers/:id/connections/manage',
+    { config: { rateLimit: { max: 30, timeWindow: '1 minute' } } },
+    async (request, reply) => {
+      const auth = requireUser(request);
+      const params = z.object({ id: z.string().uuid() }).parse(request.params);
+      const body = z
+        .object({
+          action: z.enum(['delete', 'replace']),
+          kind: z.enum(['subscription', 'link']),
+          name: z.string().regex(/^[A-Za-z0-9_.-]{1,64}$/).optional(),
+          hash: z.string().regex(/^[a-f0-9]{64}$/i).optional(),
+          value: z.string().trim().min(8).max(8192).optional(),
+        })
+        .strict()
+        .refine(
+          (value) =>
+            value.kind === 'subscription'
+              ? Boolean(value.name) && !value.hash
+              : Boolean(value.hash) && !value.name,
+          { message: 'Для подписки нужен name, для ссылки — hash' },
+        )
+        .refine(
+          (value) =>
+            value.action === 'replace' ? Boolean(value.value) : !value.value,
+          { message: 'Для замены нужно новое значение, для удаления оно не требуется' },
+        )
+        .parse(request.body);
+
+      const router = await getRouterForMutation(pool, auth, params.id);
+      assertOnline(router);
+
+      if (body.value) {
+        if (body.kind === 'subscription') {
+          if (!SUBSCRIPTION_RE.test(body.value)) {
+            throw badRequest(
+              'invalid_subscription',
+              'Ссылка на подписку должна начинаться с http:// или https://',
+            );
+          }
+        } else if (!VLESS_RE.test(body.value)) {
+          throw badRequest(
+            'invalid_link',
+            'Поддерживаются ссылки vless://, vmess://, trojan://, ss://, ssr://, hysteria2://, hy2://, tuic://, anytls://, socks://',
+          );
+        }
+      }
+
+      let editId: string | null = null;
+      if (body.action === 'replace' && body.value) {
+        editId = uuidv7();
+        await pool.query(
+          'insert into connection_edits (id, router_id, secret_enc) values ($1,$2,$3)',
+          [editId, router.id, encryptSecret(body.value, masterKey)],
+        );
+      }
+
+      const job = await enqueueJob(pool, {
+        type: 'manage_connection',
+        routerId: router.id,
+        requestedBy: auth.userId,
+        timeoutSeconds: 240,
+        payload: {
+          section: router.managed_section ?? 'router_control',
+          action: body.action,
+          kind: body.kind,
+          name: body.name ?? null,
+          hash: body.hash ?? null,
+          edit_id: editId,
+        },
+      });
+
+      await audit(pool, {
+        actorId: auth.userId,
+        actorRole: auth.role,
+        action: 'router.connection_manage',
+        targetType: 'router_connection',
+        targetId: body.name ?? body.hash ?? null,
+        routerId: router.id,
+        result: 'ok',
+        ip: request.ip,
+        userAgent: request.headers['user-agent'],
+        metadata: {
+          operation: body.action,
+          kind: body.kind,
+          name: body.name ?? null,
+          hash: body.hash ?? null,
+          section: router.managed_section ?? 'router_control',
+        },
+      });
+
+      reply.code(202);
+      return { job: jobJson(job) };
+    },
+  );
 
   app.post(
     '/api/v1/routers/:id/connections',

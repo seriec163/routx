@@ -160,7 +160,7 @@ function apply_uci(product, items, base_state_hash, create_sections, local_lists
 	return { ok: true, applied: applied };
 }
 
-const LINK_RE = /^(vless|vmess|trojan|ss|ssr|hysteria2?|tuic):\/\/\S+$/i;
+const LINK_RE = /^(vless|vmess|trojan|ss|ssr|hysteria|hysteria2|hy2|tuic|anytls|socks|socks4|socks4a|socks5|socks5h):\/\/\S+$/i;
 const SUBSCRIPTION_RE = /^https?:\/\/\S+$/i;
 const SECTION_RE = /^[A-Za-z0-9_.-]{1,64}$/;
 const CONNECTIONS_STATE = util.STATE_DIR + "/connections.json";
@@ -180,6 +180,176 @@ function save_link_state(link_state) {
 function managed_link_hashes(link_state, product, section) {
 	let entry = link_state[product + ":" + section];
 	return type(entry) == "array" ? entry : [];
+}
+
+function connection_mask(url) {
+	let text = util.as_string(url);
+	let sep = index(text, "://");
+	let scheme = sep > 0 ? substr(text, 0, sep) : "";
+	let rest = sep > 0 ? substr(text, sep + 3) : text;
+	let stop = length(rest);
+	for (let ch in [ "/", "?", "#" ]) {
+		let pos = index(rest, ch);
+		if (pos >= 0 && pos < stop)
+			stop = pos;
+	}
+	let host = substr(rest, 0, stop);
+	let at = rindex(host, "@");
+	if (at >= 0)
+		host = substr(host, at + 1);
+	let tail = length(text) > 4 ? substr(text, length(text) - 4) : "";
+	return { scheme: scheme, host: host, tail: tail };
+}
+
+function list_connections(product, args) {
+	if (product != "forkop" && product != "prokop")
+		return { ok: false, error: "неизвестный продукт" };
+	let section = util.as_string(args.section);
+	if (match(section, SECTION_RE) == null)
+		return { ok: false, error: "invalid_section" };
+
+	let cursor = uci.cursor();
+	if (cursor.get(product, section) != "section")
+		return { ok: false, error: "section_missing" };
+
+	let all = cursor.get_all(product);
+	if (type(all) != "object")
+		all = {};
+	let subscriptions = [];
+	for (let sname in all) {
+		let sect = all[sname];
+		if (type(sect) != "object" || sect[".type"] != "subscription_url")
+			continue;
+		if (util.as_string(sect.section) != section)
+			continue;
+		let info = connection_mask(sect.url);
+		push(subscriptions, { name: sname, host: info.host, tail: info.tail });
+	}
+
+	let links = [];
+	let raw = cursor.get(product, section, "selector_proxy_links");
+	if (type(raw) != "array")
+		raw = raw == null ? [] : [ raw ];
+	let index_value = 0;
+	for (let item in raw) {
+		let link = util.as_string(item);
+		if (link == "") {
+			index_value++;
+			continue;
+		}
+		let info = connection_mask(link);
+		let hash_pos = index(link, "#");
+		let label = hash_pos >= 0 ? substr(link, hash_pos + 1) : "";
+		push(links, {
+			index: index_value,
+			hash: util.sha256_hex(link),
+			scheme: info.scheme,
+			host: info.host,
+			tail: info.tail,
+			label: label
+		});
+		index_value++;
+	}
+
+	return { ok: true, section: section, subscriptions: subscriptions, links: links };
+}
+
+function manage_connection(product, args) {
+	if (product != "forkop" && product != "prokop")
+		return { ok: false, error: "неизвестный продукт" };
+	let section = util.as_string(args.section);
+	if (match(section, SECTION_RE) == null)
+		return { ok: false, error: "invalid_section" };
+	let action = util.as_string(args.action);
+	if (action != "delete" && action != "replace")
+		return { ok: false, error: "invalid_action" };
+	let kind = util.as_string(args.kind);
+	if (kind != "subscription" && kind != "link")
+		return { ok: false, error: "invalid_kind" };
+
+	let value = trim(util.as_string(args.value));
+	if (action == "replace") {
+		if (kind == "subscription") {
+			if (match(value, SUBSCRIPTION_RE) == null)
+				return { ok: false, error: "invalid_subscription" };
+		} else if (match(value, LINK_RE) == null) {
+			return { ok: false, error: "invalid_link" };
+		}
+	}
+
+	let cursor = uci.cursor();
+	if (cursor.get(product, section) != "section")
+		return { ok: false, error: "section_missing" };
+
+	if (kind == "subscription") {
+		let name = util.as_string(args.name);
+		if (match(name, SECTION_RE) == null)
+			return { ok: false, error: "invalid_name" };
+		if (cursor.get(product, name) != "subscription_url")
+			return { ok: false, error: "subscription_missing" };
+		if (util.as_string(cursor.get(product, name, "section")) != section)
+			return { ok: false, error: "subscription_section_mismatch" };
+		if (action == "delete")
+			cursor.delete(product, name);
+		else
+			cursor.set(product, name, "url", value);
+	} else {
+		let hash = util.as_string(args.hash);
+		if (match(hash, /^[a-f0-9]{64}$/) == null)
+			return { ok: false, error: "invalid_hash" };
+		let raw = cursor.get(product, section, "selector_proxy_links");
+		if (type(raw) != "array")
+			raw = raw == null ? [] : [ raw ];
+		let found = -1;
+		for (let i = 0; i < length(raw); i++)
+			if (util.sha256_hex(util.as_string(raw[i])) == hash) {
+				found = i;
+				break;
+			}
+		if (found < 0)
+			return { ok: false, error: "link_missing" };
+		if (action == "delete") {
+			let next = [];
+			for (let i = 0; i < length(raw); i++)
+				if (i != found)
+					push(next, raw[i]);
+			if (length(next) == 0)
+				cursor.delete(product, section, "selector_proxy_links");
+			else
+				cursor.set(product, section, "selector_proxy_links", next);
+		} else {
+			raw[found] = value;
+			cursor.set(product, section, "selector_proxy_links", raw);
+		}
+	}
+
+	// Если после удаления в секции не осталось источников подключения,
+	// выключаем её, чтобы Prokop не ругался на connection без подключения.
+	let disabled = false;
+	if (action == "delete") {
+		let subscriptions = 0;
+		let all = cursor.get_all(product);
+		if (type(all) != "object")
+			all = {};
+		for (let sname in all) {
+			let sect = all[sname];
+			if (type(sect) == "object" && sect[".type"] == "subscription_url" &&
+			    util.as_string(sect.section) == section)
+				subscriptions++;
+		}
+		let links = cursor.get(product, section, "selector_proxy_links");
+		let link_count = type(links) == "array" ? length(links) : (links == null ? 0 : 1);
+		let outbounds = cursor.get(product, section, "outbound_jsons");
+		let outbound_count = type(outbounds) == "array" ? length(outbounds) : (outbounds == null ? 0 : 1);
+		if (subscriptions + link_count + outbound_count == 0) {
+			cursor.set(product, section, "enabled", "0");
+			disabled = true;
+		}
+	}
+
+	if (cursor.commit(product) == null)
+		return { ok: false, error: "uci commit failed" };
+	return { ok: true, section: section, action: action, kind: kind, disabled: disabled };
 }
 
 function apply_connections(product, args) {
@@ -345,4 +515,4 @@ function apply_connections(product, args) {
 	};
 }
 
-return { precheck, verify, service_action, reload, apply_uci, apply_connections };
+return { precheck, verify, service_action, reload, apply_uci, apply_connections, list_connections, manage_connection };
