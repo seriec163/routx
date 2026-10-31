@@ -21,7 +21,7 @@ function renderValue(value: DiffItem['before']): string {
 
 export function DiffView({ items }: { items: DiffItem[] }) {
   if (items.length === 0) {
-    return <p className="empty">Различий нет — конфигурация уже совпадает с шаблоном.</p>;
+    return <p className="empty">Различий нет — конфигурация уже совпадает.</p>;
   }
 
   const counts = {

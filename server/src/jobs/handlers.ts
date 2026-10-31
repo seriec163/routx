@@ -23,6 +23,11 @@ import { createCommand, waitForCommand } from '../agent/service.js';
 import { isCancelRequested } from './queue.js';
 import type { JobRow } from './queue.js';
 import { notifyRouterOwner } from '../notifications.js';
+import {
+  buildRuleViews,
+  type AgentSection,
+  type StoredConnection,
+} from '../domain/rules.js';
 
 export class JobFailure extends Error {
   readonly code: string;
@@ -275,8 +280,8 @@ export async function diffTemplate(ctx: HandlerContext, job: JobRow): Promise<Js
   await ctx.pool.query(
     `insert into apply_runs
        (id, router_id, template_id, revision, diff, diff_hash, base_state_hash, desired_hash,
-        local_lists, section_map, status, requested_by)
-     values ($1,$2,$3,$4,$5::jsonb,$6,$7,$8,$9::jsonb,$10::jsonb,'awaiting_confirmation',$11)`,
+        local_lists, section_map, create_sections, status, requested_by)
+     values ($1,$2,$3,$4,$5::jsonb,$6,$7,$8,$9::jsonb,$10::jsonb,$11::jsonb,'awaiting_confirmation',$12)`,
     [
       runId,
       routerId,
@@ -288,6 +293,7 @@ export async function diffTemplate(ctx: HandlerContext, job: JobRow): Promise<Js
       desiredHash,
       JSON.stringify(plan.localLists),
       JSON.stringify(mapped.sectionMap),
+      JSON.stringify(plan.createSections),
       job.requested_by,
     ],
   );
@@ -328,6 +334,81 @@ export async function diffTemplate(ctx: HandlerContext, job: JobRow): Promise<Js
   };
 }
 
+/**
+ * Сравнение для ручного правила или применённого шаблона-пресета.
+ * В отличие от diffTemplatepayload приходит целиком в задаче: шаблон уже
+ * развёрнут в секцию, поэтому имя секции здесь есть, а в самом шаблоне его нет.
+ */
+export async function diffCustom(ctx: HandlerContext, job: JobRow): Promise<Json> {
+  const routerId = requireRouter(job);
+  const payload = templatePayloadSchema.parse(job.payload.payload);
+  const exclusions = validateExclusions(
+    Array.isArray(job.payload.exclusions) ? job.payload.exclusions.map(String) : [],
+  );
+
+  const current = await readState(ctx, job);
+  const extras = await loadListExtras(ctx.pool, routerId);
+  const plan = computePlan(payload, current, exclusions, extras);
+  const items = plan.items;
+  const hash = diffHash(items);
+  const baseHash = stateHash(current);
+  const desiredHash = plan.desiredHash;
+
+  const runId = uuidv7();
+  await ctx.pool.query(
+    `insert into apply_runs
+       (id, router_id, template_id, revision, diff, diff_hash, base_state_hash, desired_hash,
+        local_lists, section_map, create_sections, status, requested_by)
+     values ($1,$2,null,null,$3::jsonb,$4,$5,$6,$7::jsonb,'{}'::jsonb,$8::jsonb,'awaiting_confirmation',$9)`,
+    [
+      runId,
+      routerId,
+      JSON.stringify(items),
+      hash,
+      baseHash,
+      desiredHash,
+      JSON.stringify(plan.localLists),
+      JSON.stringify(plan.createSections),
+      job.requested_by,
+    ],
+  );
+
+  let seq = 1;
+  for (const item of items) {
+    await ctx.pool.query(
+      `insert into apply_items (apply_run_id, seq, op, path, value_before, value_after)
+       values ($1,$2,$3,$4,$5::jsonb,$6::jsonb)`,
+      [
+        runId,
+        seq++,
+        item.op,
+        item.path,
+        item.before === null ? null : JSON.stringify(item.before),
+        item.after === null ? null : JSON.stringify(item.after),
+      ],
+    );
+  }
+
+  const counts = {
+    add: items.filter((item) => item.op === 'add').length,
+    change: items.filter((item) => item.op === 'change').length,
+    delete: items.filter((item) => item.op === 'delete').length,
+  };
+
+  await recomputeDrift(ctx.pool, routerId, current);
+
+  return {
+    apply_run_id: runId,
+    diff_hash: hash,
+    base_state_hash: baseHash,
+    desired_hash: desiredHash,
+    counts,
+    total: items.length,
+    section_map: {},
+    warnings: [],
+  };
+}
+
 function expectedState(items: DiffItem[]): Map<string, UciValue> {
   const expected = new Map<string, UciValue>();
   for (const item of items) {
@@ -362,6 +443,8 @@ export async function applyRun(ctx: HandlerContext, job: JobRow): Promise<Json> 
     base_state_hash: string | null;
     desired_hash: string | null;
     local_lists: unknown;
+    section_map: unknown;
+    create_sections: unknown;
     status: string;
     backup_ok: boolean;
   }>('select * from apply_runs where id = $1', [applyRunId]);
@@ -419,8 +502,10 @@ export async function applyRun(ctx: HandlerContext, job: JobRow): Promise<Json> 
 
   // 2. Запись UCI с проверкой базового состояния на агенте.
   try {
-    let createSections: string[] = [];
-    if (run.template_id && run.revision !== null) {
+    let createSections: string[] = Array.isArray(run.create_sections)
+      ? run.create_sections.map(String)
+      : [];
+    if (createSections.length === 0 && run.template_id && run.revision !== null) {
       const revision = await loadRevision(ctx.pool, run.template_id, run.revision);
       createSections = creatableSections(revision.payload);
     }
@@ -459,7 +544,7 @@ export async function applyRun(ctx: HandlerContext, job: JobRow): Promise<Json> 
       `update apply_items set result = 'ok' where apply_run_id = $1`,
       [applyRunId],
     );
-    if (run.template_id && run.desired_hash) {
+    if (run.template_id && run.revision !== null && run.desired_hash) {
       await ctx.pool.query(
         `update template_assignments
             set applied_hash = $3, applied_at = now(), drift = 'in_sync', last_checked_at = now()
@@ -1032,33 +1117,55 @@ export async function applyRouterConnections(ctx: HandlerContext, job: JobRow): 
   );
   const router = routerResult.rows[0];
   if (!router) throw new JobFailure('router_missing', 'Роутер не найден');
-  const section = router.managed_section || 'router_control';
+  const defaultSection = router.managed_section || 'router_control';
+  const requestedSection = asString(job.payload.section);
 
   const result = await ctx.pool.query<{
     id: string;
     kind: 'subscription' | 'vless';
     label: string;
+    section: string;
     secret_enc: string;
     enabled: boolean;
   }>(
-    `select id, kind, label, secret_enc, enabled
+    `select id, kind, label, section, secret_enc, enabled
        from router_connections where router_id = $1 order by created_at asc`,
     [routerId],
   );
 
-  const links: string[] = [];
-  const subscriptions: Array<{ name: string; url: string }> = [];
+  const bySection = new Map<
+    string,
+    { links: string[]; subscriptions: Array<{ name: string; url: string }> }
+  >();
   for (const row of result.rows) {
+    if (requestedSection && row.section !== requestedSection) continue;
     if (!row.enabled) continue;
+    const section = row.section || defaultSection;
+    const group = bySection.get(section) ?? { links: [], subscriptions: [] };
     const value = decryptSecret(row.secret_enc, ctx.masterKey);
-    if (row.kind === 'vless') links.push(value);
-    else {
-      subscriptions.push({
+    if (row.kind === 'vless') {
+      group.links.push(value);
+    } else {
+      group.subscriptions.push({
         name: `rc_sub_${row.id.replace(/-/g, '').slice(0, 12)}`,
         url: value,
       });
     }
+    bySection.set(section, group);
   }
+  if (requestedSection && !bySection.has(requestedSection)) {
+    bySection.set(requestedSection, { links: [], subscriptions: [] });
+  }
+
+  const stateResult = await ctx.pool.query<{ managed: Record<string, unknown> | null }>(
+    'select managed from router_state where router_id = $1',
+    [routerId],
+  );
+  const managed = stateResult.rows[0]?.managed ?? {};
+  const sectionOption = (section: string, option: string): string => {
+    const value = managed[`section.${section}.${option}`];
+    return typeof value === 'string' ? value : '';
+  };
 
   let snapshotRef: string | null = null;
   try {
@@ -1086,28 +1193,46 @@ export async function applyRouterConnections(ctx: HandlerContext, job: JobRow): 
     );
   }
 
+  const appliedSections: Array<{ section: string; links: number; subscriptions: number }> = [];
   try {
-    await runCommand(
-      ctx,
-      job,
-      'apply_connections',
-      {
+    for (const [section, group] of bySection) {
+      const expectedEnabled = group.links.length + group.subscriptions.length > 0;
+      const currentAction = sectionOption(section, 'action');
+      await runCommand(
+        ctx,
+        job,
+        'apply_connections',
+        {
+          section,
+          action: currentAction || 'connection',
+          label: sectionOption(section, 'label') || section,
+          enabled: expectedEnabled,
+          links: group.links,
+          subscriptions: group.subscriptions,
+        },
+        120_000,
+      );
+      appliedSections.push({
         section,
-        action: 'connection',
-        enabled: links.length + subscriptions.length > 0,
-        links,
-        subscriptions,
-      },
-      120_000,
-    );
+        links: group.links.length,
+        subscriptions: group.subscriptions.length,
+      });
+    }
+
     await runCommand(ctx, job, 'reload', {}, 90_000);
     const raw = await runCommand(ctx, job, 'read_state', {}, 60_000);
     const current = await saveState(ctx.pool, routerId, raw, 'connections');
-    const enabledPath = `section.${section}.enabled`;
-    const actual = current[enabledPath];
-    const expectEnabled = links.length + subscriptions.length > 0;
-    if (expectEnabled && String(actual) !== '1') {
-      throw new JobFailure('verify_mismatch', 'Секция подключений не включилась после применения');
+
+    for (const applied of appliedSections) {
+      const expectedEnabled = applied.links + applied.subscriptions > 0;
+      if (!expectedEnabled) continue;
+      const actual = current[`section.${applied.section}.enabled`];
+      if (String(actual) !== '1') {
+        throw new JobFailure(
+          'verify_mismatch',
+          `Секция «${applied.section}» не включилась после применения`,
+        );
+      }
     }
   } catch (error) {
     let rollback: 'ok' | 'failed' = 'failed';
@@ -1138,9 +1263,9 @@ export async function applyRouterConnections(ctx: HandlerContext, job: JobRow): 
   ]);
 
   return {
-    section,
-    links: links.length,
-    subscriptions: subscriptions.length,
+    sections: appliedSections,
+    links: appliedSections.reduce((sum, item) => sum + item.links, 0),
+    subscriptions: appliedSections.reduce((sum, item) => sum + item.subscriptions, 0),
     snapshot: snapshotRef,
   };
 }
@@ -1149,6 +1274,73 @@ export async function listConnections(ctx: HandlerContext, job: JobRow): Promise
   requireRouter(job);
   const section = asString(job.payload.section) || 'router_control';
   return runCommand(ctx, job, 'list_connections', { section }, 30_000);
+}
+
+/**
+ * Живое чтение правил: секции, их настройки, подписки, прямые ссылки
+ * и содержимое локальных списков доменов/IP. Один запрос к агенту вместо
+ * серии list_connections на каждую секцию.
+ */
+export async function readRules(ctx: HandlerContext, job: JobRow): Promise<Json> {
+  const routerId = requireRouter(job);
+  const raw = await runCommand(ctx, job, 'read_rules', {}, 90_000);
+
+  // read_rules отдаёт секции, подписки и локальные списки, но не health/service.
+  // Дополнительное read_state обновляет карточку «Служба» и capabilities.
+  let managed: Record<string, string | string[]> = asRecord(raw.managed) as Record<
+    string,
+    string | string[]
+  >;
+  try {
+    const stateRaw = await runCommand(ctx, job, 'read_state', {}, 60_000);
+    managed = (await saveState(ctx.pool, routerId, stateRaw, 'read_rules')) as Record<
+      string,
+      string | string[]
+    >;
+  } catch {
+    if (Object.keys(managed).length > 0 || raw.state_hash != null) {
+      await saveState(ctx.pool, routerId, raw, 'read_rules');
+    }
+  }
+
+  const stored = await ctx.pool.query<{
+    id: string;
+    kind: 'subscription' | 'vless';
+    label: string;
+    section: string;
+    secret_enc: string;
+    enabled: boolean;
+  }>(
+    `select id, kind, label, section, secret_enc, enabled
+       from router_connections where router_id = $1 order by created_at asc`,
+    [routerId],
+  );
+  const connections: StoredConnection[] = stored.rows.map((row) => ({
+    id: row.id,
+    kind: row.kind,
+    label: row.label,
+    section: row.section,
+    value: decryptSecret(row.secret_enc, ctx.masterKey),
+    enabled: row.enabled,
+  }));
+
+  const extras = await loadListExtras(ctx.pool, routerId);
+  const agentSections = Array.isArray(raw.sections)
+    ? (raw.sections as unknown as AgentSection[])
+    : [];
+  const rules = buildRuleViews({
+    managed: managed as Record<string, string | string[]>,
+    agentSections,
+    connections,
+    extras,
+    source: 'live',
+  });
+
+  return {
+    rules,
+    state_hash: asString(raw.state_hash),
+    source: 'live',
+  };
 }
 
 export async function manageConnection(ctx: HandlerContext, job: JobRow): Promise<Json> {
@@ -1166,7 +1358,10 @@ export async function manageConnection(ctx: HandlerContext, job: JobRow): Promis
     'select managed_section from routers where id = $1',
     [routerId],
   );
-  const section = routerResult.rows[0]?.managed_section || 'router_control';
+  const section =
+    asString(job.payload.section) ||
+    routerResult.rows[0]?.managed_section ||
+    'router_control';
   const name = asString(job.payload.name);
   const hash = asString(job.payload.hash);
   const editId = asString(job.payload.edit_id);
@@ -1327,7 +1522,9 @@ export type JobHandler = (ctx: HandlerContext, job: JobRow) => Promise<Json>;
 export const HANDLERS: Record<string, JobHandler> = {
   refresh_state: refreshState,
   diff: diffTemplate,
+  diff_custom: diffCustom,
   apply: applyRun,
+  read_rules: readRules,
   monitor: monitorProbe,
   access_check: accessCheck,
   diagnostics,

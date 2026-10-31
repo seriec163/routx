@@ -28,6 +28,11 @@ function handle_command(cmd) {
 			let r = uci_state.build_read_state(product);
 			return { status: "success", result: r };
 		}
+		if (op == "read_rules") {
+			let res = ops.read_rules(product);
+			if (!res.ok) return { status: "failed", error: { code: "read_rules_failed", message: util.as_string(res.error) } };
+			return { status: "success", result: res };
+		}
 		if (op == "product_probe") {
 			return { status: "success", result: client.build_probe(product) };
 		}

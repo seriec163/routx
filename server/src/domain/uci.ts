@@ -2,7 +2,7 @@ import { z } from 'zod';
 import { isIP } from 'node:net';
 import { canonicalJson, sha256Hex } from '../lib/crypto.js';
 import { badRequest } from '../lib/errors.js';
-import { ROUTING_SERVICE_IDS } from './routing.js';
+import { ROUTING_ACTION_IDS, ROUTING_SERVICE_IDS } from './routing.js';
 
 /**
  * Единый источник истины по управляемым UCI-параметрам.
@@ -267,6 +267,22 @@ function normalizeIp(value: string): string | null {
   if (family === 4 && (prefix < 0 || prefix > 32)) return null;
   if (family === 6 && (prefix < 0 || prefix > 128)) return null;
   return `${address}/${prefix}`;
+}
+
+/** Проверяет ручные домены и IP так же, как это сделает buildPlan. */
+export function validateManualEntries(domains: string[], ips: string[]): void {
+  for (const raw of domains) {
+    if (isCommentLine(raw)) continue;
+    if (!parseManualDomain(raw)) {
+      throw badRequest('invalid_domain', `Некорректный домен: ${raw}`, { value: raw });
+    }
+  }
+  for (const raw of ips) {
+    if (isCommentLine(raw)) continue;
+    if (!normalizeIp(raw)) {
+      throw badRequest('invalid_ip', `Некорректный IP/CIDR: ${raw}`, { value: raw });
+    }
+  }
 }
 
 function validRemoteReference(value: string, kind: 'rule_set' | 'plain'): boolean {
@@ -768,14 +784,25 @@ export function normalizeValue(value: UciValue, list: boolean): UciValue {
   return String(value);
 }
 
-const valueSchema = z.union([
+export const uciValueSchema = z.union([
   z.string().max(4096),
   z.array(z.string().max(4096)).max(200),
   z.null(),
 ]);
 
+const valueSchema = uciValueSchema;
+
 export const templatePayloadSchema = z
   .object({
+    // Новый формат (schema v2): шаблон — это набор настроек и действие,
+    // без привязки к имени секции. Ресурсы применяются к той секции,
+    // которую пользователь выбрал на роутере.
+    action: z.string().max(64).optional(),
+    enabled: valueSchema.optional(),
+    resources: z.record(z.string(), valueSchema).default({}),
+    manual_domains: z.array(z.string().trim().min(1).max(512)).max(MAX_MANUAL_ENTRIES).default([]),
+    manual_ips: z.array(z.string().trim().min(1).max(64)).max(MAX_MANUAL_ENTRIES).default([]),
+    // Старый формат (schema v1) остаётся для чтения уже сохранённых шаблонов.
     settings: z.record(z.string(), valueSchema).default({}),
     sections: z.record(z.string(), z.record(z.string(), valueSchema)).default({}),
     urltest: z.record(z.string(), z.record(z.string(), valueSchema)).default({}),
@@ -809,6 +836,236 @@ export const templateInputSchema = z
   .strict();
 
 export type TemplateInput = z.infer<typeof templateInputSchema>;
+
+/**
+ * «Пресет» шаблона — то, что реально применяется к одной секции роутера.
+ * В нём нет имени секции: имя выбирается на роутере.
+ */
+export interface TemplatePreset {
+  action: string;
+  enabled: string;
+  resources: Record<string, UciValue>;
+  manual_domains: string[];
+  manual_ips: string[];
+  settings: Record<string, UciValue>;
+}
+
+/** Поля, которые задаются отдельно и не должны попадать в resources. */
+const PRESET_RESOURCE_RESERVED = new Set([
+  'label',
+  'action',
+  'enabled',
+  'domain_ip_lists',
+]);
+
+export function emptyTemplatePayload(): TemplatePayload {
+  return {
+    resources: {},
+    manual_domains: [],
+    manual_ips: [],
+    settings: {},
+    sections: {},
+    urltest: {},
+    section_interface: {},
+    subscription_url: {},
+    create_urltest: [],
+    create_sections: [],
+    manual_entries: {},
+  };
+}
+
+/**
+ * Проверяет ресурсы шаблона/правила теми же правилами, что и обычные пути UCI.
+ * Секретные и служебные опции здесь запрещены.
+ */
+export function validateTemplateResources(resources: Record<string, UciValue>): void {
+  for (const [option, value] of Object.entries(resources)) {
+    if (PRESET_RESOURCE_RESERVED.has(option)) {
+      throw badRequest(
+        'invalid_resource_option',
+        `Параметр «${option}» задаётся отдельно и не входит в ресурсы`,
+        { option },
+      );
+    }
+    const rule = assertAllowedPath(`section.__preset__.${option}`);
+    normalizeValue(value, rule.list);
+    if (option === 'community_lists') {
+      const values = Array.isArray(value) ? value : value == null ? [] : [String(value)];
+      for (const item of values) {
+        if (!ROUTING_SERVICE_IDS.has(item)) {
+          throw badRequest(
+            'unknown_community_list',
+            `Неизвестный список «${item}». Выберите ресурс из каталога Prokop/Forkop.`,
+            { value: item },
+          );
+        }
+      }
+    }
+  }
+}
+
+/**
+ * Приводит сохранённый шаблон (старый или новый) к простому пресету.
+ * Старый шаблон с одной секцией читается как пресет этой секции.
+ */
+export function presetFromPayload(payload: TemplatePayload): TemplatePreset {
+  const hasNewFormat =
+    Boolean(payload.action) ||
+    Object.keys(payload.resources ?? {}).length > 0 ||
+    payload.manual_domains.length > 0 ||
+    payload.manual_ips.length > 0;
+
+  if (hasNewFormat) {
+    validateTemplateResources(payload.resources);
+    validateManualEntries(payload.manual_domains, payload.manual_ips);
+    const action = payload.action ?? 'connection';
+    if (!(ROUTING_ACTION_IDS as Set<string>).has(action)) {
+      throw badRequest('invalid_action', `Неизвестное действие «${action}»`);
+    }
+    return {
+      action,
+      enabled: payload.enabled == null ? '1' : String(payload.enabled),
+      resources: { ...payload.resources },
+      manual_domains: payload.manual_domains.filter((line) => !isCommentLine(line)),
+      manual_ips: payload.manual_ips.filter((line) => !isCommentLine(line)),
+      settings: { ...payload.settings },
+    };
+  }
+
+  const entries = Object.entries(payload.sections);
+  if (entries.length === 0) {
+    return {
+      action: 'connection',
+      enabled: '1',
+      resources: {},
+      manual_domains: [],
+      manual_ips: [],
+      settings: { ...payload.settings },
+    };
+  }
+
+  const connectionEntries = entries.filter(([, options]) => {
+    const action = options.action;
+    return typeof action === 'string' && CONNECTION_ACTIONS.has(action);
+  });
+  const chosen =
+    connectionEntries.length === 1
+      ? connectionEntries[0]
+      : entries.length === 1
+        ? entries[0]
+        : null;
+  if (!chosen) {
+    throw badRequest(
+      'legacy_multi_section',
+      'Шаблон старого формата содержит несколько секций. Откройте его в редакторе и сохраните как шаблон без имён секций.',
+    );
+  }
+
+  const [sectionName, options] = chosen;
+  const resources: Record<string, UciValue> = {};
+  for (const [option, value] of Object.entries(options)) {
+    if (PRESET_RESOURCE_RESERVED.has(option)) continue;
+    resources[option] = value;
+  }
+  const manual = payload.manual_entries[sectionName] ?? { domains: [], ips: [] };
+  validateManualEntries(manual.domains, manual.ips);
+  const action =
+    typeof options.action === 'string' && options.action !== '' ? options.action : 'connection';
+  if (!(ROUTING_ACTION_IDS as Set<string>).has(action)) {
+    throw badRequest('invalid_action', `Неизвестное действие «${action}»`);
+  }
+  return {
+    action,
+    enabled: options.enabled == null ? '1' : String(options.enabled),
+    resources,
+    manual_domains: manual.domains.filter((line) => !isCommentLine(line)),
+    manual_ips: manual.ips.filter((line) => !isCommentLine(line)),
+    settings: { ...payload.settings },
+  };
+}
+
+/**
+ * Разворачивает пресет в обычный payload для конкретной секции.
+ * Дальше работают уже существующие buildPlan/computePlan/diff/apply.
+ */
+export function materializePresetForSection(
+  preset: TemplatePreset,
+  section: string,
+  create: boolean,
+): TemplatePayload {
+  if (!NAME_RE.test(section)) {
+    throw badRequest('invalid_section', `Некорректное имя секции «${section}»`);
+  }
+  if (!(ROUTING_ACTION_IDS as Set<string>).has(preset.action)) {
+    throw badRequest('invalid_action', `Неизвестное действие «${preset.action}»`);
+  }
+  validateTemplateResources(preset.resources);
+  return {
+    ...emptyTemplatePayload(),
+    settings: { ...preset.settings },
+    sections: {
+      [section]: {
+        ...preset.resources,
+        action: preset.action,
+        enabled: preset.enabled,
+      },
+    },
+    manual_entries: {
+      [section]: {
+        domains: [...preset.manual_domains],
+        ips: [...preset.manual_ips],
+      },
+    },
+    create_sections: create ? [section] : [],
+  };
+}
+
+export interface SectionRuleInput {
+  section: string;
+  label?: string;
+  action: string;
+  enabled?: boolean;
+  resources?: Record<string, UciValue>;
+  manual_domains?: string[];
+  manual_ips?: string[];
+  settings?: Record<string, UciValue>;
+  create?: boolean;
+}
+
+/**
+ * Собирает payload для ручного правила. Все ресурсы передаются полностью:
+ * списки в UCI заменяются целиком, поэтому частичный набор удалил бы
+ * существующие домены и списки.
+ */
+export function sectionRulePayload(input: SectionRuleInput): TemplatePayload {
+  if (!NAME_RE.test(input.section)) {
+    throw badRequest('invalid_section', `Некорректное имя секции «${input.section}»`);
+  }
+  if (!(ROUTING_ACTION_IDS as Set<string>).has(input.action)) {
+    throw badRequest('invalid_action', `Неизвестное действие «${input.action}»`);
+  }
+  const resources = input.resources ?? {};
+  validateTemplateResources(resources);
+  validateManualEntries(input.manual_domains ?? [], input.manual_ips ?? []);
+
+  const options: Record<string, UciValue> = { ...resources };
+  options.action = input.action;
+  options.enabled = input.enabled === false ? '0' : '1';
+  if (input.label) options.label = input.label.slice(0, 120);
+
+  return {
+    ...emptyTemplatePayload(),
+    settings: input.settings ?? {},
+    sections: { [input.section]: options },
+    manual_entries: {
+      [input.section]: {
+        domains: input.manual_domains ?? [],
+        ips: input.manual_ips ?? [],
+      },
+    },
+    create_sections: input.create ? [input.section] : [],
+  };
+}
 
 /** Разворачивает payload в плоскую карту path → значение. */
 export function templateToDesired(payload: TemplatePayload): Map<string, UciValue> {
@@ -952,6 +1209,7 @@ export interface DiffItem {
 export interface DiffPlan {
   items: DiffItem[];
   localLists: LocalList[];
+  createSections: string[];
   desiredHash: string;
 }
 
@@ -993,7 +1251,7 @@ export function computePlan(
     }
   }
 
-  return { items, localLists: plan.localLists, desiredHash: plan.desiredHash };
+  return { items, localLists: plan.localLists, createSections: plan.createSections, desiredHash: plan.desiredHash };
 }
 
 export function computeDiff(

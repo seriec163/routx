@@ -8,6 +8,8 @@ import type { PlatformSettings } from '../settings.js';
 
 export const MUTATING_OPS = new Set([
   'apply_uci',
+  'apply_connections',
+  'manage_connection',
   'reload',
   'snapshot_create',
   'snapshot_restore',

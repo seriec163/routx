@@ -8,8 +8,12 @@ import { uuidv7 } from '../lib/ids.js';
 import { loadSettings } from '../settings.js';
 import {
   buildPlan,
+  presetFromPayload,
   templateInputSchema,
+  templatePayloadSchema,
   templateToDesired,
+  validateManualEntries,
+  validateTemplateResources,
   type TemplateInput,
 } from '../domain/uci.js';
 
@@ -18,6 +22,8 @@ interface RouteContext {
 }
 
 function validate(input: TemplateInput) {
+  validateTemplateResources(input.payload.resources);
+  validateManualEntries(input.payload.manual_domains, input.payload.manual_ips);
   const plan = buildPlan(input.payload, input.exclusions);
   const desired = plan.desired;
   const exclusions = plan.exclusions;
@@ -45,14 +51,32 @@ export async function registerTemplateRoutes(app: FastifyInstance, ctx: RouteCon
     const result = await pool.query(
       `select t.id, t.owner_id, t.name, t.description, t.schema_version, t.current_revision,
               t.archived_at, t.created_at, t.updated_at,
-              (select count(*)::int from template_assignments a where a.template_id = t.id) as assignment_count
+              (select count(*)::int from template_assignments a where a.template_id = t.id) as assignment_count,
+              tr.payload as payload
          from templates t
+         left join template_revisions tr
+           on tr.template_id = t.id and tr.revision = t.current_revision
         where ($1::uuid is null or t.owner_id = $1)
           and ($2::boolean or t.archived_at is null)
         order by t.updated_at desc`,
       [auth.role === 'superadmin' ? null : auth.userId, includeArchived],
     );
-    return { items: result.rows };
+    return {
+      items: result.rows.map((row) => {
+        let preset = null;
+        try {
+          preset = presetFromPayload(templatePayloadSchema.parse(row.payload));
+        } catch {
+          preset = null;
+        }
+        return {
+          ...row,
+          payload: undefined,
+          preset_action: preset?.action ?? null,
+          preset_resources: preset ? Object.keys(preset.resources).length : 0,
+        };
+      }),
+    };
   });
 
   app.post(
@@ -145,12 +169,25 @@ export async function registerTemplateRoutes(app: FastifyInstance, ctx: RouteCon
       [params.id, template.current_revision],
     );
 
+    const revisionRow = revision.rows[0];
+    let preset = null;
+    let presetError: string | null = null;
+    if (revisionRow) {
+      try {
+        preset = presetFromPayload(templatePayloadSchema.parse(revisionRow.payload));
+      } catch (error) {
+        presetError = (error as Error).message.slice(0, 500);
+      }
+    }
+
     return {
       template: {
         ...template,
-        revision: revision.rows[0]?.revision,
-        payload: revision.rows[0]?.payload,
-        exclusions: revision.rows[0]?.exclusions,
+        revision: revisionRow?.revision,
+        payload: revisionRow?.payload,
+        exclusions: revisionRow?.exclusions,
+        preset,
+        preset_error: presetError,
       },
     };
   });
@@ -345,15 +382,22 @@ export async function registerTemplateRoutes(app: FastifyInstance, ctx: RouteCon
       );
 
       // Новая ревизия должна применяться к уже назначенным роутерам.
-      // Иначе назначение остаётся на старой ревизии, и сравнение показывает
-      // устаревший шаблон.
-      const assignments = await client.query(
-        `update template_assignments
-            set revision = $2, desired_hash = $3, drift = 'unknown',
-                applied_hash = null, applied_at = null
-          where template_id = $1`,
-        [params.id, next, desiredHash],
-      );
+      // Но шаблон нового формата (без имени секции) применяется к выбранной
+      // секции на странице роутера, а не через старое назначение. Поэтому
+      // назначения обновляем только для шаблонов старого формата.
+      const legacyAssignment =
+        Object.keys(body.payload.sections).length > 0 &&
+        !body.payload.action &&
+        Object.keys(body.payload.resources ?? {}).length === 0;
+      const assignments = legacyAssignment
+        ? await client.query(
+            `update template_assignments
+                set revision = $2, desired_hash = $3, drift = 'unknown',
+                    applied_hash = null, applied_at = null
+              where template_id = $1`,
+            [params.id, next, desiredHash],
+          )
+        : { rowCount: 0 };
       await client.query('commit');
 
       await audit(pool, {

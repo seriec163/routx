@@ -352,8 +352,75 @@ function manage_connection(product, args) {
 	return { ok: true, section: section, action: action, kind: kind, disabled: disabled };
 }
 
-function apply_connections(product, args) {
+/**
+ * Живое чтение всех правил: настройки секций, подписки, прямые ссылки
+ * и содержимое локальных .lst. Один вызов вместо list_connections на каждую
+ * секцию. Секреты по-прежнему не отдаются: только host/tail/hash.
+ */
+function read_rules(product) {
 	if (product != "forkop" && product != "prokop")
+		return { ok: false, error: "неизвестный продукт" };
+
+	let rs = state.read_state(product);
+	let managed = rs.managed;
+
+	let names = {};
+	for (let path in managed) {
+		let m = match(path, /^section\.([A-Za-z0-9_.-]{1,64})\./);
+		if (m != null)
+			names[m[1]] = true;
+	}
+
+	let sections = [];
+	for (let name in names) {
+		let options = {};
+		let prefix = "section." + name + ".";
+		for (let path in managed) {
+			if (substr(path, 0, length(prefix)) == prefix)
+				options[substr(path, length(prefix))] = managed[path];
+		}
+
+		let conn = list_connections(product, { section: name });
+		let lists = {};
+		let paths = options.domain_ip_lists;
+		if (type(paths) != "array")
+			paths = paths == null ? [] : [ paths ];
+		for (let item in paths) {
+			let path = util.as_string(item);
+			if (match(path, /^\/etc\/janusnew\/lists\/[A-Za-z0-9_.\/-]+\.lst$/) == null)
+				continue;
+			let text = util.read_file(path, "");
+			if (text == "")
+				continue;
+			let lines = [];
+			for (let line in split(text, "\n")) {
+				let value = trim(line);
+				if (value != "")
+					push(lines, value);
+				if (length(lines) >= 5000)
+					break;
+			}
+			lists[path] = lines;
+		}
+
+		push(sections, {
+			section: name,
+			options: options,
+			subscriptions: conn.ok ? conn.subscriptions : [],
+			links: conn.ok ? conn.links : [],
+			lists: lists
+		});
+	}
+
+	return {
+		ok: true,
+		state_hash: rs.state_hash,
+		managed: managed,
+		sections: sections
+	};
+}
+
+function apply_connections(product, args) {	if (product != "forkop" && product != "prokop")
 		return { ok: false, error: "неизвестный продукт" };
 	args = type(args) == "object" ? args : {};
 
@@ -422,8 +489,15 @@ function apply_connections(product, args) {
 	if (label == "")
 		label = "Router Control";
 
+	let action = util.as_string(args.action);
+	if (action == "")
+		action = "connection";
+	if (action != "connection" && action != "proxy" && action != "outbound" &&
+	    action != "vpn" && action != "bypass" && action != "block" && action != "dns")
+		return { ok: false, error: "invalid_action" };
+
 	let enabled = args.enabled == null ? true : util.is_true(args.enabled);
-	cursor.set(product, section, "action", "connection");
+	cursor.set(product, section, "action", action);
 	cursor.set(product, section, "label", label);
 	cursor.delete(product, section, "selector_proxy_links");
 	if (length(merged_links) > 0)
@@ -515,4 +589,4 @@ function apply_connections(product, args) {
 	};
 }
 
-return { precheck, verify, service_action, reload, apply_uci, apply_connections, list_connections, manage_connection };
+return { precheck, verify, service_action, reload, apply_uci, apply_connections, list_connections, manage_connection, read_rules };

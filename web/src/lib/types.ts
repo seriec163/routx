@@ -106,9 +106,16 @@ export interface TemplateListItem {
   created_at: string;
   updated_at: string;
   assignment_count: number;
+  preset_action?: string | null;
+  preset_resources?: number;
 }
 
 export interface TemplatePayload {
+  action?: string;
+  enabled?: string | string[] | null;
+  resources?: Record<string, string | string[] | null>;
+  manual_domains?: string[];
+  manual_ips?: string[];
   settings: Record<string, string | string[] | null>;
   sections: Record<string, Record<string, string | string[] | null>>;
   urltest: Record<string, Record<string, string | string[] | null>>;
@@ -117,6 +124,15 @@ export interface TemplatePayload {
   create_urltest: string[];
   create_sections: string[];
   manual_entries: Record<string, { domains: string[]; ips: string[] }>;
+}
+
+export interface TemplatePreset {
+  action: string;
+  enabled: string;
+  resources: Record<string, string | string[] | null>;
+  manual_domains: string[];
+  manual_ips: string[];
+  settings: Record<string, string | string[] | null>;
 }
 
 export interface RouterConnection {
@@ -129,8 +145,45 @@ export interface RouterConnection {
   enabled: boolean;
   subscription_id?: string | null;
   catalog_name?: string | null;
+  section?: string;
   created_at: string;
   updated_at: string;
+}
+
+export interface RuleConnectionView {
+  kind: 'subscription' | 'link';
+  id: string | null;
+  name: string | null;
+  hash: string | null;
+  label: string;
+  masked: string;
+  host: string;
+  tail: string;
+  managed: boolean;
+  enabled: boolean;
+  missing: boolean;
+}
+
+export interface RuleView {
+  section: string;
+  label: string;
+  action: string;
+  enabled: boolean;
+  resources: Record<string, string | string[] | null>;
+  manual_domains: string[];
+  manual_ips: string[];
+  subscriptions: RuleConnectionView[];
+  links: RuleConnectionView[];
+  source: 'live' | 'cache';
+  warnings: string[];
+}
+
+export interface RulesResponse {
+  rules: RuleView[];
+  source: 'live' | 'cache';
+  managed_section?: string;
+  state_collected_at?: string | null;
+  state_hash?: string | null;
 }
 
 export interface ExternalSubscription {
@@ -287,6 +340,8 @@ export interface TemplateFull extends Omit<TemplateListItem, 'assignment_count'>
   revision: number;
   payload: TemplatePayload;
   exclusions: string[];
+  preset: TemplatePreset | null;
+  preset_error: string | null;
 }
 
 export interface TemplateRevision {

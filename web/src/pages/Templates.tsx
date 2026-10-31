@@ -47,6 +47,11 @@ export function TemplatesPage() {
           name,
           description: description || null,
           payload: {
+            action: 'connection',
+            enabled: '1',
+            resources: {},
+            manual_domains: [],
+            manual_ips: [],
             settings: {},
             sections: {},
             urltest: {},
@@ -118,8 +123,8 @@ export function TemplatesPage() {
   return (
     <div className="page">
       <PageHeader
-        title="Шаблоны конфигурации"
-        subtitle="Полный набор управляемых параметров с явными исключениями. Ревизии неизменяемы, применение — только через diff."
+        title="Шаблоны"
+        subtitle="Готовые наборы действия и настроек. Ресурсы можно добавить в шаблон или выбрать уже в правиле на роутере. Имени секции в шаблоне нет."
         actions={<Button onClick={() => setCreateOpen(true)}>Новый шаблон</Button>}
       />
 
@@ -166,7 +171,6 @@ export function TemplatesPage() {
                 <tr>
                   <th>Название</th>
                   <th>Ревизия</th>
-                  <th>Назначен</th>
                   <th>{view === 'archive' ? 'В архиве' : 'Обновлён'}</th>
                   <th />
                 </tr>
@@ -185,7 +189,6 @@ export function TemplatesPage() {
                       ) : null}
                     </td>
                     <td>{template.current_revision}</td>
-                    <td>{template.assignment_count > 0 ? `${template.assignment_count} шт.` : '—'}</td>
                     <td className="muted-text small">
                       {formatDate(template.archived_at ?? template.updated_at)}
                     </td>
@@ -235,18 +238,24 @@ export function TemplatesPage() {
         )}
       </Panel>
 
-      <Panel title="Правила шаблонов">
+      <Panel title="Как это работает">
         <ul className="bullets">
           <li>
-            Шаблон описывает только управляемые параметры. Секретные пути (ключи, пароли, URL
-            подписок) в шаблон не попадают.
+            Шаблон — это действие (через VPN, в обход, блок, только DNS), список ресурсов и
+            глобальные настройки. Имени секции в нём нет.
           </li>
-          <li>Списки заменяются целиком; значение <code>null</code> удаляет параметр.</li>
           <li>
-            Индивидуальные VLESS/Sub-подключения никогда не перезаписываются: создавать и удалять
-            можно только секции <code>urltest</code>.
+            На странице роутера откройте «Правила и подключения», создайте правило и выберите
+            шаблон — форма заполнится его значениями.
           </li>
-          <li>Перед применением обязательны diff, подтверждение и снимок.</li>
+          <li>
+            Подписки и VLESS-ссылки хранятся отдельно от шаблона и никогда им не перезаписываются.
+          </li>
+          <li>
+            Старые назначения шаблонов на роутеры больше не используются: шаблон применяется к
+            выбранному правилу, а не ко всему роутеру.
+          </li>
+          <li>Перед применением правила показывается diff; перед записью создаётся снимок.</li>
         </ul>
       </Panel>
 

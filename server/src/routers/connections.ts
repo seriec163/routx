@@ -111,16 +111,17 @@ export async function registerRouterConnectionRoutes(
       compact_secret: string | null;
       enabled: boolean;
       subscription_id: string | null;
+      section: string;
       catalog_name: string | null;
       created_at: Date;
       updated_at: Date;
     }>(
       `select c.id, c.kind, c.label, c.secret_enc, c.compact_secret, c.enabled, c.subscription_id,
-              s.name as catalog_name, c.created_at, c.updated_at
+              c.section, s.name as catalog_name, c.created_at, c.updated_at
          from router_connections c
          left join subscriptions s on s.id = c.subscription_id
         where c.router_id = $1
-        order by c.created_at asc`,
+        order by c.section asc, c.created_at asc`,
       [params.id],
     );
 
@@ -135,6 +136,7 @@ export async function registerRouterConnectionRoutes(
         compact_length: row.compact_secret?.length ?? null,
         enabled: row.enabled,
         subscription_id: row.subscription_id,
+        section: row.section,
         catalog_name: row.catalog_name,
         created_at: row.created_at.toISOString(),
         updated_at: row.updated_at.toISOString(),
@@ -149,12 +151,16 @@ export async function registerRouterConnectionRoutes(
       const params = z.object({ id: z.string().uuid() }).parse(request.params);
       const router = await getRouterForMutation(pool, auth, params.id);
       assertOnline(router);
+      const body = z
+        .object({ section: z.string().regex(/^[A-Za-z0-9_.-]{1,64}$/).optional() })
+        .strict()
+        .parse(request.body ?? {});
       const job = await enqueueJob(pool, {
         type: 'list_connections',
         routerId: router.id,
         requestedBy: auth.userId,
         timeoutSeconds: 60,
-        payload: { section: router.managed_section ?? 'router_control' },
+        payload: { section: body.section ?? router.managed_section ?? 'router_control' },
       });
       reply.code(202);
       return { job: jobJson(job) };
@@ -174,6 +180,7 @@ export async function registerRouterConnectionRoutes(
           name: z.string().regex(/^[A-Za-z0-9_.-]{1,64}$/).optional(),
           hash: z.string().regex(/^[a-f0-9]{64}$/i).optional(),
           value: z.string().trim().min(8).max(8192).optional(),
+          section: z.string().regex(/^[A-Za-z0-9_.-]{1,64}$/).optional(),
         })
         .strict()
         .refine(
@@ -224,7 +231,7 @@ export async function registerRouterConnectionRoutes(
         requestedBy: auth.userId,
         timeoutSeconds: 240,
         payload: {
-          section: router.managed_section ?? 'router_control',
+          section: body.section ?? router.managed_section ?? 'router_control',
           action: body.action,
           kind: body.kind,
           name: body.name ?? null,
@@ -248,7 +255,7 @@ export async function registerRouterConnectionRoutes(
           kind: body.kind,
           name: body.name ?? null,
           hash: body.hash ?? null,
-          section: router.managed_section ?? 'router_control',
+          section: body.section ?? router.managed_section ?? 'router_control',
         },
       });
 
@@ -270,6 +277,7 @@ export async function registerRouterConnectionRoutes(
           value: z.string().trim().min(8).max(8192).optional(),
           secret: z.string().trim().min(10).max(4096).optional(),
           subscription_id: z.string().uuid().optional(),
+          section: z.string().regex(/^[A-Za-z0-9_.-]{1,64}$/).optional(),
         })
         .strict()
         .refine(
@@ -307,35 +315,45 @@ export async function registerRouterConnectionRoutes(
           : validateValue(body.kind, body.value!);
       }
 
+      const section = body.section ?? router.managed_section ?? 'router_control';
       const id = uuidv7();
-      try {
-        await pool.query(
-          `insert into router_connections
-             (id, router_id, kind, label, secret_enc, compact_secret, enabled, created_by, subscription_id)
-           values ($1,$2,$3,$4,$5,$6,true,$7,$8)`,
-          [
-            id,
-            params.id,
-            body.kind,
-            label,
-            encryptSecret(value, masterKey),
-            compactSecret,
-            auth.userId,
-            catalogId,
-          ],
-        );
-      } catch (error) {
-        if ((error as { code?: string }).code === '23505') {
-          throw conflict('connection_label_taken', 'Подключение с таким названием уже существует');
+      const baseLabel = label;
+      let inserted = false;
+      for (let attempt = 0; attempt < 20 && !inserted; attempt += 1) {
+        const nextLabel = attempt === 0 ? baseLabel : `${baseLabel} ${attempt + 1}`.slice(0, 120);
+        try {
+          await pool.query(
+            `insert into router_connections
+               (id, router_id, section, kind, label, secret_enc, compact_secret, enabled, created_by, subscription_id)
+             values ($1,$2,$3,$4,$5,$6,$7,true,$8,$9)`,
+            [
+              id,
+              params.id,
+              section,
+              body.kind,
+              nextLabel,
+              encryptSecret(value, masterKey),
+              compactSecret,
+              auth.userId,
+              catalogId,
+            ],
+          );
+          label = nextLabel;
+          inserted = true;
+        } catch (error) {
+          if ((error as { code?: string }).code === '23505') continue;
+          throw error;
         }
-        throw error;
+      }
+      if (!inserted) {
+        throw conflict('connection_label_taken', 'Не удалось подобрать уникальное название подключения');
       }
 
       const job = await enqueueJob(pool, {
         type: 'connections_apply',
         routerId: params.id,
         requestedBy: auth.userId,
-        payload: { reason: 'connection_add' },
+        payload: { reason: 'connection_add', section },
         timeoutSeconds: 240,
       });
 
@@ -354,7 +372,7 @@ export async function registerRouterConnectionRoutes(
           label,
           subscription_id: catalogId,
           compact_secret: Boolean(compactSecret),
-          section: router.managed_section ?? 'router_control',
+          section,
         },
       });
 
@@ -385,8 +403,8 @@ export async function registerRouterConnectionRoutes(
         .parse(request.body);
       assertOnline(await getRouterForMutation(pool, auth, params.id));
 
-      const existing = await pool.query<{ kind: 'subscription' | 'vless'; label: string }>(
-        'select kind, label from router_connections where id = $1 and router_id = $2',
+      const existing = await pool.query<{ kind: 'subscription' | 'vless'; label: string; section: string }>(
+        'select kind, label, section from router_connections where id = $1 and router_id = $2',
         [params.connectionId, params.id],
       );
       const row = existing.rows[0];
@@ -426,17 +444,27 @@ export async function registerRouterConnectionRoutes(
       sets.push('updated_at = now()');
       values.push(params.connectionId, params.id);
 
-      await pool.query(
-        `update router_connections set ${sets.join(', ')}
-          where id = $${values.length - 1} and router_id = $${values.length}`,
-        values,
-      );
+      try {
+        await pool.query(
+          `update router_connections set ${sets.join(', ')}
+            where id = $${values.length - 1} and router_id = $${values.length}`,
+          values,
+        );
+      } catch (error) {
+        if ((error as { code?: string }).code === '23505') {
+          throw conflict(
+            'connection_label_taken',
+            'Подключение с таким названием уже есть в этой секции',
+          );
+        }
+        throw error;
+      }
 
       const job = await enqueueJob(pool, {
         type: 'connections_apply',
         routerId: params.id,
         requestedBy: auth.userId,
-        payload: { reason: 'connection_update' },
+        payload: { reason: 'connection_update', section: row.section },
         timeoutSeconds: 240,
       });
 
@@ -504,17 +532,18 @@ export async function registerRouterConnectionRoutes(
       .parse(request.params);
     assertOnline(await getRouterForMutation(pool, auth, params.id));
 
-    const removed = await pool.query(
-      'delete from router_connections where id = $1 and router_id = $2',
+    const removed = await pool.query<{ section: string }>(
+      'delete from router_connections where id = $1 and router_id = $2 returning section',
       [params.connectionId, params.id],
     );
     if ((removed.rowCount ?? 0) === 0) throw notFound('Подключение не найдено');
+    const section = removed.rows[0]?.section ?? 'router_control';
 
     const job = await enqueueJob(pool, {
       type: 'connections_apply',
       routerId: params.id,
       requestedBy: auth.userId,
-      payload: { reason: 'connection_delete' },
+      payload: { reason: 'connection_delete', section },
       timeoutSeconds: 240,
     });
 
