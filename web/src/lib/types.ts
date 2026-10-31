@@ -480,6 +480,7 @@ export interface UserRow {
   last_name: string | null;
   created_at: string;
   last_login_at: string | null;
+  archived_at?: string | null;
   router_count?: number;
 }
 

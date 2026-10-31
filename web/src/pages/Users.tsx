@@ -25,7 +25,9 @@ import { useSession } from '../session';
 export function UsersPage() {
   const toast = useToast();
   const { me } = useSession();
-  const users = useApi<{ items: UserRow[] }>('/api/v1/users?include_suspended=true');
+  const users = useApi<{ items: UserRow[] }>(
+    '/api/v1/users?include_suspended=true&include_archived=true',
+  );
   const invites = useApi<{ items: InviteRow[] }>('/api/v1/invites');
 
   const [inviteOpen, setInviteOpen] = useState(false);
@@ -47,7 +49,7 @@ export function UsersPage() {
   } | null>(null);
   const [confirmUser, setConfirmUser] = useState<{
     user: UserRow;
-    action: 'suspend' | 'activate' | 'revoke';
+    action: 'suspend' | 'activate' | 'revoke' | 'archive' | 'restore' | 'delete';
   } | null>(null);
   const [editingName, setEditingName] = useState<UserRow | null>(null);
   const [nameFields, setNameFields] = useState({ first_name: '', middle_name: '', last_name: '' });
@@ -153,6 +155,31 @@ export function UsersPage() {
     }
   }
 
+  async function userAction(
+    target: UserRow,
+    action: 'archive' | 'restore' | 'delete',
+  ): Promise<void> {
+    setBusy(true);
+    try {
+      if (action === 'archive') {
+        await api(`/api/v1/users/${target.id}/archive`, { method: 'POST' });
+        toast.success('Пользователь перемещён в архив');
+      } else if (action === 'restore') {
+        await api(`/api/v1/users/${target.id}/restore`, { method: 'POST' });
+        toast.success('Пользователь восстановлен из архива');
+      } else {
+        await api(`/api/v1/users/${target.id}`, { method: 'DELETE' });
+        toast.success('Пользователь удалён');
+      }
+      setConfirmUser(null);
+      await users.reload();
+    } catch (caught) {
+      toast.error(errorMessage(caught));
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function revokeInvite(): Promise<void> {
     if (!revoking) return;
     setBusy(true);
@@ -221,6 +248,7 @@ export function UsersPage() {
                       <Select
                         value={user.role}
                         onChange={(value) => void updateUser(user, { role: value as Role })}
+                        disabled={Boolean(user.archived_at)}
                       >
                         <option value="user">Пользователь</option>
                         <option value="superadmin">Суперадминистратор</option>
@@ -233,33 +261,76 @@ export function UsersPage() {
                       />
                     </td>
                     <td>
-                      <StatusBadge status={user.status === 'active' ? 'online' : 'offline'} label={user.status} />
+                      <StatusBadge
+                        status={
+                          user.archived_at
+                            ? 'neutral'
+                            : user.status === 'active'
+                              ? 'online'
+                              : 'offline'
+                        }
+                        label={
+                          user.archived_at
+                            ? 'архив'
+                            : user.status === 'active'
+                              ? 'активен'
+                              : 'заблокирован'
+                        }
+                      />
                     </td>
                     <td>{user.router_count ?? '—'}</td>
                     <td className="muted-text small">{formatRelative(user.last_login_at)}</td>
                     <td className="row-actions">
-                      <Button size="sm" variant="ghost" onClick={() => setResetTarget(user)}>
-                        Сбросить пароль
-                      </Button>
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        onClick={() =>
-                          setConfirmUser({
-                            user,
-                            action: user.status === 'active' ? 'suspend' : 'activate',
-                          })
-                        }
-                      >
-                        {user.status === 'active' ? 'Заблокировать' : 'Активировать'}
-                      </Button>
-                      <Button
-                        size="sm"
-                        variant="subtle"
-                        onClick={() => setConfirmUser({ user, action: 'revoke' })}
-                      >
-                        Сбросить сессии
-                      </Button>
+                      {user.archived_at ? (
+                        <>
+                          <Button
+                            size="sm"
+                            variant="subtle"
+                            onClick={() => setConfirmUser({ user, action: 'restore' })}
+                          >
+                            Восстановить
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            onClick={() => setConfirmUser({ user, action: 'delete' })}
+                          >
+                            Удалить навсегда
+                          </Button>
+                        </>
+                      ) : (
+                        <>
+                          <Button size="sm" variant="ghost" onClick={() => setResetTarget(user)}>
+                            Сбросить пароль
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            onClick={() =>
+                              setConfirmUser({
+                                user,
+                                action: user.status === 'active' ? 'suspend' : 'activate',
+                              })
+                            }
+                          >
+                            {user.status === 'active' ? 'Заблокировать' : 'Активировать'}
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="subtle"
+                            onClick={() => setConfirmUser({ user, action: 'revoke' })}
+                          >
+                            Сбросить сессии
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            onClick={() => setConfirmUser({ user, action: 'archive' })}
+                          >
+                            Архивировать
+                          </Button>
+                        </>
+                      )}
                     </td>
                   </tr>
                 ))}
@@ -492,21 +563,43 @@ export function UsersPage() {
               ? 'Сбросить все сессии?'
               : confirmUser.action === 'suspend'
                 ? 'Заблокировать пользователя?'
-                : 'Активировать пользователя?'
+                : confirmUser.action === 'activate'
+                  ? 'Активировать пользователя?'
+                  : confirmUser.action === 'archive'
+                    ? 'Архивировать пользователя?'
+                    : confirmUser.action === 'restore'
+                      ? 'Восстановить пользователя?'
+                      : 'Удалить пользователя навсегда?'
           }
-          danger={confirmUser.action === 'suspend'}
+          danger={
+            confirmUser.action === 'suspend' ||
+            confirmUser.action === 'archive' ||
+            confirmUser.action === 'delete'
+          }
           busy={busy}
           confirmLabel={
             confirmUser.action === 'revoke'
               ? 'Сбросить'
               : confirmUser.action === 'suspend'
                 ? 'Заблокировать'
-                : 'Активировать'
+                : confirmUser.action === 'activate'
+                  ? 'Активировать'
+                  : confirmUser.action === 'archive'
+                    ? 'Архивировать'
+                    : confirmUser.action === 'restore'
+                      ? 'Восстановить'
+                      : 'Удалить'
           }
           onCancel={() => setConfirmUser(null)}
           onConfirm={() => {
             if (confirmUser.action === 'revoke') void revokeSessions(confirmUser.user);
-            else void updateUser(confirmUser.user, { status: confirmUser.action === 'suspend' ? 'suspended' : 'active' });
+            else if (confirmUser.action === 'suspend' || confirmUser.action === 'activate') {
+              void updateUser(confirmUser.user, {
+                status: confirmUser.action === 'suspend' ? 'suspended' : 'active',
+              });
+            } else {
+              void userAction(confirmUser.user, confirmUser.action);
+            }
           }}
           message={
             <p>
@@ -514,7 +607,13 @@ export function UsersPage() {
                 ? `Все активные сессии ${confirmUser.user.email} будут отозваны. Пользователю придётся войти снова.`
                 : confirmUser.action === 'suspend'
                   ? `${confirmUser.user.email} потеряет доступ, все сессии будут отозваны.`
-                  : `${confirmUser.user.email} снова сможет входить в систему.`}
+                  : confirmUser.action === 'activate'
+                    ? `${confirmUser.user.email} снова сможет входить в систему.`
+                    : confirmUser.action === 'archive'
+                      ? `${confirmUser.user.email} будет перемещён в архив: вход запрещён, сессии отозваны. Роутеры, шаблоны и подписки сохранятся.`
+                      : confirmUser.action === 'restore'
+                        ? `${confirmUser.user.email} будет восстановлен из архива и снова сможет входить в систему.`
+                        : `${confirmUser.user.email} будет удалён навсегда. Удаление возможно только если у пользователя нет роутеров, шаблонов, подписок и приглашений.`}
             </p>
           }
         />

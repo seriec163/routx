@@ -75,6 +75,7 @@ export function userJson(row: {
   last_name?: string | null;
   created_at?: Date;
   last_login_at?: Date | null;
+  archived_at?: Date | null;
 }) {
   return {
     id: row.id,
@@ -87,6 +88,7 @@ export function userJson(row: {
     last_name: row.last_name ?? null,
     created_at: row.created_at?.toISOString(),
     last_login_at: row.last_login_at?.toISOString() ?? null,
+    archived_at: row.archived_at?.toISOString() ?? null,
   };
 }
 

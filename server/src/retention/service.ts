@@ -15,6 +15,7 @@ export interface RetentionSummary {
   mfa_tickets: number;
   router_snapshots: number;
   agent_reports: number;
+  invites: number;
 }
 
 const DAY = ' days';
@@ -45,6 +46,7 @@ export async function runRetention(
     mfa_tickets: 0,
     router_snapshots: 0,
     agent_reports: 0,
+    invites: 0,
   };
 
   const run = async (
@@ -73,6 +75,11 @@ export async function runRetention(
       and finished_at < now() - ($1 || '${DAY}')::interval`, [days]);
 
   await run('audit_log', `delete from audit_log where at < now() - ($1 || '${DAY}')::interval`, [days]);
+  // История приглашений: использованные и истёкшие ссылки храним не дольше
+  // общего retention. Активные приглашения не удаляем.
+  await run('invites', `delete from invites
+      where (used_at is not null or expires_at < now())
+        and created_at < now() - ($1 || '${DAY}')::interval`, [days]);
   await run('notifications', `delete from notifications where read_at is not null
       and created_at < now() - ($1 || '${DAY}')::interval`, [days]);
 

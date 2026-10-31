@@ -22,17 +22,22 @@ export async function registerUserRoutes(app: FastifyInstance, ctx: RouteContext
   app.get('/api/v1/users', async (request) => {
     requireSuperadmin(request);
     const query = z
-      .object({ include_suspended: z.enum(['true', 'false']).optional() })
+      .object({
+        include_suspended: z.enum(['true', 'false']).optional(),
+        include_archived: z.enum(['true', 'false']).optional(),
+      })
       .parse(request.query);
 
     const result = await pool.query(
       `select u.id, u.email, u.role, u.status, u.totp_enabled,
               u.first_name, u.middle_name, u.last_name, u.created_at, u.last_login_at,
+              u.archived_at,
               (select count(*)::int from routers r where r.owner_id = u.id and r.archived_at is null) as router_count
          from users u
         where ($1::boolean or u.status = 'active')
+          and ($2::boolean or u.archived_at is null)
         order by u.created_at asc`,
-      [query.include_suspended === 'true'],
+      [query.include_suspended === 'true', query.include_archived === 'true'],
     );
     return { items: result.rows.map((row) => ({ ...userJson(row), router_count: row.router_count })) };
   });
@@ -42,7 +47,7 @@ export async function registerUserRoutes(app: FastifyInstance, ctx: RouteContext
     const params = z.object({ id: z.string().uuid() }).parse(request.params);
     const result = await pool.query(
       `select id, email, role, status, totp_enabled,
-              first_name, middle_name, last_name, created_at, last_login_at
+              first_name, middle_name, last_name, created_at, last_login_at, archived_at
          from users where id = $1`,
       [params.id],
     );
@@ -64,12 +69,24 @@ export async function registerUserRoutes(app: FastifyInstance, ctx: RouteContext
       .strict()
       .parse(request.body);
 
-    const target = await pool.query<{ id: string; role: string; status: string; email: string }>(
-      'select id, role, status, email from users where id = $1',
+    const target = await pool.query<{
+      id: string;
+      role: string;
+      status: string;
+      email: string;
+      archived_at: Date | null;
+    }>(
+      'select id, role, status, email, archived_at from users where id = $1',
       [params.id],
     );
     const user = target.rows[0];
     if (!user) throw notFound('Пользователь не найден');
+    if (user.archived_at && (body.role !== undefined || body.status !== undefined)) {
+      throw conflict(
+        'user_archived',
+        'Пользователь в архиве. Сначала восстановите его, затем меняйте роль или статус.',
+      );
+    }
 
     const demotesSuperadmin = user.role === 'superadmin' && body.role === 'user';
     const suspendsSuperadmin = user.role === 'superadmin' && body.status === 'suspended';
@@ -78,7 +95,8 @@ export async function registerUserRoutes(app: FastifyInstance, ctx: RouteContext
     }
     if (demotesSuperadmin || suspendsSuperadmin) {
       const activeAdmins = await pool.query<{ count: string }>(
-        `select count(*)::text as count from users where role = 'superadmin' and status = 'active'`,
+        `select count(*)::text as count from users
+          where role = 'superadmin' and status = 'active' and archived_at is null`,
       );
       if (Number(activeAdmins.rows[0]?.count ?? 0) <= 1) {
         throw conflict('last_superadmin', 'Нельзя оставить инстанс без активного суперадминистратора');
@@ -112,7 +130,7 @@ export async function registerUserRoutes(app: FastifyInstance, ctx: RouteContext
       `update users set ${sets.join(', ')}
         where id = $${values.length}
         returning id, email, role, status, totp_enabled,
-                  first_name, middle_name, last_name, created_at, last_login_at`,
+                  first_name, middle_name, last_name, created_at, last_login_at, archived_at`,
       values,
     );
 
@@ -156,6 +174,163 @@ export async function registerUserRoutes(app: FastifyInstance, ctx: RouteContext
       metadata: { sessions: result.rowCount ?? 0 },
     });
     return { revoked: result.rowCount ?? 0 };
+  });
+
+  app.post('/api/v1/users/:id/archive', async (request) => {
+    const auth = requireSuperadmin(request);
+    const params = z.object({ id: z.string().uuid() }).parse(request.params);
+    const target = await pool.query<{
+      id: string;
+      role: string;
+      status: string;
+      email: string;
+      archived_at: Date | null;
+    }>('select id, role, status, email, archived_at from users where id = $1', [params.id]);
+    const user = target.rows[0];
+    if (!user) throw notFound('Пользователь не найден');
+    if (user.id === auth.userId) {
+      throw conflict('self_lockout', 'Нельзя архивировать собственную учётную запись');
+    }
+    if (user.archived_at) throw conflict('already_archived', 'Пользователь уже в архиве');
+    if (user.role === 'superadmin' && user.status === 'active') {
+      const activeAdmins = await pool.query<{ count: string }>(
+        `select count(*)::text as count from users
+          where role = 'superadmin' and status = 'active' and archived_at is null`,
+      );
+      if (Number(activeAdmins.rows[0]?.count ?? 0) <= 1) {
+        throw conflict('last_superadmin', 'Нельзя оставить инстанс без активного суперадминистратора');
+      }
+    }
+
+    await pool.query(
+      `update users set archived_at = now(), status = 'suspended', updated_at = now()
+        where id = $1`,
+      [params.id],
+    );
+    await pool.query('update sessions set revoked_at = now() where user_id = $1 and revoked_at is null', [
+      params.id,
+    ]);
+    await audit(pool, {
+      actorId: auth.userId,
+      actorRole: auth.role,
+      action: 'user.archive',
+      targetType: 'user',
+      targetId: params.id,
+      result: 'ok',
+      ip: request.ip,
+      userAgent: request.headers['user-agent'],
+      metadata: { email: user.email },
+    });
+    return { ok: true };
+  });
+
+  app.post('/api/v1/users/:id/restore', async (request) => {
+    const auth = requireSuperadmin(request);
+    const params = z.object({ id: z.string().uuid() }).parse(request.params);
+    const target = await pool.query<{
+      id: string;
+      email: string;
+      archived_at: Date | null;
+    }>('select id, email, archived_at from users where id = $1', [params.id]);
+    const user = target.rows[0];
+    if (!user) throw notFound('Пользователь не найден');
+    if (!user.archived_at) throw conflict('not_archived', 'Пользователь не находится в архиве');
+
+    const settings = await loadSettings(pool);
+    const active = await pool.query<{ count: string }>(
+      'select count(*)::text as count from users where archived_at is null',
+    );
+    if (Number(active.rows[0]?.count ?? 0) >= settings.limits.usersPerInstance) {
+      throw conflict(
+        'limit_reached',
+        `Достигнут лимит учётных записей на сервере (${settings.limits.usersPerInstance}).`,
+      );
+    }
+
+    await pool.query(
+      `update users set archived_at = null, status = 'active', updated_at = now()
+        where id = $1`,
+      [params.id],
+    );
+    await audit(pool, {
+      actorId: auth.userId,
+      actorRole: auth.role,
+      action: 'user.restore',
+      targetType: 'user',
+      targetId: params.id,
+      result: 'ok',
+      ip: request.ip,
+      userAgent: request.headers['user-agent'],
+      metadata: { email: user.email },
+    });
+    return { ok: true };
+  });
+
+  app.delete('/api/v1/users/:id', async (request, reply) => {
+    const auth = requireSuperadmin(request);
+    const params = z.object({ id: z.string().uuid() }).parse(request.params);
+    const target = await pool.query<{
+      id: string;
+      role: string;
+      status: string;
+      email: string;
+      archived_at: Date | null;
+    }>('select id, role, status, email, archived_at from users where id = $1', [params.id]);
+    const user = target.rows[0];
+    if (!user) throw notFound('Пользователь не найден');
+    if (user.id === auth.userId) {
+      throw conflict('self_lockout', 'Нельзя удалить собственную учётную запись');
+    }
+    if (user.role === 'superadmin' && user.status === 'active') {
+      const activeAdmins = await pool.query<{ count: string }>(
+        `select count(*)::text as count from users
+          where role = 'superadmin' and status = 'active' and archived_at is null`,
+      );
+      if (Number(activeAdmins.rows[0]?.count ?? 0) <= 1) {
+        throw conflict('last_superadmin', 'Нельзя оставить инстанс без активного суперадминистратора');
+      }
+    }
+
+    const owned = await pool.query<{ has_data: boolean }>(
+      `select (
+         exists (select 1 from routers where owner_id = $1)
+         or exists (select 1 from templates where owner_id = $1)
+         or exists (select 1 from subscriptions where owner_id = $1)
+         or exists (select 1 from invites where created_by = $1)
+       ) as has_data`,
+      [params.id],
+    );
+    if (owned.rows[0]?.has_data) {
+      throw conflict(
+        'user_has_data',
+        'У пользователя есть роутеры, шаблоны, подписки или приглашения. Архивируйте его, чтобы сохранить историю.',
+      );
+    }
+
+    try {
+      await pool.query('delete from users where id = $1', [params.id]);
+    } catch (error) {
+      if ((error as { code?: string }).code === '23503') {
+        throw conflict(
+          'user_has_references',
+          'Пользователь связан с другими записями. Архивируйте его вместо удаления.',
+        );
+      }
+      throw error;
+    }
+
+    await audit(pool, {
+      actorId: auth.userId,
+      actorRole: auth.role,
+      action: 'user.delete',
+      targetType: 'user',
+      targetId: params.id,
+      result: 'ok',
+      ip: request.ip,
+      userAgent: request.headers['user-agent'],
+      metadata: { email: user.email },
+    });
+    reply.code(204);
   });
 
   app.post('/api/v1/users/:id/password-reset', async (request) => {
@@ -216,7 +391,9 @@ export async function registerUserRoutes(app: FastifyInstance, ctx: RouteContext
       .parse(request.body ?? {});
 
     const settings = await loadSettings(pool);
-    const total = await pool.query<{ count: string }>('select count(*)::text as count from users');
+    const total = await pool.query<{ count: string }>(
+      'select count(*)::text as count from users where archived_at is null',
+    );
     const open = await pool.query<{ count: string }>(
       'select count(*)::text as count from invites where used_at is null and expires_at > now()',
     );
