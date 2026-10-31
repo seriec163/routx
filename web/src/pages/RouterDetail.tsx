@@ -931,7 +931,8 @@ export function RouterDetailPage({ id }: { id: string }) {
   }
 
   function chooseDnsPair(type: 'udp' | 'doh', candidates: DnsCandidateResult[]): void {
-    const servers = candidates.slice(0, 2).map((item) => item.address);
+    const limit = type === 'doh' ? 3 : 2;
+    const servers = candidates.slice(0, limit).map((item) => item.address);
     if (servers.length === 0) return;
     setDnsChoice({ type, servers });
   }

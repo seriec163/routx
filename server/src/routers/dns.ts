@@ -24,8 +24,8 @@ const DNS_PATHS = [
 const dnsProposalSchema = z
   .object({
     dns_type: z.enum(['udp', 'doh']),
-    dns_server: z.array(z.string().trim().min(1).max(2048)).min(1).max(2),
-    bootstrap_dns_server: z.array(z.string().trim().min(1).max(64)).min(1).max(2),
+    dns_server: z.array(z.string().trim().min(1).max(2048)).min(1).max(4),
+    bootstrap_dns_server: z.array(z.string().trim().min(1).max(64)).min(1).max(4),
   })
   .strict();
 

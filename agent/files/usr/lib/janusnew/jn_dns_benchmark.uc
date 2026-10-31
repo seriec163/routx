@@ -46,10 +46,11 @@ const UDP_CANDIDATES = [
 ];
 
 const DOH_CANDIDATES = [
-	{ id: "yandex-doh", provider: "Yandex DoH", address: "https://common.dot.dns.yandex.net/dns-query", ip: "77.88.8.8", filtered: false },
-	{ id: "cloudflare-doh", provider: "Cloudflare DoH", address: "https://cloudflare-dns.com/dns-query", ip: "1.1.1.1", filtered: false },
-	{ id: "google-doh", provider: "Google DoH", address: "https://dns.google/dns-query", ip: "8.8.8.8", filtered: false },
-	{ id: "quad9-doh", provider: "Quad9 DoH", address: "https://dns.quad9.net/dns-query", ip: "9.9.9.9", filtered: false },
+	{ id: "yandex-doh", provider: "Yandex DoH", address: "https://77.88.8.8/dns-query", ip: "77.88.8.8", filtered: false },
+	{ id: "cloudflare-doh", provider: "Cloudflare DoH", address: "https://1.1.1.1/dns-query", ip: "1.1.1.1", filtered: false },
+	{ id: "google-doh", provider: "Google DoH", address: "https://8.8.8.8/dns-query", ip: "8.8.8.8", filtered: false },
+	{ id: "google-secondary-doh", provider: "Google DoH", address: "https://8.8.4.4/dns-query", ip: "8.8.4.4", filtered: false },
+	{ id: "quad9-doh", provider: "Quad9 DoH", address: "https://9.9.9.9/dns-query", ip: "9.9.9.9", filtered: false },
 	{ id: "mullvad-doh", provider: "Mullvad DoH", address: "https://dns.mullvad.net/dns-query", ip: "194.242.2.2", filtered: false },
 	{ id: "dnssb-doh", provider: "DNS.SB DoH", address: "https://doh.dns.sb/dns-query", ip: "185.222.222.222", filtered: false },
 	{ id: "dns4eu-doh", provider: "DNS4EU", address: "https://unfiltered.joindns4.eu/dns-query", ip: "86.54.11.100", filtered: false },
@@ -63,6 +64,10 @@ const DOH_CANDIDATES = [
 	{ id: "adguard-doh", provider: "AdGuard DoH", address: "https://dns.adguard-dns.com/dns-query", ip: "94.140.14.14", filtered: true },
 	{ id: "controld-doh", provider: "Control D DoH", address: "https://freedns.controld.com/p0", ip: "76.76.2.0", filtered: false }
 ];
+
+// Bootstrap для DoH: только IP-адреса. IP-based DoH-кандидаты не нуждаются
+// в резолве hostname, но остальные кандидаты и sing-box используют этот список.
+const BOOTSTRAP_SERVERS = [ "77.88.8.8", "8.8.4.4", "1.1.1.1", "9.9.9.9" ];
 
 function now_ms() {
 	let t = clock();
@@ -489,18 +494,19 @@ function top_for(results, protocol) {
 		    item.success > 0 && item.loss_pct <= 20 && item.median_ms != null)
 			push(working, item);
 	working = sort_results(working);
+	let limit = protocol == "doh" ? 3 : 2;
 	let selected = [];
 	let providers = {};
 	for (let item in working) {
-		if (length(selected) >= 2) break;
+		if (length(selected) >= limit) break;
 		if (!providers[item.provider]) {
 			providers[item.provider] = true;
 			push(selected, item);
 		}
 	}
-	if (length(selected) < 2) {
+	if (length(selected) < limit) {
 		for (let item in working) {
-			if (length(selected) >= 2) break;
+			if (length(selected) >= limit) break;
 			let seen = false;
 			for (let chosen in selected)
 				if (chosen.address == item.address) seen = true;
@@ -518,22 +524,13 @@ function recommendations(results) {
 }
 
 function choose_bootstrap(results) {
-	let working = [];
-	for (let item in results)
-		if (item.protocol == "udp" && item.filtered !== true && item.suspect !== true &&
-		    item.success > 0 && item.median_ms != null && item.loss_pct <= 20)
-			push(working, item);
-	working = sort_results(working);
+	// Пользовательский набор bootstrap: стабильные IP-адреса. Результаты
+	// бенчмарка оставляем для рекомендаций, но bootstrap не зависит от того,
+	// какой UDP-сервер оказался самым быстрым в этот раз.
 	let ips = [];
-	for (let item in working) {
-		if (length(ips) >= 2) break;
-		if (index(ips, item.address) < 0)
-			push(ips, item.address);
-	}
-	if (length(ips) == 0)
-		return [ "77.88.8.8", "1.1.1.1" ];
-	if (length(ips) == 1)
-		push(ips, ips[0] == "1.1.1.1" ? "77.88.8.8" : "1.1.1.1");
+	for (let ip in BOOTSTRAP_SERVERS)
+		if (index(ips, ip) < 0)
+			push(ips, ip);
 	return ips;
 }
 
