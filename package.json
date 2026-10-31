@@ -20,6 +20,8 @@
     "test": "npm run test -w @router-control/server",
     "db:migrate": "npm run db:migrate -w @router-control/server",
     "bootstrap": "npm run bootstrap -w @router-control/server --",
+    "password-reset": "npm run password-reset -w @router-control/server --",
+    "rotate-master-key": "npm run rotate-master-key -w @router-control/server --",
     "agent:build": "node agent/build.mjs"
   },
   "devDependencies": {

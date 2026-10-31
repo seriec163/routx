@@ -287,7 +287,7 @@ export async function isCancelRequested(pool: Pool, jobId: string): Promise<bool
 }
 
 export async function timeoutStaleJobs(pool: Pool): Promise<number> {
-  const result = await pool.query(
+  const result = await pool.query<{ id: string }>(
     `update jobs
         set status = 'timeout', finished_at = now(),
             error_code = 'lease_expired', error_detail = 'Исполнитель потерял задачу'
@@ -297,7 +297,86 @@ export async function timeoutStaleJobs(pool: Pool): Promise<number> {
   for (const row of result.rows as { id: string }[]) {
     await addJobEvent(pool, row.id, 'timeout', 'lease_expired', 'Исполнитель потерял задачу');
   }
+  await markDependentState(
+    pool,
+    (result.rows as { id: string }[]).map((row) => row.id),
+    'lease_expired',
+    'Задача потеряла исполнителя; проверьте состояние роутера и при необходимости восстановите снимок',
+  );
   return result.rowCount ?? 0;
+}
+
+/**
+ * Завершает задачи, оставшиеся в running от предыдущего процесса сервера.
+ * Без этого после рестарта роутер до 10 минут ждёт освобождения очереди,
+ * хотя команда агента уже выполнена. Сами изменения не откатываются
+ * автоматически: для apply выставляется needs_attention, чтобы оператор
+ * проверил состояние и при необходимости восстановил снимок.
+ */
+export async function recoverOrphanedJobs(pool: Pool, currentWorkerId: string): Promise<number> {
+  const result = await pool.query<{ id: string }>(
+    `update jobs
+        set status = 'timeout', finished_at = now(),
+            error_code = 'orphaned_after_restart',
+            error_detail = 'Сервер перезапущен во время выполнения задачи; проверьте состояние роутера и при необходимости восстановите снимок',
+            lease_owner = null, lease_expires_at = null
+      where status = 'running'
+        and (lease_owner is null or lease_owner <> $1)
+      returning id`,
+    [currentWorkerId],
+  );
+  const ids = (result.rows as { id: string }[]).map((row) => row.id);
+  for (const id of ids) {
+    await addJobEvent(
+      pool,
+      id,
+      'timeout',
+      'orphaned_after_restart',
+      'Сервер перезапущен во время выполнения задачи',
+    );
+  }
+  await markDependentState(
+    pool,
+    ids,
+    'orphaned_after_restart',
+    'Сервер перезапущен во время выполнения задачи; проверьте состояние роутера и при необходимости восстановите снимок',
+  );
+  return ids.length;
+}
+
+async function markDependentState(
+  pool: Pool,
+  jobIds: string[],
+  code: string,
+  detail: string,
+): Promise<void> {
+  if (jobIds.length === 0) return;
+
+  await pool.query(
+    `update apply_runs ar
+        set status = 'needs_attention', finished_at = now(),
+            error_code = $2, error_detail = $3
+       from jobs j
+      where j.id = any($1::uuid[])
+        and j.type = 'apply'
+        and j.payload ? 'apply_run_id'
+        and ar.id = (j.payload->>'apply_run_id')::uuid
+        and ar.status in ('queued','running')`,
+    [jobIds, code, detail],
+  );
+
+  await pool.query(
+    `update rollout_targets rt
+        set status = 'failed', finished_at = now(), error_code = $2
+       from jobs j
+      where j.id = any($1::uuid[])
+        and j.type = 'sb_install'
+        and j.payload ? 'rollout_id'
+        and rt.rollout_id = (j.payload->>'rollout_id')::uuid
+        and rt.router_id = j.router_id
+        and rt.status in ('pending','installing','verifying')`,
+    [jobIds, code],
+  );
 }
 
 export async function getJob(pool: Pool, id: string): Promise<(JobRow & { events: unknown[] }) | null> {

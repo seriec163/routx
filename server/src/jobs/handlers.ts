@@ -800,6 +800,11 @@ export async function singBoxInstall(ctx: HandlerContext, job: JobRow): Promise<
     throw new JobFailure('invalid_payload', 'Не указан вариант или версия sing-box');
   }
 
+  const normalizeVersion = (value: string | null | undefined): string =>
+    (value ?? '').trim().replace(/-r\d+$/, '');
+  const normalizeVariant = (value: string | null | undefined): string =>
+    (value ?? '').trim().replace(/-/g, '_');
+
   const before = await ctx.pool.query<{
     sing_box_version: string | null;
     sing_box_variant: string | null;
@@ -873,11 +878,35 @@ export async function singBoxInstall(ctx: HandlerContext, job: JobRow): Promise<
         ? error
         : new JobFailure('sb_install_failed', (error as Error).message.slice(0, 500));
 
+    // Проверяем, изменился ли реальный вариант/версия. Если upstream отказал
+    // до удаления текущего пакета (например, не хватило места), откат не нужен
+    // и только тратит место/время.
+    let currentVersion = previous;
+    let currentVariant = previousVariant;
+    let verifyOk = false;
+    try {
+      const current = await runCommand(ctx, job, 'verify', {}, 20_000);
+      const actualVersion = asString(current.version);
+      const actualVariant = asString(current.variant);
+      if (actualVersion) {
+        currentVersion = actualVersion;
+        verifyOk = true;
+      }
+      if (actualVariant) currentVariant = actualVariant;
+    } catch (verifyError) {
+      ctx.log.warn({ err: verifyError, routerId }, 'не удалось проверить sing-box после ошибки установки');
+    }
+    const unchanged =
+      verifyOk &&
+      Boolean(previousVariant || previous) &&
+      normalizeVariant(currentVariant) === normalizeVariant(previousVariant) &&
+      normalizeVersion(currentVersion) === normalizeVersion(previous);
+
     // Возвращаем предыдущий вариант/версию. Prokop при смене варианта сначала
     // удаляет текущий пакет, поэтому без этого шага роутер может остаться без sing-box.
     let rollback: 'ok' | 'failed' | 'skipped' = 'skipped';
     let rollbackError: string | null = null;
-    if (previousVariant || previous) {
+    if (!unchanged && (previousVariant || previous)) {
       const rollbackVariant = previousVariant ?? 'stable';
       const rollbackVersion = previous ? previous.replace(/-r\d+$/, '') : null;
       try {
@@ -914,6 +943,24 @@ export async function singBoxInstall(ctx: HandlerContext, job: JobRow): Promise<
       }
     }
 
+    // После неудачной установки Prokop мог остаться остановленным. Запускаем
+    // его, если бинарник на месте; повторный start идемпотентен.
+    let serviceRestarted = false;
+    try {
+      await runCommand(ctx, job, 'service_action', { action: 'start' }, 90_000);
+      serviceRestarted = true;
+    } catch (startError) {
+      ctx.log.warn({ err: startError, routerId }, 'не удалось запустить службу после ошибки sing-box');
+    }
+
+    const outcome = unchanged
+      ? 'текущий вариант не изменён'
+      : rollback === 'ok'
+        ? `восстановлен предыдущий вариант ${previousVariant ?? 'stable'} ${previous ?? ''}`.trim()
+        : rollback === 'failed'
+          ? `откат не удался: ${rollbackError ?? 'неизвестная ошибка'}`
+          : 'откат недоступен: не известен предыдущий вариант';
+
     if (asString(job.payload.rollout_id)) {
       await ctx.pool.query(
         `update rollout_targets set status = 'failed', finished_at = now(), error_code = $3,
@@ -929,19 +976,13 @@ export async function singBoxInstall(ctx: HandlerContext, job: JobRow): Promise<
       message:
         rollback === 'ok'
           ? `Не удалось установить sing-box (${variant || versionTag}), предыдущий вариант восстановлен`
-          : `Не удалось установить sing-box (${variant || versionTag}): ${failure.message}`,
+          : `Не удалось установить sing-box (${variant || versionTag}): ${failure.message} (${outcome})`,
       dedupeKey: `sb:${routerId}:${variant || versionTag}:${failure.code}`,
     });
 
     throw new JobFailure(
       failure.code,
-      `${failure.message} (${
-        rollback === 'ok'
-          ? `восстановлен предыдущий вариант ${previousVariant ?? 'stable'} ${previous ?? ''}`.trim()
-          : rollback === 'failed'
-            ? `откат не удался: ${rollbackError ?? 'неизвестная ошибка'}`
-            : 'откат недоступен: не известен предыдущий вариант'
-      })`,
+      `${failure.message} (${outcome}${serviceRestarted ? '' : '; служба не запущена'})`,
       failure.terminal,
     );
   }

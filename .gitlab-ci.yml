@@ -3,7 +3,7 @@ stages:
   - package
 
 default:
-  image: node:24-bookworm
+  image: node:24-alpine
   interruptible: true
   cache:
     key:

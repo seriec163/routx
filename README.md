@@ -32,6 +32,9 @@
 | [`docs/runbooks/monitoring-and-rollouts.md`](docs/runbooks/monitoring-and-rollouts.md) | Мониторинг прокси и поэтапное обновление sing-box |
 | [`docs/runbooks/router-onboarding.md`](docs/runbooks/router-onboarding.md) | Мастер добавления роутера из четырёх шагов |
 | [`docs/runbooks/archive-and-delete.md`](docs/runbooks/archive-and-delete.md) | Архив, восстановление и полное удаление роутеров и шаблонов |
+| [`docs/runbooks/connections-and-sections.md`](docs/runbooks/connections-and-sections.md) | Физические и логические секции, внешние подписки, безопасное слияние подключений |
+| [`docs/runbooks/prokop-diagnostics.md`](docs/runbooks/prokop-diagnostics.md) | Пояснения к спорным проверкам Prokop |
+| [`docs/runbooks/backup-and-key-rotation.md`](docs/runbooks/backup-and-key-rotation.md) | Шифрованные бэкапы PostgreSQL и ротация `RC_MASTER_KEY` |
 
 Код этапа 1:
 
@@ -40,10 +43,13 @@
 | `server/` | Fastify 5 + TypeScript: конфигурация, `/healthz`, `/readyz`, `/api/v1/meta`, security-заголовки, статическая отдача SPA |
 | `server/migrations/` | `0001_init.sql`: `schema_migrations`, `settings`, `schema_version` |
 | `server/src/db/migrate.ts` | SQL-runner с advisory lock, отдельной транзакцией на файл и идемпотентным повторным запуском |
+| `server/src/cli/rotate-master-key.ts` | Ротация `RC_MASTER_KEY` с проверкой `--dry-run` и транзакционным перешифрованием |
+| `scripts/backup-db.sh`, `Dockerfile.backup` | Шифрованный `pg_dump`, проверка дампа, retention и offsite-хук |
 | `server/test/` | Vitest: конфигурация и служебные эндпоинты (15 тестов) |
 | `web/` | React 19 + Vite 8 SPA: статус API, PostgreSQL, схемы и панели |
-| `Dockerfile`, `docker-compose.yml` | Node 24, PostgreSQL 16, healthchecks, непривилегированный контейнер, профиль Caddy |
-| `.github/workflows/ci.yml` | typecheck, тесты, сборка, миграции и runtime smoke-тест |
+| `Dockerfile`, `docker-compose.yml` | Node 24, PostgreSQL 16, healthchecks, непривилегированный контейнер, профили `proxy` и `backup` |
+| `.gitlab-ci.yml` | GitLab CI: typecheck, тесты, сборка, миграции, agent-пакеты и Docker-образ |
+| `.github/workflows/ci.yml` | GitHub Actions: typecheck, тесты, сборка, миграции и runtime smoke-тест |
 
 Аудит выполнен по зафиксированным коммитам:
 

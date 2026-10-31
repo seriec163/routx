@@ -5,6 +5,7 @@ import type { PlatformSettings } from '../settings.js';
 import {
   claimJob,
   finishJob,
+  recoverOrphanedJobs,
   renewLease,
   requeueJob,
   timeoutStaleJobs,
@@ -57,7 +58,7 @@ export class JobWorker {
   start(): void {
     if (this.loopPromise) return;
     this.stopped = false;
-    this.loopPromise = this.loop();
+    this.loopPromise = this.startLoop();
     this.schedulerTimer = setInterval(() => {
       void this.scheduleMonitoring().catch((error) =>
         this.log.warn({ err: error }, 'не удалось запланировать мониторинг'),
@@ -72,6 +73,23 @@ export class JobWorker {
     void this.scheduleMonitoring().catch(() => undefined);
     void this.maintenance().catch(() => undefined);
     this.log.info({ worker: this.workerId }, 'исполнитель задач запущен');
+  }
+
+  private async startLoop(): Promise<void> {
+    // Сначала освобождаем очередь от задач предыдущего процесса: иначе после
+    // рестарта роутер ждёт истечения lease до 10 минут.
+    try {
+      const recovered = await recoverOrphanedJobs(this.pool, this.workerId);
+      if (recovered > 0) {
+        this.log.warn(
+          { count: recovered, worker: this.workerId },
+          'завершены задачи, оставшиеся от предыдущего процесса сервера',
+        );
+      }
+    } catch (error) {
+      this.log.error({ err: error }, 'не удалось восстановить задачи после рестарта');
+    }
+    await this.loop();
   }
 
   async stop(): Promise<void> {

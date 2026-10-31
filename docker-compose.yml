@@ -70,6 +70,28 @@ services:
     security_opt:
       - no-new-privileges:true
 
+  backup:
+    build:
+      context: .
+      dockerfile: Dockerfile.backup
+    profiles: ["backup"]
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      PGHOST: db
+      PGPORT: "5432"
+      PGDATABASE: ${POSTGRES_DB:-router_control}
+      PGUSER: ${POSTGRES_USER:-router_control}
+      PGPASSWORD: ${POSTGRES_PASSWORD:?Задайте POSTGRES_PASSWORD в .env}
+      BACKUP_PASSPHRASE: ${BACKUP_PASSPHRASE:-}
+      BACKUP_RETENTION_DAYS: ${BACKUP_RETENTION_DAYS:-14}
+      BACKUP_OFFSITE_CMD: ${BACKUP_OFFSITE_CMD:-}
+    volumes:
+      - ./backups:/backups
+    security_opt:
+      - no-new-privileges:true
+
 volumes:
   pgdata:
   caddy_data:

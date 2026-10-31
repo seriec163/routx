@@ -26,6 +26,7 @@ audit/
 pgdata/
 caddy_data/
 caddy_config/
+backups/
 
 # Agent dist
 agent/dist/

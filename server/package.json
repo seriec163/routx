@@ -12,7 +12,8 @@
     "test": "vitest run",
     "db:migrate": "tsx src/migrate-cli.ts",
     "bootstrap": "tsx src/cli/bootstrap.ts",
-    "password-reset": "tsx src/cli/password-reset.ts"
+    "password-reset": "tsx src/cli/password-reset.ts",
+    "rotate-master-key": "tsx src/cli/rotate-master-key.ts"
   },
   "dependencies": {
     "@fastify/cookie": "^11.1.3",
