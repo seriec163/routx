@@ -131,6 +131,31 @@ function active_delays(product, group, members) {
 	return { ok: true, delays: delays };
 }
 
+// Prokop/Forkop называют outbound-группу по физическому имени UCI-секции:
+// gga -> gga-out. Пользователь видит label (router_control), поэтому в
+// человекочитаемых сообщениях показываем label, а не внутренний тег.
+function group_display(product, group) {
+	let name = group;
+	let dash = rindex(group, "-");
+	if (dash > 0) {
+		let candidate = substr(group, 0, dash);
+		let cursor = uci.cursor();
+		if (cursor.get(product, candidate) == "section") {
+			let label = util.as_string(cursor.get(product, candidate, "label"));
+			if (label != "")
+				return label;
+			return candidate;
+		}
+	}
+	let cursor = uci.cursor();
+	if (cursor.get(product, group) == "section") {
+		let label = util.as_string(cursor.get(product, group, "label"));
+		if (label != "")
+			return label;
+	}
+	return group;
+}
+
 function probe_proxy(product) {
 	let result = {
 		proxy_health: "unknown",
@@ -152,11 +177,12 @@ function probe_proxy(product) {
 		result.detail = "нет группы прокси";
 		return result;
 	}
+	let display_group = group_display(product, group);
 
 	let info = proxies.value.proxies[group];
 	let members = type(info) == "object" && type(info.all) == "array" ? info.all : [];
 	if (length(members) == 0) {
-		result.detail = "группа " + group + " пуста";
+		result.detail = "группа " + display_group + " пуста";
 		return result;
 	}
 
@@ -165,7 +191,7 @@ function probe_proxy(product) {
 		result.proxy_health = "dead";
 		result.total_tags = length(members);
 		result.failed_tags = length(members);
-		result.detail = "группа " + group + ": ни один тег не ответил";
+		result.detail = "группа " + display_group + ": ни один тег не ответил";
 		return result;
 	}
 	let delays = active.ok ? active.delays : {};
@@ -192,7 +218,7 @@ function probe_proxy(product) {
 	result.total_tags = length(members);
 	result.failed_tags = failed;
 	result.latency_ms = median(latencies);
-	result.detail = "группа " + group + ": " + alive + "/" + length(members) + " живых";
+	result.detail = "группа " + display_group + ": " + alive + "/" + length(members) + " живых";
 	if (failed > 0 && length(failed_names) <= 3)
 		result.detail = result.detail + " (" + join(", ", failed_names) + ")";
 
