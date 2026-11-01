@@ -2456,3 +2456,17 @@ details.advanced[open] > summary {
   white-space: nowrap;
   vertical-align: bottom;
 }
+
+.qr-box {
+  display: flex;
+  justify-content: center;
+  padding: 12px;
+  border-radius: 16px;
+  background: #ffffff;
+}
+
+.qr-image {
+  display: block;
+  width: min(320px, 100%);
+  height: auto;
+}

@@ -16,6 +16,7 @@ export interface RetentionSummary {
   router_snapshots: number;
   agent_reports: number;
   invites: number;
+  mobile_tokens: number;
 }
 
 const DAY = ' days';
@@ -47,6 +48,7 @@ export async function runRetention(
     router_snapshots: 0,
     agent_reports: 0,
     invites: 0,
+    mobile_tokens: 0,
   };
 
   const run = async (
@@ -91,6 +93,9 @@ export async function runRetention(
   await run('sessions', `delete from sessions where expires_at < now() - interval '7 days'
       or (revoked_at is not null and revoked_at < now() - interval '7 days')`, []);
   await run('mfa_tickets', `delete from mfa_tickets where expires_at < now() - interval '1 day'`, []);
+  await run('mobile_tokens', `delete from mobile_tokens
+      where (used_at is not null or expires_at < now())
+        and created_at < now() - interval '1 day'`, []);
 
   await run('router_snapshots', `delete from router_snapshots rs
       where rs.id in (

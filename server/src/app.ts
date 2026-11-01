@@ -19,6 +19,7 @@ import { registerRouterRoutes } from './routers/routes.js';
 import { registerRouterExtrasRoutes } from './routers/extras.js';
 import { registerRouterConnectionRoutes } from './routers/connections.js';
 import { registerRouterRuleRoutes } from './routers/rules.js';
+import { registerMobileRoutes } from './mobile/routes.js';
 import { registerDnsRoutes } from './routers/dns.js';
 import { registerSubscriptionRoutes } from './subscriptions/routes.js';
 import { registerTemplateRoutes } from './templates/routes.js';
@@ -238,6 +239,11 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
     await registerRouterExtrasRoutes(app, { pool });
     await registerRouterConnectionRoutes(app, { pool, masterKey: config.masterKey });
     await registerRouterRuleRoutes(app, { pool, masterKey: config.masterKey });
+    await registerMobileRoutes(app, {
+      pool,
+      publicUrl: config.publicUrl,
+      secureCookie: config.secureCookie,
+    });
     await registerDnsRoutes(app, { pool });
     await registerSubscriptionRoutes(app, { pool, masterKey: config.masterKey });
     await registerTemplateRoutes(app, { pool });
@@ -267,6 +273,10 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
       prefix: '/',
       index: ['index.html'],
       setHeaders(res, filePath) {
+        if (filePath.endsWith('sw.js') || filePath.endsWith('manifest.webmanifest')) {
+          res.header('Cache-Control', 'no-cache');
+          return;
+        }
         if (filePath.endsWith('index.html')) {
           res.header('Cache-Control', 'no-store');
         } else {

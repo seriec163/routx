@@ -13,6 +13,7 @@ import { DashboardPage } from './pages/Dashboard';
 import { DiagnosticDetailPage, DiagnosticsPage } from './pages/Diagnostics';
 import { JobsPage } from './pages/Jobs';
 import { LoginPage, InvitePage, ResetPasswordPage, BrandMark } from './pages/Auth';
+import { InstallPage } from './pages/Install';
 import { RouterDetailPage } from './pages/RouterDetail';
 import { RouterOnboardingPage } from './pages/RouterOnboarding';
 import { RoutersPage } from './pages/Routers';
@@ -127,6 +128,16 @@ function Root() {
     route.segments[0] === 'reset-password'
       ? route.segments[1] ?? route.query.get('token') ?? ''
       : null;
+
+  if (route.segments[0] === 'install') {
+    return (
+      <InstallPage
+        token={route.query.get('token')}
+        routerId={route.query.get('router')}
+        onLoggedIn={reload}
+      />
+    );
+  }
 
   if (resetToken !== null) {
     return <ResetPasswordPage token={resetToken} />;
