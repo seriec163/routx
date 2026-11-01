@@ -6,6 +6,37 @@ const allow = require("jn_allowlist");
 const run = require("jn_run");
 const state = require("jn_uci_state");
 
+/**
+ * Prokop не может собрать конфигурацию, если не осталось ни одной включённой
+ * секции. Перед выключением последней проверяем, есть ли другая включённая.
+ * Функции объявлены до apply_uci/manage_connection: ucode не поднимает
+ * объявления снизу вверх для уже скомпилированных функций.
+ */
+function has_other_enabled_section(product, cursor, section) {
+	let all = cursor.get_all(product);
+	if (type(all) != "object")
+		return false;
+	for (let sname in all) {
+		let sect = all[sname];
+		if (type(sect) != "object" || sect[".type"] != "section")
+			continue;
+		let real = sect[".name"] == null ? sname : util.as_string(sect[".name"]);
+		if (real == section || sname == section)
+			continue;
+		if (util.as_string(sect.enabled) != "0")
+			return true;
+	}
+	return false;
+}
+
+function last_enabled_error() {
+	return {
+		ok: false,
+		code: "last_enabled_rule",
+		error: "нельзя выключить последнее включённое правило: Prokop не сможет собрать конфигурацию. Сначала включите другое правило"
+	};
+}
+
 function precheck(product) {
 	let rs = state.build_read_state(product);
 	return { ok: true, managed_count: length(keys(rs.managed)), health: rs.health.overall };
@@ -200,35 +231,6 @@ function save_link_state(link_state) {
 function managed_link_hashes(link_state, product, section) {
 	let entry = link_state[product + ":" + section];
 	return type(entry) == "array" ? entry : [];
-}
-
-/**
- * Prokop не может собрать конфигурацию, если не осталось ни одной включённой
- * секции. Перед выключением последней проверяем, есть ли другая включённая.
- */
-function has_other_enabled_section(product, cursor, section) {
-	let all = cursor.get_all(product);
-	if (type(all) != "object")
-		return false;
-	for (let sname in all) {
-		let sect = all[sname];
-		if (type(sect) != "object" || sect[".type"] != "section")
-			continue;
-		let real = sect[".name"] == null ? sname : util.as_string(sect[".name"]);
-		if (real == section || sname == section)
-			continue;
-		if (util.as_string(sect.enabled) != "0")
-			return true;
-	}
-	return false;
-}
-
-function last_enabled_error() {
-	return {
-		ok: false,
-		code: "last_enabled_rule",
-		error: "нельзя выключить последнее включённое правило: Prokop не сможет собрать конфигурацию. Сначала включите другое правило"
-	};
 }
 
 function connection_mask(url) {
