@@ -2470,3 +2470,74 @@ details.advanced[open] > summary {
   width: min(320px, 100%);
   height: auto;
 }
+
+/* -------------------------------------------------------------------------- */
+/* Мобильная карточка роутера                                                 */
+/* -------------------------------------------------------------------------- */
+
+.router-mobile-list {
+  display: none;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.router-mobile-card {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--panel);
+  padding: 12px 14px;
+}
+
+.router-mobile-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.router-mobile-stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  margin: 9px 0;
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+
+.router-mobile-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 10px;
+}
+
+@media (max-width: 760px) {
+  .router-table-desktop {
+    display: none;
+  }
+
+  .router-mobile-list {
+    display: flex;
+  }
+
+  .toolbar {
+    flex-wrap: wrap;
+    align-items: stretch;
+  }
+
+  .toolbar .segmented {
+    flex-wrap: wrap;
+  }
+
+  .toolbar .input {
+    flex: 1 1 100%;
+  }
+
+  .toolbar .switch-row {
+    width: 100%;
+  }
+
+  .toolbar .btn {
+    flex: 1 1 auto;
+  }
+}

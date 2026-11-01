@@ -355,7 +355,8 @@ export function RoutersPage() {
                       : 'Ничего не найдено по запросу.'}
           </Empty>
         ) : (
-          <div className="table-wrap">
+          <>
+            <div className="table-wrap router-table-desktop">
             <table className="table">
               <thead>
                 <tr>
@@ -512,6 +513,103 @@ export function RoutersPage() {
               </tbody>
             </table>
           </div>
+
+          <div className="router-mobile-list">
+            {filtered.map((router) => {
+              const monitor = monitorById.get(router.id);
+              const status = monitor?.status ?? router.status;
+              const health = monitor?.health ? HEALTH_LABEL[monitor.health] ?? monitor.health : '—';
+              const serviceState =
+                monitor?.service_state && monitor.service_state !== 'ok'
+                  ? HEALTH_LABEL[monitor.service_state] ?? monitor.service_state
+                  : null;
+              const tagText =
+                monitor?.total_tags != null && monitor?.failed_tags != null
+                  ? `${monitor.total_tags - monitor.failed_tags}/${monitor.total_tags} тегов`
+                  : null;
+              const errorText = router.last_error ?? monitor?.last_error ?? null;
+              return (
+                <article className="router-mobile-card" key={router.id}>
+                  <div className="router-mobile-head">
+                    <div>
+                      <Link to={`/routers/${router.id}`}>{router.name}</Link>
+                      <div className="muted-text small">{router.model ?? router.product}</div>
+                      {isAdmin && router.owner_email ? (
+                        <div className="muted-text small">{router.owner_email}</div>
+                      ) : null}
+                    </div>
+                    {router.archived_at ? (
+                      <StatusBadge status="archived" label="В архиве" />
+                    ) : (
+                      <StatusBadge status={status} label={ROUTER_STATUS[status] ?? status} />
+                    )}
+                  </div>
+
+                  <div className="router-mobile-stats">
+                    <span>
+                      Служба: {health}
+                      {serviceState ? ` (${serviceState})` : ''}
+                    </span>
+                    <span>
+                      Прокси:{' '}
+                      {monitor?.proxy_health ? proxyHealth(monitor.proxy_health) : '—'}
+                    </span>
+                    {tagText ? <span>{tagText}</span> : null}
+                    <span>Задержка: {formatMs(monitor?.latency_ms)}</span>
+                    <span>Связь: {formatRelative(router.last_seen_at)}</span>
+                  </div>
+
+                  <div className="muted-text small">
+                    {PRODUCT_LABEL[router.product] ?? router.product}{' '}
+                    {router.product_version ?? ''} · OpenWrt {router.openwrt_version ?? '—'} ·
+                    sing-box {router.sing_box_version ?? '—'}
+                  </div>
+
+                  {errorText ? <p className="field-error small">{errorText}</p> : null}
+
+                  <div className="router-mobile-actions">
+                    {router.archived_at ? (
+                      <>
+                        <Button size="sm" variant="ghost" onClick={() => void restore(router)} busy={busy}>
+                          Восстановить
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="danger"
+                          onClick={() => {
+                            setPurging(router);
+                            setPurgeName('');
+                          }}
+                        >
+                          Удалить навсегда
+                        </Button>
+                      </>
+                    ) : (
+                      <>
+                        <Button size="sm" variant="ghost" onClick={() => void issueToken(router)}>
+                          Привязка
+                        </Button>
+                        <Button size="sm" variant="subtle" onClick={() => setArchiving(router)}>
+                          В архив
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="danger"
+                          onClick={() => {
+                            setPurging(router);
+                            setPurgeName('');
+                          }}
+                        >
+                          Удалить
+                        </Button>
+                      </>
+                    )}
+                  </div>
+                </article>
+              );
+            })}
+          </div>
+          </>
         )}
       </Panel>
 
