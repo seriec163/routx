@@ -70,8 +70,8 @@ export function DashboardPage() {
           title="Требуют внимания"
           subtitle="Офлайн, конфликты, ошибки или проблемы с прокси"
           actions={
-            <Link className="btn btn-ghost btn-sm" to="/monitoring">
-              Мониторинг
+            <Link className="btn btn-ghost btn-sm" to="/routers">
+              Роутеры и мониторинг
             </Link>
           }
         >

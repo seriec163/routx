@@ -2447,3 +2447,12 @@ details.advanced[open] > summary {
   gap: 12px;
   margin-bottom: 4px;
 }
+
+.error-cell {
+  display: inline-block;
+  max-width: 190px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  vertical-align: bottom;
+}

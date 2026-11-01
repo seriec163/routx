@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Link } from '../components/link';
 import {
   Button,
@@ -10,31 +10,81 @@ import {
   PageHeader,
   Panel,
   Spinner,
+  Stat,
   StatusBadge,
+  Switch,
   TextInput,
   useToast,
 } from '../components/ui';
 import { api, errorMessage } from '../lib/api';
 import { copyText } from '../lib/clipboard';
-import { formatDate, formatRelative, PRODUCT_LABEL, ROUTER_STATUS } from '../lib/format';
+import {
+  formatDate,
+  formatMs,
+  formatRelative,
+  PRODUCT_LABEL,
+  proxyHealth,
+  ROUTER_STATUS,
+} from '../lib/format';
 import { navigate } from '../lib/router';
-import type { BindingToken, RouterRecord } from '../lib/types';
+import type {
+  BindingToken,
+  MonitoringItem,
+  MonitoringOverview,
+  RouterRecord,
+} from '../lib/types';
 import { useApi } from '../lib/useApi';
 import { useSession } from '../session';
 
+const HEALTH_LABEL: Record<string, string> = {
+  ok: 'Норма',
+  recovered: 'Восстановлено',
+  degraded: 'Деградация',
+  failed: 'Ошибка',
+  unknown: 'Неизвестно',
+  running: 'Работает',
+  stopped: 'Остановлен',
+  transitioning: 'Переходное состояние',
+  'running but disabled': 'Работает, автозапуск выключен',
+  'stopped & disabled': 'Остановлен и отключён',
+  'stopped but enabled': 'Остановлен, автозапуск включён',
+};
+
+type ProxyFilter = 'all' | 'healthy' | 'degraded' | 'dead';
+
+/**
+ * Единая страница парка и мониторинга.
+ *
+ * Раньше «Роутеры» и «Мониторинг» показывали почти один и тот же список.
+ * Теперь это одна таблица: устройство, продукт/платформа, доступность,
+ * служба, прокси, задержка, связь и действия. Данные мониторинга
+ * подмешиваются к записи роутера по id.
+ */
 export function RoutersPage() {
   const { me } = useSession();
   const toast = useToast();
   const isAdmin = me?.permissions.is_superadmin === true;
-  const routers = useApi<{ items: RouterRecord[] }>('/api/v1/routers?limit=200&include_archived=true');
+  const routers = useApi<{ items: RouterRecord[] }>(
+    '/api/v1/routers?limit=200&include_archived=true',
+  );
+  const overview = useApi<MonitoringOverview>('/api/v1/monitoring/overview');
 
   const [view, setView] = useState<'active' | 'pending' | 'archive'>('active');
   const [query, setQuery] = useState('');
+  const [proxyFilter, setProxyFilter] = useState<ProxyFilter>('all');
+  const [auto, setAuto] = useState(true);
+  const [checking, setChecking] = useState(false);
   const [busy, setBusy] = useState(false);
   const [archiving, setArchiving] = useState<RouterRecord | null>(null);
   const [binding, setBinding] = useState<{ router: RouterRecord; token: BindingToken } | null>(null);
   const [purging, setPurging] = useState<RouterRecord | null>(null);
   const [purgeName, setPurgeName] = useState('');
+
+  const monitorById = useMemo(() => {
+    const map = new Map<string, MonitoringItem>();
+    for (const item of overview.data?.items ?? []) map.set(item.id, item);
+    return map;
+  }, [overview.data]);
 
   const allItems = routers.data?.items ?? [];
   const isDraft = (item: RouterRecord) =>
@@ -44,17 +94,58 @@ export function RoutersPage() {
   const archivedItems = allItems.filter((item) => item.archived_at);
 
   const filtered = useMemo(() => {
-    const items =
+    let items =
       view === 'active' ? activeItems : view === 'pending' ? pendingItems : archivedItems;
+    if (view === 'active' && proxyFilter !== 'all') {
+      items = items.filter((item) => monitorById.get(item.id)?.proxy_health === proxyFilter);
+    }
     const needle = query.trim().toLowerCase();
     if (!needle) return items;
     return items.filter(
       (item) =>
         item.name.toLowerCase().includes(needle) ||
         item.product.toLowerCase().includes(needle) ||
-        (item.model ?? '').toLowerCase().includes(needle),
+        (item.model ?? '').toLowerCase().includes(needle) ||
+        (item.owner_email ?? '').toLowerCase().includes(needle),
     );
-  }, [activeItems, pendingItems, archivedItems, view, query]);
+  }, [activeItems, pendingItems, archivedItems, view, query, proxyFilter, monitorById]);
+
+  useEffect(() => {
+    if (!auto) return;
+    const timer = window.setInterval(() => {
+      void routers.reload();
+      void overview.reload();
+    }, 30_000);
+    return () => window.clearInterval(timer);
+  }, [auto, routers.reload, overview.reload]);
+
+  async function checkNow(): Promise<void> {
+    const online = (overview.data?.items ?? []).filter((item) => item.status === 'online');
+    if (online.length === 0) {
+      toast.info('Нет роутеров в сети');
+      return;
+    }
+    setChecking(true);
+    try {
+      for (const item of online) {
+        await api(`/api/v1/routers/${item.id}/monitor`, { method: 'POST' });
+      }
+      toast.info(`Проверка запущена: ${online.length} роутер(ов)`);
+      window.setTimeout(() => {
+        void overview.reload();
+        void routers.reload();
+      }, 5000);
+    } catch (caught) {
+      toast.error(errorMessage(caught));
+    } finally {
+      setChecking(false);
+    }
+  }
+
+  function reloadAll(): void {
+    void routers.reload();
+    void overview.reload();
+  }
 
   async function archive(): Promise<void> {
     if (!archiving) return;
@@ -63,7 +154,7 @@ export function RoutersPage() {
       await api(`/api/v1/routers/${archiving.id}`, { method: 'DELETE' });
       toast.success('Роутер перемещён в архив');
       setArchiving(null);
-      await routers.reload();
+      reloadAll();
     } catch (caught) {
       toast.error(errorMessage(caught));
     } finally {
@@ -76,7 +167,7 @@ export function RoutersPage() {
     try {
       await api(`/api/v1/routers/${router.id}/restore`, { method: 'POST' });
       toast.success('Роутер восстановлен из архива');
-      await routers.reload();
+      reloadAll();
     } catch (caught) {
       toast.error(errorMessage(caught));
     } finally {
@@ -92,7 +183,7 @@ export function RoutersPage() {
       toast.success('Роутер удалён навсегда');
       setPurging(null);
       setPurgeName('');
-      await routers.reload();
+      reloadAll();
     } catch (caught) {
       toast.error(errorMessage(caught));
     } finally {
@@ -111,19 +202,41 @@ export function RoutersPage() {
     }
   }
 
+  const summary = overview.data?.summary;
+  const proxyProblem = (summary?.proxy_degraded ?? 0) + (summary?.proxy_dead ?? 0);
+
   return (
     <div className="page">
       <PageHeader
-        title="Роутеры"
-        subtitle="Один роутер — один продукт Forkop или Prokop. Непривязанные — во вкладке «Ожидают», архивные — в «Архиве»."
+        title="Роутеры и мониторинг"
+        subtitle="Парк устройств, доступность, состояние службы и прокси в одном месте. Один роутер — один продукт Forkop или Prokop."
         actions={<Button onClick={() => navigate('/routers/new')}>Добавить роутер</Button>}
       />
 
-      {routers.error ? <ErrorBanner message={routers.error} onRetry={() => void routers.reload()} /> : null}
+      {routers.error ? (
+        <ErrorBanner message={routers.error} onRetry={() => void routers.reload()} />
+      ) : null}
+      {overview.error ? (
+        <ErrorBanner message={overview.error} onRetry={() => void overview.reload()} />
+      ) : null}
+
+      <div className="stat-grid stat-grid-compact">
+        <Stat label="Всего" value={summary?.total ?? allItems.filter((item) => !item.archived_at).length} hint="Без архивных" />
+        <Stat label="В сети" value={summary?.online ?? 0} tone="ok" hint="Отвечали за последние 3 минуты" />
+        <Stat label="Не в сети" value={summary?.offline ?? 0} tone="bad" hint="Пропущено 3 опроса подряд" />
+        <Stat label="Ожидают привязки" value={summary?.pending ?? 0} tone="warn" hint="Агент ещё не подключался" />
+        <Stat label="Прокси в норме" value={summary?.proxy_healthy ?? 0} tone="ok" hint="Отдельно от доступности" />
+        <Stat
+          label="Проблемы с прокси"
+          value={proxyProblem}
+          tone={proxyProblem > 0 ? 'warn' : 'ok'}
+          hint="Деградация или мёртвые теги"
+        />
+      </div>
 
       <Panel
         title="Парк устройств"
-        subtitle="Нажмите на имя, чтобы открыть состояние, шаблоны и снимки."
+        subtitle="Нажмите на имя, чтобы открыть состояние, правила, шаблоны и снимки."
         actions={
           <div className="toolbar">
             <div className="segmented">
@@ -149,8 +262,50 @@ export function RoutersPage() {
                 Архив ({archivedItems.length})
               </button>
             </div>
-            <TextInput value={query} onChange={setQuery} placeholder="Поиск по имени или модели" type="search" />
-            <Button variant="ghost" size="sm" onClick={() => void routers.reload()} busy={routers.loading}>
+
+            {view === 'active' ? (
+              <div className="segmented">
+                {(['all', 'healthy', 'degraded', 'dead'] as const).map((value) => (
+                  <button
+                    key={value}
+                    type="button"
+                    className={proxyFilter === value ? 'seg-active' : ''}
+                    onClick={() => setProxyFilter(value)}
+                  >
+                    {value === 'all'
+                      ? 'Все'
+                      : value === 'healthy'
+                        ? 'В норме'
+                        : value === 'degraded'
+                          ? 'Деградация'
+                          : 'Мёртв'}
+                  </button>
+                ))}
+              </div>
+            ) : null}
+
+            <TextInput
+              value={query}
+              onChange={setQuery}
+              placeholder="Поиск по имени, модели или владельцу"
+              type="search"
+            />
+            <Switch checked={auto} onChange={setAuto} label="Авто 30 с" />
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={() => void checkNow()}
+              busy={checking}
+              disabled={view !== 'active'}
+            >
+              Проверить сейчас
+            </Button>
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={reloadAll}
+              busy={routers.loading || overview.loading}
+            >
               Обновить
             </Button>
           </div>
@@ -166,100 +321,194 @@ export function RoutersPage() {
                 ? 'Нет роутеров, ожидающих привязки.'
                 : allItems.length === 0
                   ? 'Роутеров пока нет. Добавьте первый и выпустите токен привязки.'
-                  : 'Ничего не найдено по запросу.'}
+                  : proxyFilter !== 'all'
+                    ? 'Нет роутеров в выбранном фильтре прокси.'
+                    : 'Ничего не найдено по запросу.'}
           </Empty>
         ) : (
           <div className="table-wrap">
             <table className="table">
               <thead>
                 <tr>
-                  <th>Имя</th>
-                  {isAdmin ? <th>Владелец</th> : null}
-                  <th>Продукт</th>
-                  <th>Платформа</th>
+                  <th>Роутер</th>
+                  <th>Продукт и платформа</th>
                   <th>Статус</th>
-                  <th>sing-box</th>
-                  <th>Контакт</th>
+                  <th>Служба</th>
+                  <th>Прокси</th>
+                  <th>Ошибка</th>
                   <th />
                 </tr>
               </thead>
               <tbody>
-                {filtered.map((router) => (
-                  <tr key={router.id}>
-                    <td>
-                      <Link to={`/routers/${router.id}`}>{router.name}</Link>
-                      {router.model ? <div className="muted-text small">{router.model}</div> : null}
-                    </td>
-                    {isAdmin ? <td className="muted-text small">{router.owner_email ?? '—'}</td> : null}
-                    <td>
-                      <div>{PRODUCT_LABEL[router.product] ?? router.product}</div>
-                      <div className="muted-text small">{router.product_version ?? 'версия неизвестна'}</div>
-                    </td>
-                    <td className="small">
-                      <div>{router.openwrt_version ?? '—'}</div>
-                      <div className="muted-text">{router.arch ?? '—'}</div>
-                    </td>
-                    <td>
-                      {router.archived_at ? (
-                        <StatusBadge status="archived" label="В архиве" />
-                      ) : (
-                        <StatusBadge
-                          status={router.status}
-                          label={ROUTER_STATUS[router.status] ?? router.status}
-                        />
-                      )}
-                    </td>
-                    <td className="small">{router.sing_box_version ?? '—'}</td>
-                    <td className="muted-text small">
-                      {router.archived_at
-                        ? `архив ${formatDate(router.archived_at)}`
-                        : formatRelative(router.last_seen_at)}
-                    </td>
-                    <td className="row-actions">
-                      {router.archived_at ? (
-                        <>
-                          <Button size="sm" variant="ghost" onClick={() => void restore(router)} busy={busy}>
-                            Восстановить
-                          </Button>
-                          <Button
-                            size="sm"
-                            variant="danger"
-                            onClick={() => {
-                              setPurging(router);
-                              setPurgeName('');
-                            }}
-                          >
-                            Удалить навсегда
-                          </Button>
-                        </>
-                      ) : (
-                        <>
-                          <Button size="sm" variant="ghost" onClick={() => void issueToken(router)}>
-                            Привязка
-                          </Button>
-                          <Button size="sm" variant="subtle" onClick={() => setArchiving(router)}>
-                            В архив
-                          </Button>
-                          <Button
-                            size="sm"
-                            variant="danger"
-                            onClick={() => {
-                              setPurging(router);
-                              setPurgeName('');
-                            }}
-                          >
-                            Удалить
-                          </Button>
-                        </>
-                      )}
-                    </td>
-                  </tr>
-                ))}
+                {filtered.map((router) => {
+                  const monitor = monitorById.get(router.id);
+                  const status = monitor?.status ?? router.status;
+                  const health = monitor?.health ? HEALTH_LABEL[monitor.health] ?? monitor.health : '—';
+                  const serviceState =
+                    monitor?.service_state && monitor.service_state !== 'ok'
+                      ? HEALTH_LABEL[monitor.service_state] ?? monitor.service_state
+                      : null;
+                  const tagText =
+                    monitor?.total_tags != null && monitor?.failed_tags != null
+                      ? `${monitor.total_tags - monitor.failed_tags}/${monitor.total_tags} тегов`
+                      : null;
+                  const errorText = router.last_error ?? monitor?.last_error ?? null;
+                  return (
+                    <tr key={router.id}>
+                      <td>
+                        <Link to={`/routers/${router.id}`}>{router.name}</Link>
+                        {router.model ? <div className="muted-text small">{router.model}</div> : null}
+                        {isAdmin && router.owner_email ? (
+                          <div className="muted-text small">{router.owner_email}</div>
+                        ) : null}
+                      </td>
+                      <td className="small">
+                        <div>
+                          {PRODUCT_LABEL[router.product] ?? router.product}
+                          {router.product_version ? ` ${router.product_version}` : ''}
+                        </div>
+                        <div className="muted-text">
+                          {router.openwrt_version ? `OpenWrt ${router.openwrt_version}` : 'OpenWrt —'}
+                          {router.arch ? ` · ${router.arch}` : ''}
+                        </div>
+                        <div className="muted-text">
+                          sing-box {router.sing_box_version ?? '—'}
+                          {router.sing_box_variant ? ` · ${router.sing_box_variant}` : ''}
+                        </div>
+                      </td>
+                      <td>
+                        {router.archived_at ? (
+                          <StatusBadge status="archived" label="В архиве" />
+                        ) : (
+                          <StatusBadge
+                            status={status}
+                            label={ROUTER_STATUS[status] ?? status}
+                          />
+                        )}
+                        {monitor?.offline_since ? (
+                          <div className="muted-text small">
+                            с {formatRelative(monitor.offline_since)}
+                          </div>
+                        ) : null}
+                        <div className="muted-text small">
+                          связь: {formatRelative(router.last_seen_at)}
+                        </div>
+                      </td>
+                      <td className="small">
+                        {health}
+                        {serviceState ? <div className="muted-text small">{serviceState}</div> : null}
+                      </td>
+                      <td>
+                        {monitor?.proxy_health ? (
+                          <>
+                            <StatusBadge
+                              status={monitor.proxy_health}
+                              label={proxyHealth(monitor.proxy_health)}
+                            />
+                            {tagText || monitor?.latency_ms != null ? (
+                              <div className="muted-text small">
+                                {tagText ?? ''}
+                                {tagText && monitor?.latency_ms != null ? ' · ' : ''}
+                                {monitor?.latency_ms != null ? formatMs(monitor.latency_ms) : ''}
+                              </div>
+                            ) : null}
+                            {monitor?.detail ? (
+                              <div className="muted-text small">{monitor.detail}</div>
+                            ) : null}
+                            {monitor?.ts ? (
+                              <div className="muted-text small">
+                                замер: {formatRelative(monitor.ts)}
+                              </div>
+                            ) : null}
+                          </>
+                        ) : (
+                          <span className="muted-text">—</span>
+                        )}
+                      </td>
+                      <td className="small">
+                        {errorText ? (
+                          <span className="error-cell" title={errorText}>
+                            {errorText}
+                          </span>
+                        ) : (
+                          '—'
+                        )}
+                      </td>
+                      <td className="row-actions">
+                        {router.archived_at ? (
+                          <>
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              onClick={() => void restore(router)}
+                              busy={busy}
+                            >
+                              Восстановить
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="danger"
+                              onClick={() => {
+                                setPurging(router);
+                                setPurgeName('');
+                              }}
+                            >
+                              Удалить навсегда
+                            </Button>
+                          </>
+                        ) : (
+                          <>
+                            <Button size="sm" variant="ghost" onClick={() => void issueToken(router)}>
+                              Привязка
+                            </Button>
+                            <Button size="sm" variant="subtle" onClick={() => setArchiving(router)}>
+                              В архив
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="danger"
+                              onClick={() => {
+                                setPurging(router);
+                                setPurgeName('');
+                              }}
+                            >
+                              Удалить
+                            </Button>
+                          </>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>
         )}
       </Panel>
+
+      <details className="advanced">
+        <summary>Как считается мониторинг</summary>
+        <ul className="bullets">
+          <li>
+            Раз в 60 секунд сервер просит агент проверить роутер. Кнопка «Проверить сейчас»
+            запускает проверку немедленно.
+          </li>
+          <li>
+            Доступность — отвечает ли агент. Роутер считается офлайн после 3 пропущенных проверок
+            подряд (около 3 минут).
+          </li>
+          <li>
+            Служба — состояние Prokop/Forkop: норма, деградация или ошибка.
+          </li>
+          <li>
+            Прокси — реальные задержки через Clash API. Все теги ответили — «в норме», часть —
+            «деградация», ни один — «мёртв». Если Clash API недоступен, показывается «нет данных»,
+            а не ложное «мёртв».
+          </li>
+          <li>Задержка выше 1500 мс тоже считается деградацией.</li>
+          <li>Метрики, отчёты и журналы хранятся не более 30 дней.</li>
+        </ul>
+      </details>
 
       {archiving ? (
         <ConfirmDialog

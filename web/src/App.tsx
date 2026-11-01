@@ -13,7 +13,6 @@ import { DashboardPage } from './pages/Dashboard';
 import { DiagnosticDetailPage, DiagnosticsPage } from './pages/Diagnostics';
 import { JobsPage } from './pages/Jobs';
 import { LoginPage, InvitePage, ResetPasswordPage, BrandMark } from './pages/Auth';
-import { MonitoringPage } from './pages/Monitoring';
 import { RouterDetailPage } from './pages/RouterDetail';
 import { RouterOnboardingPage } from './pages/RouterOnboarding';
 import { RoutersPage } from './pages/Routers';
@@ -39,7 +38,6 @@ const NAV: Array<{ section: string; items: NavItem[] }> = [
     items: [
       { to: '/', label: 'Панель', exact: true },
       { to: '/routers', label: 'Роутеры' },
-      { to: '/monitoring', label: 'Мониторинг' },
     ],
   },
   {
@@ -299,6 +297,17 @@ function isActive(path: string, item: NavItem): boolean {
   return path === item.to || path.startsWith(`${item.to}/`);
 }
 
+function RedirectTo({ to }: { to: string }) {
+  useEffect(() => {
+    navigate(to);
+  }, [to]);
+  return (
+    <div className="boot">
+      <Spinner label="Открываем роутеры…" />
+    </div>
+  );
+}
+
 function renderRoute(segments: string[], isAdmin: boolean) {
   const [first, second] = segments;
 
@@ -318,7 +327,7 @@ function renderRoute(segments: string[], isAdmin: boolean) {
     case 'apply-runs':
       return second ? <ApplyRunDetailPage id={second} /> : <ApplyRunsPage />;
     case 'monitoring':
-      return <MonitoringPage />;
+      return <RedirectTo to="/routers" />;
     case 'diagnostics':
       return second ? <DiagnosticDetailPage id={second} /> : <DiagnosticsPage />;
     case 'singbox':
