@@ -564,16 +564,12 @@ return view.extend({
 
 	handleMobileQr: function(root) {
 		const r = root.jnRefs;
-		if (r.qrButton.disabled)
-			return Promise.resolve();
 
-		r.qrButton.disabled = true;
 		r.qrError.textContent = '';
 		r.qrResult.innerHTML = '';
 		r.qrStatus.textContent = 'Создаём одноразовую ссылку…';
 
 		const finish = () => {
-			r.qrButton.disabled = false;
 			r.qrStatus.textContent = '';
 		};
 
