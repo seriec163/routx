@@ -54,6 +54,8 @@ const ACTION_SHORT: Record<string, string> = {
 };
 
 const CONNECTION_ACTIONS = new Set(['connection', 'proxy', 'outbound', 'vpn']);
+const LINK_PREFIX_RE =
+  /^(vless|vmess|trojan|ss|ssr|hysteria|hysteria2|hy2|tuic|anytls|socks|socks4|socks4a|socks5|socks5h):\/\//i;
 
 const SERVICE_ICONS: Record<string, string> = {
   youtube: '▶',
@@ -477,6 +479,15 @@ export function RouterRulesPanel(props: {
         }
       >
         {error ? <ErrorBanner message={error} onRetry={() => void readLive()} /> : null}
+        {reading ? (
+          <div className="job-progress">
+            <div className="job-progress-head">
+              <span>Обновляем список правил…</span>
+              <span className="muted-text small">выполняется…</span>
+            </div>
+            <ProgressBar value={null} label="Обновляем список правил" />
+          </div>
+        ) : null}
         {loading && rules.length === 0 ? <Spinner /> : null}
 
         {!online ? (
@@ -916,7 +927,7 @@ function RuleEditorModal(props: {
       setTemplateSettings(preset.settings ?? {});
       toast.success(`Шаблон «${response.template.name}» применён к форме`);
     } catch (caught) {
-      setError(errorMessage(caught));
+      fail(errorMessage(caught));
     } finally {
       setTemplateBusy(false);
     }
@@ -945,7 +956,21 @@ function RuleEditorModal(props: {
     }
     const value = connectionValue.trim();
     if (value === '') {
-      setError('Вставьте URL подписки');
+      fail('Вставьте URL подписки');
+      return;
+    }
+    if (LINK_PREFIX_RE.test(value)) {
+      setPending((current) => [
+        ...current,
+        {
+          kind: 'vless',
+          label: connectionLabel.trim() || `VLESS ${current.length + 1}`,
+          value,
+        },
+      ]);
+      toast.info('Это прямая ссылка — добавлено как VLESS');
+      setConnectionValue('');
+      setConnectionLabel('');
       return;
     }
     setPending((current) => [
@@ -963,7 +988,7 @@ function RuleEditorModal(props: {
   function addLinks(): void {
     const values = lines(vlessValue);
     if (values.length === 0) {
-      setError('Вставьте хотя бы одну VLESS-ссылку');
+      fail('Вставьте хотя бы одну VLESS-ссылку');
       return;
     }
     setPending((current) => [
@@ -977,14 +1002,61 @@ function RuleEditorModal(props: {
     setVlessValue('');
   }
 
+  function fail(message: string): void {
+    setError(message);
+    toast.error(message);
+  }
+
   function submit(): void {
     const trimmed = label.trim();
     if (trimmed === '') {
-      setError('Укажите название правила');
+      fail('Укажите название правила');
       return;
     }
-    if (canConnect && existingSources + pending.length === 0) {
-      setError('Для действия «Через VPN» добавьте подписку или VLESS-ссылку');
+
+    // Если пользователь вставил URL/VLESS и сразу нажал «Проверить и сохранить»,
+    // не заставляем его отдельно нажимать «Добавить». Иначе кажется, что
+    // сохранение не произошло.
+    const effectivePending: PendingConnection[] = [...pending];
+    if (canConnect) {
+      const keys = new Set(
+        effectivePending.map((entry) =>
+          entry.subscription_id
+            ? `subscription:${entry.subscription_id}`
+            : `${entry.kind}:${entry.value ?? ''}`,
+        ),
+      );
+      const pushPending = (entry: PendingConnection) => {
+        const key = entry.subscription_id
+          ? `subscription:${entry.subscription_id}`
+          : `${entry.kind}:${entry.value ?? ''}`;
+        if (keys.has(key)) return;
+        keys.add(key);
+        effectivePending.push(entry);
+      };
+
+      if (catalogId) {
+        const entry = catalog.find((item) => item.id === catalogId);
+        pushPending({
+          kind: 'subscription',
+          label: connectionLabel.trim() || entry?.name || 'Подписка',
+          subscription_id: catalogId,
+        });
+      } else if (connectionValue.trim() !== '') {
+        const value = connectionValue.trim();
+        pushPending(
+          LINK_PREFIX_RE.test(value)
+            ? { kind: 'vless', label: connectionLabel.trim() || 'VLESS', value }
+            : { kind: 'subscription', label: connectionLabel.trim() || 'Подписка', value },
+        );
+      }
+      for (const [index, value] of lines(vlessValue).entries()) {
+        pushPending({ kind: 'vless', label: `VLESS ${index + 1}`, value });
+      }
+    }
+
+    if (canConnect && existingSources + effectivePending.length === 0) {
+      fail('Для действия «Через VPN» добавьте подписку или VLESS-ссылку');
       return;
     }
     const resources: Record<string, string | string[] | null> = {
@@ -1015,7 +1087,7 @@ function RuleEditorModal(props: {
         manual_ips: lines(manualIps),
         settings: templateSettings,
       },
-      canConnect ? pending : [],
+      canConnect ? effectivePending : [],
     );
   }
 
@@ -1029,13 +1101,17 @@ function RuleEditorModal(props: {
           <Button variant="ghost" onClick={props.onClose}>
             Отмена
           </Button>
-          <Button onClick={submit}>Показать изменения</Button>
+          <Button onClick={submit}>Проверить и сохранить</Button>
         </>
       }
     >
       <p className="page-sub">
         Правило — это секция на роутере. Название видно в панели и в LuCI Prokop. Имя UCI
         создаётся автоматически и не требует внимания.
+      </p>
+      <p className="muted-text small" style={{ marginTop: -6 }}>
+        Сохранение в два шага: сначала «Проверить и сохранить» — откроется список изменений,
+        затем «Подтвердить и применить» — запись на роутер.
       </p>
 
       {error ? <ErrorBanner message={error} /> : null}
@@ -1166,8 +1242,9 @@ function RuleEditorModal(props: {
         <div className="rule-connection-box">
           <h3>Источники подключения</h3>
           <p className="muted-text small">
-            Вставьте URL подписки или VLESS-ссылки. Они будут добавлены в правило после
-            применения.
+            Вставьте URL подписки или VLESS-ссылки. Если сразу нажать «Проверить и сохранить»,
+            вставленные значения добавятся автоматически. Кнопки ниже нужны, чтобы добавить
+            несколько источников заранее.
           </p>
 
           <Field label="Подписка из каталога" hint="Необязательно, если вставляете URL вручную.">
