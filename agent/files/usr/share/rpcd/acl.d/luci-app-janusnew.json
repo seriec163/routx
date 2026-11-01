@@ -9,7 +9,8 @@
 		"write": {
 			"file": {
 				"/etc/init.d/janusnew restart": [ "exec" ],
-				"/usr/bin/janusnew rotate": [ "exec" ]
+				"/usr/bin/janusnew rotate": [ "exec" ],
+				"/usr/bin/janusnew mobile-qr": [ "exec" ]
 			}
 		}
 	}

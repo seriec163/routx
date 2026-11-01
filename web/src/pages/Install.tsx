@@ -122,8 +122,8 @@ export function InstallPage({
             <>
               <ErrorBanner message={error ?? 'Ссылка недействительна'} />
               <p className="page-sub">
-                Ссылка действует 5 минут и используется один раз. Запросите новый QR в панели или
-                войдите обычным способом.
+                Ссылка действует 5 минут и используется один раз. Создайте новый QR на роутере:
+                LuCI → Служба → JanusNew, — или войдите обычным способом.
               </p>
               <div className="row">
                 <Button onClick={() => navigate('/login')}>Войти</Button>

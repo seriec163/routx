@@ -176,3 +176,9 @@ await writeFile(join(dist, 'SHA256SUMS'), `${sums.join('\n')}\n`);
 await rm(stage, { recursive: true, force: true });
 
 console.log('built janusnew ' + version);
+
+// На Windows права 0755 в tar не сохраняются: установленный пакет получит
+// неисполняемые /usr/bin/janusnew и init-скрипт. Для роутера собирайте в Docker.
+if (process.platform === 'win32') {
+  console.log('warning: Windows не сохраняет exec-биты в tar; для установки собирайте пакет в Docker');
+}

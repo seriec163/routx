@@ -17,6 +17,7 @@ import {
   type AgentAuthContext,
 } from './service.js';
 import { sanitizeAgentState } from '../domain/uci.js';
+import { createMobileLink } from '../mobile/service.js';
 
 export interface AgentRouteContext {
   pool: Pool;
@@ -624,6 +625,57 @@ export async function registerAgentRoutes(
       });
 
       return { agent_token: newToken, server_time: new Date().toISOString() };
+    },
+  );
+
+  // QR для мобильного входа показывает сам роутер: LuCI → Службы → JanusNew.
+  // Ссылку выпускает только привязанный агент, поэтому панель её не создаёт.
+  app.post(
+    '/agent/v1/mobile-link',
+    { config: { public: true, skipAuth: true, rateLimit: { max: 10, timeWindow: '1 minute' } } },
+    async (request) => {
+      await agentGuard(request);
+      const agent = agentContext(request);
+
+      const found = await pool.query<{ owner_id: string | null }>(
+        'select owner_id from routers where id = $1',
+        [agent.routerId],
+      );
+      const ownerId = found.rows[0]?.owner_id ?? null;
+      if (!ownerId) {
+        throw badRequest('router_owner_missing', 'У роутера не указан владелец');
+      }
+
+      const base = ctx.publicUrl.replace(/\/+$/, '');
+      const forwardedProto = headerValue(request, 'x-forwarded-proto');
+      const baseUrl =
+        forwardedProto === 'https' && base.startsWith('http://')
+          ? base.replace(/^http:\/\//, 'https://')
+          : base;
+
+      const link = await createMobileLink(pool, {
+        userId: ownerId,
+        routerId: agent.routerId,
+        baseUrl,
+      });
+
+      await audit(pool, {
+        actorRole: 'agent',
+        action: 'router.mobile_link',
+        targetType: 'router',
+        targetId: agent.routerId,
+        routerId: agent.routerId,
+        result: 'ok',
+        ip: request.ip,
+        userAgent: request.headers['user-agent'],
+        metadata: {
+          source: 'router-luci',
+          expires_at: link.expires_at,
+          https: link.https,
+        },
+      });
+
+      return { ...link, server_time: new Date().toISOString() };
     },
   );
 

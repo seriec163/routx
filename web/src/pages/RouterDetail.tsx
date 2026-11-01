@@ -56,7 +56,6 @@ import type {
   Job,
   MetricSample,
   MetricsResponse,
-  MobileLink,
   RouterDetail,
   RouterConnection,
   RouterListExtras,
@@ -81,7 +80,6 @@ type TabId =
   | 'metrics'
   | 'diagnostics'
   | 'singbox'
-  | 'janusnew'
   | 'jobs'
   | 'settings';
 
@@ -93,7 +91,6 @@ const TABS: Array<{ id: TabId; label: string }> = [
   { id: 'metrics', label: 'Метрики' },
   { id: 'diagnostics', label: 'Диагностика' },
   { id: 'singbox', label: 'sing-box' },
-  { id: 'janusnew', label: 'JanusNew' },
   { id: 'jobs', label: 'Задачи' },
   { id: 'settings', label: 'Настройки' },
 ];
@@ -568,8 +565,6 @@ export function RouterDetailPage({ id }: { id: string }) {
   const [busy, setBusy] = useState(false);
   const [activeJob, setActiveJob] = useState<Job | null>(null);
   const [activeJobLabel, setActiveJobLabel] = useState('');
-  const [mobileLink, setMobileLink] = useState<MobileLink | null>(null);
-  const [mobileBusy, setMobileBusy] = useState(false);
   const [restoreRouterBusy, setRestoreRouterBusy] = useState(false);
   const [purgeOpen, setPurgeOpen] = useState(false);
   const [purgeName, setPurgeName] = useState('');
@@ -1345,21 +1340,6 @@ export function RouterDetailPage({ id }: { id: string }) {
       setCredential(await api<RotateCredential>(`/api/v1/routers/${id}/rotate-credential`, { method: 'POST' }));
     } catch (caught) {
       toast.error(errorMessage(caught));
-    }
-  }
-
-  async function createMobileLink(): Promise<void> {
-    setMobileBusy(true);
-    try {
-      const link = await api<MobileLink>(`/api/v1/routers/${id}/mobile-token`, {
-        method: 'POST',
-      });
-      setMobileLink(link);
-      toast.success('QR для телефона создан');
-    } catch (caught) {
-      toast.error(errorMessage(caught));
-    } finally {
-      setMobileBusy(false);
     }
   }
 
@@ -2374,98 +2354,6 @@ export function RouterDetailPage({ id }: { id: string }) {
         </div>
       ) : null}
 
-      {tab === 'janusnew' ? (
-        <div className="grid-2">
-          <div className="stack">
-            <Panel
-              title="Мобильный доступ · PWA"
-              subtitle="QR для входа с телефона и установки приложения. Ссылка одноразовая, действует 5 минут."
-            >
-              {mobileLink ? (
-                <div className="stack">
-                  <div className="qr-box">
-                    <img
-                      src={mobileLink.qr_data_url}
-                      alt="QR-код для входа с телефона"
-                      className="qr-image"
-                    />
-                  </div>
-                  <InfoBanner tone="warn">
-                    QR даёт доступ к панели под вашей учётной записью. Не пересылайте ссылку и не
-                    оставляйте QR на виду.
-                  </InfoBanner>
-                  <div className="kv">
-                    <span>Действует до</span>
-                    <strong>{new Date(mobileLink.expires_at).toLocaleTimeString('ru-RU')}</strong>
-                    <span>Адрес</span>
-                    <strong className="mono small" style={{ wordBreak: 'break-all' }}>
-                      {mobileLink.url}
-                    </strong>
-                  </div>
-                  {!mobileLink.https ? (
-                    <InfoBanner tone="warn">
-                      Публичный адрес панели сейчас не HTTPS. QR откроет панель, но установка PWA
-                      на iPhone/Android может не работать. Откройте панель по HTTPS-домену и создайте
-                      QR заново — адрес возьмётся из текущего окна.
-                    </InfoBanner>
-                  ) : (
-                    <InfoBanner>
-                      Откройте камерой телефона, установите приложение и войдите автоматически.
-                    </InfoBanner>
-                  )}
-                  <div className="row">
-                    <Button size="sm" onClick={() => void createMobileLink()} busy={mobileBusy}>
-                      Создать новый QR
-                    </Button>
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      onClick={() => {
-                        void copyText(mobileLink.url).then((ok) =>
-                          ok
-                            ? toast.success('Ссылка скопирована')
-                            : toast.error('Не удалось скопировать'),
-                        );
-                      }}
-                    >
-                      Скопировать ссылку
-                    </Button>
-                  </div>
-                </div>
-              ) : (
-                <>
-                  <p className="page-sub">
-                    Создайте одноразовую ссылку: телефон откроет установку PWA и сразу войдёт под
-                    вашей учётной записью. Ссылка действует 5 минут и используется один раз.
-                  </p>
-                  <Button onClick={() => void createMobileLink()} busy={mobileBusy}>
-                    Создать QR для телефона
-                  </Button>
-                </>
-              )}
-            </Panel>
-          </div>
-
-          <div className="stack">
-            <Panel title="Учётные данные агента">
-              <CredentialPanel routerId={id} />
-              <Button variant="ghost" size="sm" onClick={() => void rotateCredential()}>
-                Ротировать токен агента
-              </Button>
-            </Panel>
-            <Panel title="Привязка агента">
-              <p className="page-sub">
-                Токен привязки действует 5 минут и показывается один раз. Роутер сам устанавливает
-                исходящее TLS-соединение.
-              </p>
-              <Button size="sm" onClick={() => void issueBinding()}>
-                Выпустить токен привязки
-              </Button>
-            </Panel>
-          </div>
-        </div>
-      ) : null}
-
       {tab === 'jobs' ? (
         <Panel
           title="История задач"
@@ -2547,9 +2435,26 @@ export function RouterDetailPage({ id }: { id: string }) {
                 </Link>
               </div>
             </Panel>
+
+            <Panel title="Учётные данные агента">
+              <CredentialPanel routerId={id} />
+              <Button variant="ghost" size="sm" onClick={() => void rotateCredential()}>
+                Ротировать токен агента
+              </Button>
+            </Panel>
           </div>
 
           <div className="stack">
+            <Panel title="Привязка агента">
+              <p className="page-sub">
+                Токен привязки действует 5 минут и показывается один раз. Роутер сам устанавливает
+                исходящее TLS-соединение.
+              </p>
+              <Button size="sm" onClick={() => void issueBinding()}>
+                Выпустить токен привязки
+              </Button>
+            </Panel>
+
             <Panel title="Архивирование">
               <p className="page-sub">
                 Архив отключает мониторинг и отзывает учётные данные. Forkop/Prokop на устройстве

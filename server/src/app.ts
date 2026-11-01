@@ -241,7 +241,6 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
     await registerRouterRuleRoutes(app, { pool, masterKey: config.masterKey });
     await registerMobileRoutes(app, {
       pool,
-      publicUrl: config.publicUrl,
       secureCookie: config.secureCookie,
     });
     await registerDnsRoutes(app, { pool });

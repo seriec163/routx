@@ -184,6 +184,106 @@ const STYLE = `
 [data-darkmode="true"] .jn-badge.jn-muted,
 [data-darkmode="true"] .jn-note.jn-muted { color: #9aa0a8; }
 [data-darkmode="true"] .jn-orb { color: #9aa0a8; background: rgba(154, 160, 168, .16); }
+
+.jn-mobile {
+	margin-top: 14px;
+	padding: 16px 18px;
+	border: 1px solid var(--border-color-low, rgba(128, 128, 128, .22));
+	border-radius: 12px;
+	background: var(--background-color-high, rgba(128, 128, 128, .035));
+}
+
+.jn-mobile-head {
+	display: flex;
+	align-items: flex-start;
+	justify-content: space-between;
+	gap: 12px;
+	flex-wrap: wrap;
+}
+
+.jn-mobile-title {
+	font-size: .95rem;
+	font-weight: 600;
+}
+
+.jn-mobile-text {
+	margin-top: 6px;
+	max-width: 46em;
+	font-size: .82rem;
+	line-height: 1.5;
+	opacity: .62;
+}
+
+.jn-qr-result { margin-top: 14px; }
+
+.jn-mobile-actions {
+	display: flex;
+	align-items: center;
+	gap: 10px;
+	flex-wrap: wrap;
+}
+
+.jn-qr-status {
+	font-size: .78rem;
+	opacity: .6;
+}
+
+.jn-qr-wrap {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 18px;
+	align-items: flex-start;
+}
+
+.jn-qr {
+	width: 220px;
+	height: 220px;
+	padding: 8px;
+	border-radius: 10px;
+	background: #fff;
+}
+
+.jn-qr-meta {
+	flex: 1 1 220px;
+	min-width: 0;
+	font-size: .82rem;
+	line-height: 1.55;
+}
+
+.jn-qr-meta strong { font-weight: 600; }
+
+.jn-qr-url {
+	margin-top: 6px;
+	font-family: monospace;
+	font-size: .74rem;
+	opacity: .6;
+	overflow-wrap: anywhere;
+}
+
+.jn-qr-hint {
+	margin-top: 8px;
+	opacity: .6;
+}
+
+.jn-qr-warn {
+	margin-top: 8px;
+	color: #a86400;
+}
+
+.jn-qr-error {
+	margin-top: 10px;
+	font-size: .82rem;
+	color: #bf3a2b;
+}
+
+.jn-qr-error:empty { display: none; }
+
+[data-darkmode="true"] .jn-qr-warn { color: #e7b45a; }
+[data-darkmode="true"] .jn-qr-error { color: #f08a7e; }
+
+@media (max-width: 560px) {
+	.jn-mobile-head .btn { width: 100%; }
+}
 `;
 
 function parse(raw) {
@@ -462,6 +562,83 @@ return view.extend({
 		]);
 	},
 
+	handleMobileQr: function(root) {
+		const r = root.jnRefs;
+		if (r.qrButton.disabled)
+			return Promise.resolve();
+
+		r.qrButton.disabled = true;
+		r.qrError.textContent = '';
+		r.qrResult.innerHTML = '';
+		r.qrStatus.textContent = 'Создаём одноразовую ссылку…';
+
+		const finish = () => {
+			r.qrButton.disabled = false;
+			r.qrStatus.textContent = '';
+		};
+
+		return fs.exec('/usr/bin/janusnew', [ 'mobile-qr' ])
+			.then((res) => {
+				const lines = String(res.stdout || '').split('\n').filter((line) => line.trim() !== '');
+				let data = null;
+				try {
+					data = JSON.parse(lines.length ? lines[lines.length - 1] : '');
+				}
+				catch (e) {
+					data = null;
+				}
+
+				if (res.code !== 0 || !data || data.ok !== true)
+					throw new Error((data && data.error) || String(res.stderr || '').trim() || 'агент не вернул ссылку');
+
+				this.showMobileQr(root, data);
+			})
+			.catch((e) => {
+				r.qrResult.innerHTML = '';
+				r.qrError.textContent = 'Не удалось создать QR: ' + e.message;
+			})
+			.then(finish, finish);
+	},
+
+	showMobileQr: function(root, data) {
+		const r = root.jnRefs;
+		r.qrError.textContent = '';
+		r.qrResult.innerHTML = '';
+
+		const image = E('img', {
+			'class': 'jn-qr',
+			'src': data.qr,
+			'alt': 'QR-код для входа с телефона'
+		});
+
+		const expires = data.expires_at ? new Date(data.expires_at) : null;
+		const meta = E('div', { 'class': 'jn-qr-meta' }, [
+			E('div', {}, [
+				E('strong', {}, 'Действует до '),
+				expires && !isNaN(expires.getTime())
+					? expires.toLocaleTimeString()
+					: '5 минут'
+			]),
+			E('div', { 'class': 'jn-qr-url' }, data.url),
+			E('div', { 'class': 'jn-qr-hint' }, 'Наведите камеру телефона: откроется установка приложения, вход выполнится автоматически. Ссылка одноразовая — после входа она перестанет работать.')
+		]);
+
+		if (data.https === false) {
+			meta.appendChild(E('div', { 'class': 'jn-qr-warn' }, 'Панель открыта по HTTP. Установка приложения на iPhone/Android может не работать — укажите HTTPS-адрес панели в настройках сервера.'));
+		}
+
+		meta.appendChild(E('div', { 'class': 'jn-actions' }, [
+			E('a', {
+				'class': 'btn cbi-button',
+				'href': data.url,
+				'target': '_blank',
+				'rel': 'noopener noreferrer'
+			}, 'Открыть ссылку')
+		]));
+
+		r.qrResult.appendChild(E('div', { 'class': 'jn-qr-wrap' }, [ image, meta ]));
+	},
+
 	render: function(status) {
 		const refs = {};
 
@@ -499,11 +676,35 @@ return view.extend({
 		const note = E('div', { 'class': 'jn-note' });
 		const footer = E('div', { 'class': 'jn-footer' });
 
+		const qrButton = E('button', {
+			'class': 'btn cbi-button cbi-button-action',
+			'click': ui.createHandlerFn(this, function() { return this.handleMobileQr(root); })
+		}, 'Показать QR для телефона');
+
+		const qrStatus = E('span', { 'class': 'jn-qr-status' }, '');
+		const qrResult = E('div', { 'class': 'jn-qr-result' });
+		const qrError = E('div', { 'class': 'jn-qr-error' });
+
+		const mobile = E('div', { 'class': 'jn-mobile' }, [
+			E('div', { 'class': 'jn-mobile-head' }, [
+				E('div', {}, [
+					E('div', { 'class': 'jn-mobile-title' }, 'Мобильный доступ'),
+					E('div', { 'class': 'jn-mobile-text' },
+						'QR открывает панель Router Control на телефоне и сразу входит владельцем роутера. ' +
+						'Ссылку выпускает сам роутер: она одноразовая и действует 5 минут.')
+				]),
+				E('div', { 'class': 'jn-mobile-actions' }, [ qrButton, qrStatus ])
+			]),
+			qrResult,
+			qrError
+		]);
+
 		const root = E('div', { 'class': 'jn-wrap' }, [
 			E('style', {}, STYLE),
 			hero,
 			grid,
 			note,
+			mobile,
 			E('div', { 'class': 'jn-actions' }, [
 				E('button', {
 					'class': 'btn cbi-button cbi-button-action',
@@ -526,6 +727,10 @@ return view.extend({
 		refs.sub = sub;
 		refs.note = note;
 		refs.footer = footer;
+		refs.qrButton = qrButton;
+		refs.qrStatus = qrStatus;
+		refs.qrResult = qrResult;
+		refs.qrError = qrError;
 		root.jnRefs = refs;
 
 		this.paint(root, status);

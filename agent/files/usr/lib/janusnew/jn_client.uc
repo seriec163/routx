@@ -6,7 +6,7 @@ const store = require("jn_store");
 const platform = require("jn_platform");
 const uci_state = require("jn_uci_state");
 
-const VERSION = "1.1.11";
+const VERSION = "1.1.12";
 
 function build_probe(product) {
 	let pver = platform.product_version(product);
@@ -115,6 +115,31 @@ function rotate() {
 	return { ok: true };
 }
 
+// Одноразовая ссылка + QR для мобильного входа. Выпускается сервером
+// по запросу привязанного агента: QR показывает LuCI на самом роутере.
+function mobile_link() {
+	let cfg = config.load();
+	if (!cfg.bound)
+		return { ok: false, error: "агент ещё не привязан" };
+	let st = store.load();
+	let res = http.request(cfg, "POST", "/agent/v1/mobile-link", {}, { timeout: 30, time_offset: st.time_offset });
+	if (!res.ok || type(res.json) != "object")
+		return { ok: false, error: res.stderr != "" ? res.stderr : ("HTTP " + res.status) };
+	let j = res.json;
+	let url = util.as_string(j.url);
+	let qr = util.as_string(j.qr_data_url);
+	if (url == "" || qr == "")
+		return { ok: false, error: "сервер не вернул QR-код" };
+	return {
+		ok: true,
+		url: url,
+		qr: qr,
+		expires_at: util.as_string(j.expires_at),
+		ttl_seconds: util.as_int(j.ttl_seconds, 300),
+		https: j.https === true
+	};
+}
+
 function result(command_id, status, res_data, error) {	let cfg = config.load();
 	if (!cfg.bound)
 		return { ok: false };
@@ -141,4 +166,4 @@ function report(kind, product, report_obj, text) {
 	return { ok: res.ok, json: res.json };
 }
 
-return { VERSION, build_probe, bind, probe, poll, result, report, rotate, set_server_time };
+return { VERSION, build_probe, bind, probe, poll, result, report, rotate, mobile_link, set_server_time };

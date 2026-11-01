@@ -49,16 +49,6 @@ export interface TemplateAssignment {
   section_map?: Record<string, string> | null;
 }
 
-export interface MobileLink {
-  id: string;
-  token: string;
-  url: string;
-  qr_data_url: string;
-  expires_at: string;
-  ttl_seconds: number;
-  https: boolean;
-}
-
 export interface RouterSnapshot {
   id: string;
   kind: 'native' | 'local';
