@@ -250,8 +250,27 @@ export function RouterRulesPanel(props: {
     setEditor({ mode: 'edit', rule });
   }
 
+  const enabledRules = rules.filter((rule) => rule.enabled);
+
   function requestToggle(rule: RuleView): void {
+    if (rule.enabled && enabledRules.length === 1) {
+      toast.error(
+        'Нельзя выключить последнее включённое правило: Prokop не сможет собрать конфигурацию. Сначала включите другое правило.',
+      );
+      return;
+    }
     setToggleTarget(rule);
+  }
+
+  function requestDelete(rule: RuleView, connection: RuleConnectionView): void {
+    const sources = rule.subscriptions.length + rule.links.length;
+    if (rule.enabled && enabledRules.length === 1 && sources <= 1) {
+      toast.error(
+        'Это последний источник последнего включённого правила. Prokop не сможет собрать конфигурацию. Сначала включите другое правило или добавьте источник.',
+      );
+      return;
+    }
+    setDeleteTarget({ rule, connection });
   }
 
   async function toggleRule(): Promise<void> {
@@ -375,8 +394,14 @@ export function RouterRulesPanel(props: {
 
   function submitRule(body: RuleBody, pending: PendingConnection[]): void {
     const userEnabled = body.enabled;
+    const existingRule = rules.find((rule) => rule.section === body.section);
+    const existingSources = existingRule
+      ? existingRule.subscriptions.length + existingRule.links.length
+      : 0;
     const bootstrap =
-      body.create && CONNECTION_ACTIONS.has(body.action) && pending.length > 0;
+      CONNECTION_ACTIONS.has(body.action) &&
+      pending.length > 0 &&
+      existingSources === 0;
     const diffBody = bootstrap ? { ...body, enabled: false } : body;
     setEditor(null);
     setDiffRequest({
@@ -450,6 +475,14 @@ export function RouterRulesPanel(props: {
           </p>
         ) : null}
 
+        {rules.length > 0 && enabledRules.length === 1 ? (
+          <InfoBanner tone="warn">
+            В Prokop должно оставаться хотя бы одно включённое правило. Последнее включённое правило
+            нельзя выключить или оставить без источника подключения — иначе Prokop не сможет
+            собрать конфигурацию.
+          </InfoBanner>
+        ) : null}
+
         {rules.length === 0 && !loading ? (
           <div className="empty-state">
             <Empty>
@@ -474,7 +507,7 @@ export function RouterRulesPanel(props: {
                 onReplace={(connection) =>
                   setConnectionTarget({ rule, connection })
                 }
-                onDelete={(connection) => setDeleteTarget({ rule, connection })}
+                onDelete={(connection) => requestDelete(rule, connection)}
                 onToggle={() => requestToggle(rule)}
                 disabled={!online}
               />
@@ -801,6 +834,8 @@ function RuleEditorModal(props: {
   const [error, setError] = useState<string | null>(null);
 
   const canConnect = CONNECTION_ACTIONS.has(action);
+  const existingSources =
+    (props.rule?.subscriptions.length ?? 0) + (props.rule?.links.length ?? 0);
 
   useEffect(() => {
     if (!canConnect) return;
@@ -923,7 +958,7 @@ function RuleEditorModal(props: {
       setError('Укажите название правила');
       return;
     }
-    if (props.mode === 'create' && canConnect && pending.length === 0) {
+    if (canConnect && existingSources + pending.length === 0) {
       setError('Для действия «Через VPN» добавьте подписку или VLESS-ссылку');
       return;
     }
@@ -1102,12 +1137,12 @@ function RuleEditorModal(props: {
         hint="Выключенное правило сохраняется на роутере, но не действует."
       />
 
-      {props.mode === 'create' && canConnect ? (
+      {canConnect && existingSources === 0 ? (
         <div className="rule-connection-box">
           <h3>Источники подключения</h3>
           <p className="muted-text small">
-            Вставьте URL подписки или VLESS-ссылки. Они будут добавлены в новую секцию после
-            применения правила.
+            Вставьте URL подписки или VLESS-ссылки. Они будут добавлены в правило после
+            применения.
           </p>
 
           <Field label="Подписка из каталога" hint="Необязательно, если вставляете URL вручную.">
@@ -1346,7 +1381,7 @@ function RuleDiffModal(props: {
           </div>
           {props.request.bootstrap ? (
             <InfoBanner>
-              Правило создаётся выключенным: Prokop не принимает секцию «через VPN» без источника
+              Правило применяется выключенным: Prokop не принимает секцию «через VPN» без источника
               подключения. Сразу после применения будут добавлены подключения, и правило{' '}
               {props.request.finalEnabled ? 'включится автоматически' : 'останется выключенным'}.
             </InfoBanner>

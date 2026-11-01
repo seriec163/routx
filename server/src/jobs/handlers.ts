@@ -64,6 +64,23 @@ function asNumber(value: unknown): number | null {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
+/**
+ * Prokop возвращает в лог понятную причину, но CLI-ответ при reload может быть
+ * просто JSON. Добавляем подсказку для самых частых случаев.
+ */
+function prokopReloadHint(message: string): string {
+  if (/no enabled sections/i.test(message)) {
+    return `${message}. В Prokop не осталось ни одного включённого правила: включите другое правило или добавьте источник подключения.`;
+  }
+  if (/has no connection/i.test(message)) {
+    return `${message}. У правила «через VPN» нет источника подключения: добавьте подписку или VLESS-ссылку.`;
+  }
+  if (/reload_failed|config/i.test(message) && message.trim().startsWith('{')) {
+    return `${message}. Prokop не перезагрузил конфигурацию: проверьте, что осталось включённое правило с источником подключения.`;
+  }
+  return message;
+}
+
 function requireRouter(job: JobRow): string {
   if (!job.router_id) throw new JobFailure('no_router', 'Задача не привязана к роутеру');
   return job.router_id;
@@ -595,7 +612,7 @@ export async function applyRun(ctx: HandlerContext, job: JobRow): Promise<Json> 
     await ctx.pool.query(
       `update apply_runs set status = $2, finished_at = now(), error_code = $3, error_detail = $4
         where id = $1`,
-      [applyRunId, status, failure.code, failure.message.slice(0, 500)],
+      [applyRunId, status, failure.code, prokopReloadHint(failure.message).slice(0, 500)],
     );
 
     await notifyRouterOwner(ctx.pool, routerId, {
@@ -603,15 +620,15 @@ export async function applyRun(ctx: HandlerContext, job: JobRow): Promise<Json> 
       severity: 'critical',
       message:
         rollback === 'ok'
-          ? `Применение не удалось и было откачено: ${failure.message}`
-          : `Применение не удалось (${failure.message}). Требуется ручная проверка.`,
+          ? `Применение не удалось и было откачено: ${prokopReloadHint(failure.message)}`
+          : `Применение не удалось (${prokopReloadHint(failure.message)}). Требуется ручная проверка.`,
       dedupeKey: `apply:${applyRunId}:${status}`,
     });
 
     // Задача должна завершиться failed, даже если откат прошёл успешно.
     throw new JobFailure(
       failure.code,
-      `${failure.message} (${rollback === 'ok' ? 'изменения откачены' : rollback === 'failed' ? `откат не удался: ${rollbackError ?? 'ошибка'}` : 'требуется ручная проверка'})`,
+      `${prokopReloadHint(failure.message)} (${rollback === 'ok' ? 'изменения откачены' : rollback === 'failed' ? `откат не удался: ${rollbackError ?? 'ошибка'}` : 'требуется ручная проверка'})`,
       failure.terminal,
     );
   }
@@ -1250,11 +1267,11 @@ export async function applyRouterConnections(ctx: HandlerContext, job: JobRow): 
     const failure = error as JobFailure;
     await ctx.pool.query(
       `update routers set last_error = $2, updated_at = now() where id = $1`,
-      [routerId, failure.message?.slice(0, 500) ?? 'Ошибка применения подключений'],
+      [routerId, prokopReloadHint(failure.message ?? '').slice(0, 500) || 'Ошибка применения подключений'],
     );
     throw new JobFailure(
       failure.code ?? 'connections_failed',
-      `${failure.message} (${rollback === 'ok' ? 'изменения откачены' : 'требуется ручная проверка'})`,
+      `${prokopReloadHint(failure.message ?? '')} (${rollback === 'ok' ? 'изменения откачены' : 'требуется ручная проверка'})`,
     );
   }
 
@@ -1457,11 +1474,11 @@ export async function manageConnection(ctx: HandlerContext, job: JobRow): Promis
       const failure = error as JobFailure;
       await ctx.pool.query(
         `update routers set last_error = $2, updated_at = now() where id = $1`,
-        [routerId, failure.message?.slice(0, 500) ?? 'Ошибка изменения подключения'],
+        [routerId, prokopReloadHint(failure.message ?? '').slice(0, 500) || 'Ошибка изменения подключения'],
       );
       throw new JobFailure(
         failure.code ?? 'connection_manage_failed',
-        `${failure.message} (${rollback === 'ok' ? 'изменения откачены' : 'требуется ручная проверка'})`,
+        `${prokopReloadHint(failure.message ?? '')} (${rollback === 'ok' ? 'изменения откачены' : 'требуется ручная проверка'})`,
       );
     }
   } finally {

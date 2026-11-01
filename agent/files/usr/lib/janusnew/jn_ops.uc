@@ -102,6 +102,26 @@ function apply_uci(product, items, base_state_hash, create_sections, local_lists
 	}
 
 	let cursor = uci.cursor();
+
+	// Не даём выключить последнее включённое правило: Prokop не сможет
+	// собрать конфигурацию. Сначала пользователь должен включить другое.
+	let disabling = {};
+	for (let item in items) {
+		let path = util.as_string(item.path);
+		let m = match(path, /^section\.([A-Za-z0-9_.-]{1,64})\.enabled$/);
+		if (m == null)
+			continue;
+		let value = item.value;
+		if (value == null && item.after != null)
+			value = item.after;
+		if (util.as_string(value) == "0")
+			disabling[m[1]] = true;
+	}
+	for (let section in disabling) {
+		if (!has_other_enabled_section(product, cursor, section))
+			return last_enabled_error();
+	}
+
 	let applied = [];
 	for (let item in items) {
 		let path = util.as_string(item.path);
@@ -180,6 +200,35 @@ function save_link_state(link_state) {
 function managed_link_hashes(link_state, product, section) {
 	let entry = link_state[product + ":" + section];
 	return type(entry) == "array" ? entry : [];
+}
+
+/**
+ * Prokop не может собрать конфигурацию, если не осталось ни одной включённой
+ * секции. Перед выключением последней проверяем, есть ли другая включённая.
+ */
+function has_other_enabled_section(product, cursor, section) {
+	let all = cursor.get_all(product);
+	if (type(all) != "object")
+		return false;
+	for (let sname in all) {
+		let sect = all[sname];
+		if (type(sect) != "object" || sect[".type"] != "section")
+			continue;
+		let real = sect[".name"] == null ? sname : util.as_string(sect[".name"]);
+		if (real == section || sname == section)
+			continue;
+		if (util.as_string(sect.enabled) != "0")
+			return true;
+	}
+	return false;
+}
+
+function last_enabled_error() {
+	return {
+		ok: false,
+		code: "last_enabled_rule",
+		error: "нельзя выключить последнее включённое правило: Prokop не сможет собрать конфигурацию. Сначала включите другое правило"
+	};
 }
 
 function connection_mask(url) {
@@ -342,6 +391,8 @@ function manage_connection(product, args) {
 		let outbounds = cursor.get(product, section, "outbound_jsons");
 		let outbound_count = type(outbounds) == "array" ? length(outbounds) : (outbounds == null ? 0 : 1);
 		if (subscriptions + link_count + outbound_count == 0) {
+			if (!has_other_enabled_section(product, cursor, section))
+				return last_enabled_error();
 			cursor.set(product, section, "enabled", "0");
 			disabled = true;
 		}
@@ -567,6 +618,8 @@ function apply_connections(product, args) {	if (product != "forkop" && product !
 	// что Router Control удалил свои подключения.
 	if (!enabled && (length(merged_links) > 0 || foreign_subscriptions > 0))
 		enabled = true;
+	if (!enabled && !has_other_enabled_section(product, cursor, section))
+		return last_enabled_error();
 	cursor.set(product, section, "enabled", enabled ? "1" : "0");
 
 	if (cursor.commit(product) == null)

@@ -4,6 +4,7 @@ import { z } from 'zod';
 import { audit } from '../audit.js';
 import { requireUser } from '../auth/service.js';
 import { decryptSecret } from '../lib/crypto.js';
+import { conflict } from '../lib/errors.js';
 import { enqueueJob, jobJson } from '../jobs/queue.js';
 import { getRouter, getRouterForMutation, assertOnline } from './service.js';
 import {
@@ -140,6 +141,28 @@ export async function registerRouterRuleRoutes(
       const body = ruleBodySchema.parse(request.body);
       const router = await getRouterForMutation(pool, auth, params.id);
       assertOnline(router);
+
+      // Prokop не может собрать конфигурацию, если не осталось ни одной
+      // включённой секции. Не даём выключить последнее включённое правило.
+      if (!body.enabled) {
+        const state = await pool.query<{ managed: Record<string, UciValue> | null }>(
+          'select managed from router_state where router_id = $1',
+          [router.id],
+        );
+        const managed = state.rows[0]?.managed ?? {};
+        const enabledSections = new Set<string>();
+        for (const [path, value] of Object.entries(managed)) {
+          const match = /^section\.([A-Za-z0-9_.-]{1,64})\.enabled$/.exec(path);
+          if (match && String(value) !== '0') enabledSections.add(match[1]!);
+        }
+        const targetEnabled = String(managed[`section.${body.section}.enabled`] ?? '1') !== '0';
+        if (targetEnabled && enabledSections.size <= 1 && enabledSections.has(body.section)) {
+          throw conflict(
+            'last_enabled_rule',
+            'Нельзя выключить последнее включённое правило: Prokop не сможет собрать конфигурацию. Сначала включите другое правило.',
+          );
+        }
+      }
 
       const payload = sectionRulePayload({
         section: body.section,
