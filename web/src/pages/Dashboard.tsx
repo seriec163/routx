@@ -1,129 +1,57 @@
 import { Link } from '../components/link';
-import { ErrorBanner, Empty, PageHeader, Panel, Spinner, Stat, StatusBadge } from '../components/ui';
-import { formatRelative, JOB_STATUS, JOB_TYPE, ROUTER_STATUS } from '../lib/format';
-import type { Job, MonitoringOverview, RouterRecord } from '../lib/types';
+import { Empty, ErrorBanner, PageHeader, Panel, Spinner, StatusBadge } from '../components/ui';
+import { formatRelative, JOB_STATUS, JOB_TYPE } from '../lib/format';
+import type { Job, RouterRecord } from '../lib/types';
 import { useApi } from '../lib/useApi';
 import { greetingName, useSession } from '../session';
 
+/**
+ * Панель — короткая точка входа. Подробное состояние парка и мониторинг
+ * живут на странице «Роутеры и мониторинг», чтобы не дублировать карточки
+ * и таблицу «Требуют внимания».
+ */
 export function DashboardPage() {
   const { me } = useSession();
-  const overview = useApi<MonitoringOverview>('/api/v1/monitoring/overview');
-  const jobs = useApi<{ items: Job[] }>('/api/v1/jobs?limit=8');
+  const jobs = useApi<{ items: Job[] }>('/api/v1/jobs?limit=50');
   const routers = useApi<{ items: RouterRecord[] }>('/api/v1/routers?limit=200');
 
   const names = new Map<string, string>();
   for (const router of routers.data?.items ?? []) names.set(router.id, router.name);
-  for (const item of overview.data?.items ?? []) names.set(item.id, item.name);
 
-  const summary = overview.data?.summary;
-  const attention = (overview.data?.items ?? []).filter(
-    (item) =>
-      item.status !== 'online' ||
-      item.proxy_health === 'dead' ||
-      item.proxy_health === 'degraded' ||
-      item.last_error,
-  );
-
-  if (overview.loading && !overview.data) return <Spinner />;
+  // Рутинный мониторинг не должен забивать ленту: показываем действия,
+  // которые пользователь действительно запускал.
+  const routine = new Set(['monitor', 'reconcile', 'read_rules', 'retention']);
+  const recentJobs = (jobs.data?.items ?? [])
+    .filter((job) => !routine.has(job.type))
+    .slice(0, 8);
 
   const greeting = greetingName(me?.user);
   return (
     <div className="page">
       <PageHeader
         title={`Здравствуйте${greeting ? `, ${greeting}` : ''}`}
-        subtitle="Сводка по парку роутеров, состоянию прокси и последним задачам."
+        subtitle="Коротко: что происходит в системе и с чего продолжить. Состояние парка и мониторинг — на странице «Роутеры»."
         actions={
           <>
+            <Link className="btn btn-ghost" to="/routers?filter=attention">
+              Проблемные роутеры
+            </Link>
             <Link className="btn btn-ghost" to="/routers">
               Роутеры
             </Link>
-            <Link className="btn btn-primary" to="/templates">
-              Шаблоны
+            <Link className="btn btn-primary" to="/routers/new">
+              Добавить роутер
             </Link>
           </>
         }
       />
 
-      {overview.error ? <ErrorBanner message={overview.error} onRetry={() => void overview.reload()} /> : null}
-
-      <div className="stat-grid">
-        <Stat label="Всего роутеров" value={summary?.total ?? 0} hint="Без архивных" />
-        <Stat label="В сети" value={summary?.online ?? 0} tone="ok" hint="Отвечали за последние 3 минуты" />
-        <Stat label="Не в сети" value={summary?.offline ?? 0} tone="bad" hint="Пропущено 3 опроса подряд" />
-        <Stat label="Ожидают привязки" value={summary?.pending ?? 0} tone="warn" hint="Агент ещё не подключался" />
-        <Stat
-          label="Прокси в норме"
-          value={summary?.proxy_healthy ?? 0}
-          tone="ok"
-          hint="Отдельно от доступности роутера"
-        />
-        <Stat
-          label="Прокси деградировал"
-          value={(summary?.proxy_degraded ?? 0) + (summary?.proxy_dead ?? 0)}
-          tone="warn"
-          hint="p95 > порога или есть мёртвые теги"
-        />
-      </div>
+      {jobs.error ? <ErrorBanner message={jobs.error} onRetry={() => void jobs.reload()} /> : null}
 
       <div className="grid-2">
         <Panel
-          title="Требуют внимания"
-          subtitle="Офлайн, конфликты, ошибки или проблемы с прокси"
-          actions={
-            <Link className="btn btn-ghost btn-sm" to="/routers">
-              Роутеры и мониторинг
-            </Link>
-          }
-        >
-          {overview.loading && !overview.data ? (
-            <Spinner />
-          ) : attention.length === 0 ? (
-            <Empty>Проблем не обнаружено. Все роутеры в норме.</Empty>
-          ) : (
-            <table className="table">
-              <thead>
-                <tr>
-                  <th>Роутер</th>
-                  <th>Статус</th>
-                  <th>Прокси</th>
-                  <th>Последний контакт</th>
-                </tr>
-              </thead>
-              <tbody>
-                {attention.slice(0, 8).map((item) => (
-                  <tr key={item.id}>
-                    <td>
-                      <Link to={`/routers/${item.id}`}>{item.name}</Link>
-                    </td>
-                    <td>
-                      <StatusBadge status={item.status} label={ROUTER_STATUS[item.status] ?? item.status} />
-                    </td>
-                    <td>
-                      {item.proxy_health ? (
-                        <StatusBadge
-                          status={item.proxy_health}
-                          label={
-                            item.proxy_health === 'healthy'
-                              ? 'В норме'
-                              : item.proxy_health === 'degraded'
-                                ? 'Деградация'
-                                : 'Не работает'
-                          }
-                        />
-                      ) : (
-                        <span className="muted-text">нет данных</span>
-                      )}
-                    </td>
-                    <td className="muted-text">{formatRelative(item.last_seen_at)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          )}
-        </Panel>
-
-        <Panel
           title="Последние задачи"
+          subtitle="Очередь и история применений, диагностики и обновлений."
           actions={
             <Link className="btn btn-ghost btn-sm" to="/jobs">
               Все задачи
@@ -132,11 +60,11 @@ export function DashboardPage() {
         >
           {jobs.loading && !jobs.data ? (
             <Spinner />
-          ) : (jobs.data?.items.length ?? 0) === 0 ? (
+          ) : recentJobs.length === 0 ? (
             <Empty>Задач пока нет.</Empty>
           ) : (
             <ul className="feed">
-              {jobs.data!.items.map((job) => (
+              {recentJobs.map((job) => (
                 <li key={job.id}>
                   <div className="feed-main">
                     <span className="feed-title">{JOB_TYPE[job.type] ?? job.type}</span>
@@ -153,28 +81,28 @@ export function DashboardPage() {
             </ul>
           )}
         </Panel>
-      </div>
 
-      <Panel title="С чего начать">
-        <ol className="steps">
-          <li>
-            Создайте запись роутера на странице{' '}
-            <Link to="/routers">«Роутеры»</Link> и выпустите токен привязки.
-          </li>
-          <li>
-            Установите JanusNew на роутер командой из диалога привязки — роутер сам выйдет на сервер
-            по TLS.
-          </li>
-          <li>
-            Опишите желаемые параметры в <Link to="/templates">шаблоне</Link>, назначьте его роутеру
-            и выполните сравнение.
-          </li>
-          <li>
-            Проверьте diff, подтвердите применение. Перед записью автоматически создаётся снимок,
-            при ошибке выполняется откат.
-          </li>
-        </ol>
-      </Panel>
+        <Panel title="Быстрый старт" subtitle="Четыре шага от нового роутера до рабочего правила.">
+          <ol className="steps">
+            <li>
+              Добавьте роутер на странице <Link to="/routers">«Роутеры»</Link> и выпустите токен
+              привязки.
+            </li>
+            <li>
+              Установите JanusNew командой из диалога привязки — роутер сам выйдет на сервер по
+              TLS.
+            </li>
+            <li>
+              Откройте роутер → <strong>«Правила и подключения»</strong>, создайте правило:
+              действие, ресурсы, подписка или VLESS.
+            </li>
+            <li>
+              Проверьте diff и подтвердите. Снимок и откат создаются автоматически; шаблон можно
+              применить к правилу из формы.
+            </li>
+          </ol>
+        </Panel>
+      </div>
     </div>
   );
 }

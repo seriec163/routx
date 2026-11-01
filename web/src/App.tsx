@@ -19,7 +19,6 @@ import { RoutersPage } from './pages/Routers';
 import { SubscriptionsPage } from './pages/Subscriptions';
 import { RolloutDetailPage, RolloutsPage } from './pages/Rollouts';
 import { SettingsPage } from './pages/Settings';
-import { SingBoxPage } from './pages/SingBox';
 import { TemplateEditorPage } from './pages/TemplateEditor';
 import { TemplatesPage } from './pages/Templates';
 import { UsersPage } from './pages/Users';
@@ -53,7 +52,6 @@ const NAV: Array<{ section: string; items: NavItem[] }> = [
     section: 'Обслуживание',
     items: [
       { to: '/diagnostics', label: 'Диагностика' },
-      { to: '/singbox', label: 'sing-box' },
       { to: '/rollouts', label: 'Поэтапное обновление' },
     ],
   },
@@ -331,7 +329,7 @@ function renderRoute(segments: string[], isAdmin: boolean) {
     case 'diagnostics':
       return second ? <DiagnosticDetailPage id={second} /> : <DiagnosticsPage />;
     case 'singbox':
-      return <SingBoxPage />;
+      return <RedirectTo to="/rollouts" />;
     case 'rollouts':
       return second ? <RolloutDetailPage id={second} /> : <RolloutsPage />;
     case 'account':

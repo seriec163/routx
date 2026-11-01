@@ -26,7 +26,7 @@ import {
   proxyHealth,
   ROUTER_STATUS,
 } from '../lib/format';
-import { navigate } from '../lib/router';
+import { navigate, useRoute } from '../lib/router';
 import type {
   BindingToken,
   MonitoringItem,
@@ -50,7 +50,7 @@ const HEALTH_LABEL: Record<string, string> = {
   'stopped but enabled': 'Остановлен, автозапуск включён',
 };
 
-type ProxyFilter = 'all' | 'healthy' | 'degraded' | 'dead';
+type ProxyFilter = 'all' | 'healthy' | 'degraded' | 'dead' | 'attention';
 
 /**
  * Единая страница парка и мониторинга.
@@ -63,6 +63,7 @@ type ProxyFilter = 'all' | 'healthy' | 'degraded' | 'dead';
 export function RoutersPage() {
   const { me } = useSession();
   const toast = useToast();
+  const route = useRoute();
   const isAdmin = me?.permissions.is_superadmin === true;
   const routers = useApi<{ items: RouterRecord[] }>(
     '/api/v1/routers?limit=200&include_archived=true',
@@ -71,7 +72,9 @@ export function RoutersPage() {
 
   const [view, setView] = useState<'active' | 'pending' | 'archive'>('active');
   const [query, setQuery] = useState('');
-  const [proxyFilter, setProxyFilter] = useState<ProxyFilter>('all');
+  const [proxyFilter, setProxyFilter] = useState<ProxyFilter>(() =>
+    route.query.get('filter') === 'attention' ? 'attention' : 'all',
+  );
   const [auto, setAuto] = useState(true);
   const [checking, setChecking] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -96,7 +99,19 @@ export function RoutersPage() {
   const filtered = useMemo(() => {
     let items =
       view === 'active' ? activeItems : view === 'pending' ? pendingItems : archivedItems;
-    if (view === 'active' && proxyFilter !== 'all') {
+    if (view === 'active' && proxyFilter === 'attention') {
+      items = items.filter((item) => {
+        const monitor = monitorById.get(item.id);
+        const status = monitor?.status ?? item.status;
+        return (
+          status !== 'online' ||
+          monitor?.proxy_health === 'degraded' ||
+          monitor?.proxy_health === 'dead' ||
+          Boolean(item.last_error) ||
+          Boolean(monitor?.last_error)
+        );
+      });
+    } else if (view === 'active' && proxyFilter !== 'all') {
       items = items.filter((item) => monitorById.get(item.id)?.proxy_health === proxyFilter);
     }
     const needle = query.trim().toLowerCase();
@@ -109,6 +124,16 @@ export function RoutersPage() {
         (item.owner_email ?? '').toLowerCase().includes(needle),
     );
   }, [activeItems, pendingItems, archivedItems, view, query, proxyFilter, monitorById]);
+
+  useEffect(() => {
+    const filter = route.query.get('filter');
+    if (filter === 'attention') {
+      setView('active');
+      setProxyFilter('attention');
+    } else if (route.path === '/routers') {
+      setProxyFilter('all');
+    }
+  }, [route.path, route.query.toString()]);
 
   useEffect(() => {
     if (!auto) return;
@@ -265,7 +290,7 @@ export function RoutersPage() {
 
             {view === 'active' ? (
               <div className="segmented">
-                {(['all', 'healthy', 'degraded', 'dead'] as const).map((value) => (
+                {(['all', 'attention', 'healthy', 'degraded', 'dead'] as const).map((value) => (
                   <button
                     key={value}
                     type="button"
@@ -274,11 +299,13 @@ export function RoutersPage() {
                   >
                     {value === 'all'
                       ? 'Все'
-                      : value === 'healthy'
-                        ? 'В норме'
-                        : value === 'degraded'
-                          ? 'Деградация'
-                          : 'Мёртв'}
+                      : value === 'attention'
+                        ? 'Проблемные'
+                        : value === 'healthy'
+                          ? 'В норме'
+                          : value === 'degraded'
+                            ? 'Деградация'
+                            : 'Мёртв'}
                   </button>
                 ))}
               </div>
@@ -321,9 +348,11 @@ export function RoutersPage() {
                 ? 'Нет роутеров, ожидающих привязки.'
                 : allItems.length === 0
                   ? 'Роутеров пока нет. Добавьте первый и выпустите токен привязки.'
-                  : proxyFilter !== 'all'
-                    ? 'Нет роутеров в выбранном фильтре прокси.'
-                    : 'Ничего не найдено по запросу.'}
+                  : proxyFilter === 'attention'
+                    ? 'Проблемных роутеров нет.'
+                    : proxyFilter !== 'all'
+                      ? 'Нет роутеров в выбранном фильтре прокси.'
+                      : 'Ничего не найдено по запросу.'}
           </Empty>
         ) : (
           <div className="table-wrap">

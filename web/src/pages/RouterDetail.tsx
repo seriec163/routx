@@ -2217,8 +2217,8 @@ export function RouterDetailPage({ id }: { id: string }) {
             title="Текущая версия"
             subtitle="Вариант и версия sing-box на роутере."
             actions={
-              <Link className="btn btn-ghost btn-sm" to="/singbox">
-                Каталог и rollout
+              <Link className="btn btn-ghost btn-sm" to="/rollouts">
+                Поэтапное обновление
               </Link>
             }
           >
