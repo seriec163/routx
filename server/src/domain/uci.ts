@@ -612,6 +612,8 @@ export function buildPlan(
     ...createSections,
   ]);
 
+  const replaceManual = payload.manual_entries_mode === 'replace';
+
   for (const [section, entry] of Object.entries(extras ?? {})) {
     if (!NAME_RE.test(section)) continue;
     if (!allowedExtras.has(section)) continue;
@@ -634,6 +636,9 @@ export function buildPlan(
       }
       pushListValue(desired, `section.${section}.remote_subnet_lists`, [value.trim()]);
     }
+    // Если секция явно описана в payload.manual_entries, кэш list_extras
+    // не должен возвращать уже удалённые адреса.
+    if (replaceManual && Object.prototype.hasOwnProperty.call(payload.manual_entries, section)) continue;
     addManual(section, entry.manual_domains, entry.manual_ips);
   }
 
@@ -810,6 +815,9 @@ export const templatePayloadSchema = z
     subscription_url: z.record(z.string(), z.record(z.string(), valueSchema)).default({}),
     create_urltest: z.array(z.string().min(1).max(64)).max(50).default([]),
     create_sections: z.array(z.string().regex(NAME_RE)).max(20).default([]),
+    // merge: list_extras дополняют ручные списки (шаблоны).
+    // replace: ручные списки берутся только из payload (редактирование правила).
+    manual_entries_mode: z.enum(['merge', 'replace']).default('merge'),
     manual_entries: z
       .record(
         z.string(),
@@ -870,6 +878,7 @@ export function emptyTemplatePayload(): TemplatePayload {
     subscription_url: {},
     create_urltest: [],
     create_sections: [],
+    manual_entries_mode: 'merge',
     manual_entries: {},
   };
 }
@@ -1057,6 +1066,7 @@ export function sectionRulePayload(input: SectionRuleInput): TemplatePayload {
     ...emptyTemplatePayload(),
     settings: input.settings ?? {},
     sections: { [input.section]: options },
+    manual_entries_mode: 'replace',
     manual_entries: {
       [input.section]: {
         domains: input.manual_domains ?? [],
@@ -1196,6 +1206,16 @@ export function deletionCandidates(
       candidates.add(path);
     }
   }
+
+  // Явно пустые ручные списки: ссылка на локальный список должна быть удалена,
+  // иначе последний удалённый адрес остаётся в конфигурации.
+  for (const [section, entry] of Object.entries(payload.manual_entries)) {
+    if (entry.domains.length > 0 || entry.ips.length > 0) continue;
+    const path = `section.${section}.domain_ip_lists`;
+    if (exclusions.has(path)) continue;
+    if (classifyPath(path).allowed) candidates.add(path);
+  }
+
   return candidates;
 }
 

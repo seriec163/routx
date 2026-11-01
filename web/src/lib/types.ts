@@ -116,6 +116,7 @@ export interface TemplatePayload {
   resources?: Record<string, string | string[] | null>;
   manual_domains?: string[];
   manual_ips?: string[];
+  manual_entries_mode?: 'merge' | 'replace';
   settings: Record<string, string | string[] | null>;
   sections: Record<string, Record<string, string | string[] | null>>;
   urltest: Record<string, Record<string, string | string[] | null>>;

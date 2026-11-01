@@ -19,6 +19,7 @@ export type JobType =
   | 'sb_versions'
   | 'sb_install'
   | 'service_action'
+  | 'reboot'
   | 'dns_benchmark'
   | 'connections_apply'
   | 'list_connections'

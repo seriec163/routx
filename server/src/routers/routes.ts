@@ -990,6 +990,44 @@ export async function registerRouterRoutes(app: FastifyInstance, ctx: RouteConte
     return { job: jobJson(job) };
   });
 
+  // Перезагрузка самого роутера. Агент отвечает до reboot, поэтому задача
+  // успевает завершиться; после перезагрузки связь восстанавливается сама.
+  app.post(
+    '/api/v1/routers/:id/reboot',
+    { config: { rateLimit: { max: 3, timeWindow: '5 minutes' } } },
+    async (request, reply) => {
+      const auth = requireUser(request);
+      const params = z.object({ id: z.string().uuid() }).parse(request.params);
+      const router = await getRouterForMutation(pool, auth, params.id);
+      assertOnline(router);
+
+      const job = await enqueueJob(pool, {
+        type: 'reboot',
+        routerId: router.id,
+        requestedBy: auth.userId,
+        timeoutSeconds: 60,
+        idempotencyKey: `reboot:${router.id}:${Math.floor(Date.now() / 60_000)}`,
+        payload: {},
+      });
+
+      await audit(pool, {
+        actorId: auth.userId,
+        actorRole: auth.role,
+        action: 'router.reboot',
+        targetType: 'router',
+        targetId: router.id,
+        routerId: router.id,
+        result: 'ok',
+        ip: request.ip,
+        userAgent: request.headers['user-agent'],
+        metadata: { job_id: job.id },
+      });
+
+      reply.code(202);
+      return { job: jobJson(job) };
+    },
+  );
+
   // Заготовка для локального lab-теста без роутера: только чтение, без записи.
   app.get('/api/v1/routers/:id/credential-info', async (request) => {
     const auth = requireUser(request);

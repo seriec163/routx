@@ -1148,6 +1148,12 @@ export async function serviceAction(ctx: HandlerContext, job: JobRow): Promise<J
   return { action, result: raw };
 }
 
+export async function rebootRouter(ctx: HandlerContext, job: JobRow): Promise<Json> {
+  requireRouter(job);
+  const raw = await runCommand(ctx, job, 'reboot', {}, 30_000);
+  return { scheduled: true, result: raw };
+}
+
 export async function reconcile(ctx: HandlerContext, job: JobRow): Promise<Json> {
   const routerId = requireRouter(job);
   if (!ctx.settings.features.autoReconcile) {
@@ -1400,6 +1406,26 @@ export async function readRules(ctx: HandlerContext, job: JobRow): Promise<Json>
     source: 'live',
   });
 
+  // GET /rules собирает ручные записи из list_extras, без обращения к агенту.
+  // Сохраняем их после живого чтения, иначе кэш показывает пустые списки.
+  const extrasNext: RouterListExtras = { ...extras };
+  for (const rule of rules) {
+    const previous = extrasNext[rule.section] ?? {};
+    const hasEntries = rule.manual_domains.length > 0 || rule.manual_ips.length > 0;
+    if (!hasEntries && Object.keys(previous).length === 0) continue;
+    extrasNext[rule.section] = {
+      ...previous,
+      manual_domains: rule.manual_domains,
+      manual_ips: rule.manual_ips,
+    };
+  }
+  if (JSON.stringify(extrasNext) !== JSON.stringify(extras)) {
+    await ctx.pool.query(
+      'update routers set list_extras = $2::jsonb, updated_at = now() where id = $1',
+      [routerId, JSON.stringify(extrasNext)],
+    );
+  }
+
   return {
     rules,
     state_hash: asString(raw.state_hash),
@@ -1604,6 +1630,7 @@ export const HANDLERS: Record<string, JobHandler> = {
   sb_check: singBoxCheck,
   sb_install: singBoxInstall,
   service_action: serviceAction,
+  reboot: rebootRouter,
   dns_benchmark: dnsBenchmark,
   connections_apply: applyRouterConnections,
   list_connections: listConnections,

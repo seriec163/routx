@@ -14,6 +14,7 @@ import { DiagnosticDetailPage, DiagnosticsPage } from './pages/Diagnostics';
 import { JobsPage } from './pages/Jobs';
 import { LoginPage, InvitePage, ResetPasswordPage, BrandMark } from './pages/Auth';
 import { InstallPage } from './pages/Install';
+import { MobileApp } from './mobile/MobileApp';
 import { RouterDetailPage } from './pages/RouterDetail';
 import { RouterOnboardingPage } from './pages/RouterOnboarding';
 import { RoutersPage } from './pages/Routers';
@@ -196,6 +197,10 @@ function Root() {
         </div>
       </div>
     );
+  }
+
+  if (route.segments[0] === 'app') {
+    return <MobileApp />;
   }
 
   return <Shell />;

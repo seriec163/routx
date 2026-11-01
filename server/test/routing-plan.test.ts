@@ -310,4 +310,53 @@ describe('план шаблона', () => {
 
     expect(plan.desired.get('section.gga.domain')).toBe('full:api.example.com');
   });
+
+  it('удаление последнего ручного адреса убирает ссылку на локальный список', () => {
+    const empty = payload({
+      sections: { bypass: { action: 'bypass', enabled: '1', label: 'Обход' } },
+      create_sections: [],
+      manual_entries: { bypass: { domains: [], ips: [] } },
+    });
+    const plan = computePlan(
+      empty,
+      {
+        'section.bypass.action': 'bypass',
+        'section.bypass.enabled': '1',
+        'section.bypass.label': 'Обход',
+        'section.bypass.domain_ip_lists': ['/etc/janusnew/lists/bypass-aaaaaaaaaaaa.lst'],
+      },
+      [],
+    );
+
+    const item = plan.items.find(
+      (entry) => entry.path === 'section.bypass.domain_ip_lists',
+    );
+    expect(item?.op).toBe('delete');
+    expect(item?.after).toBeNull();
+  });
+
+  it('кэш ручных списков не возвращает удалённые адреса', () => {
+    const empty = payload({
+      sections: { bypass: { action: 'bypass', enabled: '1', label: 'Обход' } },
+      create_sections: [],
+      manual_entries_mode: 'replace',
+      manual_entries: { bypass: { domains: [], ips: [] } },
+    });
+    const plan = computePlan(
+      empty,
+      {
+        'section.bypass.action': 'bypass',
+        'section.bypass.enabled': '1',
+        'section.bypass.label': 'Обход',
+        'section.bypass.domain_ip_lists': ['/etc/janusnew/lists/bypass-aaaaaaaaaaaa.lst'],
+      },
+      [],
+      { bypass: { manual_domains: ['example.com'], manual_ips: [] } },
+    );
+
+    expect(plan.localLists).toHaveLength(0);
+    expect(
+      plan.items.find((entry) => entry.path === 'section.bypass.domain_ip_lists')?.op,
+    ).toBe('delete');
+  });
 });

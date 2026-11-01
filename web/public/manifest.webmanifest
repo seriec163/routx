@@ -2,7 +2,7 @@
   "name": "Router Control",
   "short_name": "Router Control",
   "description": "Управление OpenWrt-роутерами с Forkop/Prokop: правила, подключения, DNS и мониторинг.",
-  "start_url": "/#/routers",
+  "start_url": "/#/app",
   "scope": "/",
   "display": "standalone",
   "orientation": "any",

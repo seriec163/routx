@@ -47,6 +47,11 @@ function handle_command(cmd) {
 			if (!res.ok) return { status: "failed", error: { code: "service_action_failed", message: res.error } };
 			return { status: "success", result: res };
 		}
+		if (op == "reboot") {
+			// Результат должен уйти на сервер до перезагрузки: reboot с задержкой.
+			system("(sleep 3; reboot) >/dev/null 2>&1 &");
+			return { status: "success", result: { scheduled: true, delay_seconds: 3 } };
+		}
 		if (op == "dns_benchmark") {
 			let res = dns_benchmark.handle(util.as_string(args.mode));
 			if (!res.ok)

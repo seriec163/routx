@@ -81,6 +81,9 @@ export function InstallPage({
         await onLoggedInRef.current();
         setEmail(response.user.first_name || response.user.email);
         setTargetRouter(response.router_id || routerId);
+        if (response.router_id) {
+          window.localStorage.setItem('rc.mobile.router', response.router_id);
+        }
         setStatus('ready');
       } catch (caught) {
         if (!active) return;
@@ -100,7 +103,7 @@ export function InstallPage({
     setPromptEvent(null);
   }
 
-  const openTarget = targetRouter ? `/routers/${targetRouter}` : '/routers';
+  const openTarget = '/app';
 
   return (
     <div className="auth-shell auth-shell-single">
