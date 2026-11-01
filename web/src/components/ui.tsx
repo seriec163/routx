@@ -10,6 +10,7 @@ import {
   type ReactNode,
 } from 'react';
 import { statusTone, type Tone } from '../lib/format';
+import type { Job } from '../lib/types';
 
 /* -------------------------------------------------------------------------- */
 /* Тосты                                                                      */
@@ -159,6 +160,131 @@ export function Spinner({ label = 'Загрузка…' }: { label?: string }) {
     <div className="spinner" role="status">
       <span className="spinner-dot" aria-hidden="true" />
       {label}
+    </div>
+  );
+}
+
+export function ProgressBar(props: {
+  value?: number | null;
+  label?: string;
+  tone?: 'accent' | 'warn' | 'danger';
+}) {
+  const indeterminate = props.value == null;
+  const value = indeterminate ? 0 : Math.max(0, Math.min(100, props.value ?? 0));
+  return (
+    <div
+      className={`progress progress-${props.tone ?? 'accent'} ${
+        indeterminate ? 'progress-indeterminate' : ''
+      }`}
+      role="progressbar"
+      aria-label={props.label ?? 'Выполняется'}
+      aria-valuemin={0}
+      aria-valuemax={100}
+      aria-valuenow={indeterminate ? undefined : value}
+    >
+      <span
+        className="progress-fill"
+        style={indeterminate ? undefined : { width: `${value}%` }}
+      />
+    </div>
+  );
+}
+
+const JOB_PHASE: Record<string, string> = {
+  queued: 'Ожидает выполнения',
+  read_state: 'Читаем состояние роутера',
+  plan: 'Строим план изменений',
+  snapshot: 'Создаём снимок конфигурации',
+  apply: 'Записываем настройки',
+  connections: 'Применяем подключения',
+  reload: 'Перезагружаем Prokop',
+  verify: 'Проверяем состояние',
+  rollback: 'Откатываем изменения',
+  rolled_back: 'Изменения откачены',
+  done: 'Готово',
+  failed: 'Ошибка',
+};
+
+const JOB_STATUS_TEXT: Record<string, string> = {
+  queued: 'В очереди',
+  running: 'Выполняется',
+  success: 'Готово',
+  failed: 'Ошибка',
+  cancelled: 'Отменено',
+  timeout: 'Таймаут',
+};
+
+function elapsedText(ms: number): string {
+  if (ms < 1000) return 'только что';
+  if (ms < 60_000) return `${Math.round(ms / 1000)} с`;
+  const minutes = Math.floor(ms / 60_000);
+  const seconds = Math.round((ms % 60_000) / 1000);
+  return `${minutes} мин ${seconds} с`;
+}
+
+/**
+ * Наглядный прогресс фоновой задачи. Показывает фазу, прошедшее время,
+ * полосу прогресса и ошибку. Для задач без числового прогресса полоса
+ * анимированная — но пользователь всё равно видит, что работа идёт.
+ */
+export function JobProgress(props: {
+  job: Job | null;
+  label?: string;
+  phases?: Record<string, string>;
+}) {
+  const [now, setNow] = useState(() => Date.now());
+  const job = props.job;
+  const running = job?.status === 'queued' || job?.status === 'running';
+
+  useEffect(() => {
+    if (!running) return;
+    const timer = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => window.clearInterval(timer);
+  }, [running, job?.id]);
+
+  if (!job) return null;
+
+  const phase =
+    job.result && typeof job.result.phase === 'string' ? job.result.phase : null;
+  const progress =
+    job.result && typeof job.result.progress === 'number' ? job.result.progress : null;
+  const phaseLabel = phase
+    ? (props.phases?.[phase] ?? JOB_PHASE[phase] ?? phase)
+    : null;
+  const statusLabel =
+    job.status === 'running'
+      ? (phaseLabel ?? props.label ?? JOB_STATUS_TEXT.running)
+      : (JOB_STATUS_TEXT[job.status] ?? props.label ?? job.status);
+  const startedAt = Date.parse(job.started_at ?? job.created_at);
+  const elapsed = Number.isFinite(startedAt) ? Math.max(0, now - startedAt) : 0;
+  const tone =
+    job.status === 'failed' || job.status === 'timeout'
+      ? 'danger'
+      : job.status === 'cancelled'
+        ? 'warn'
+        : 'accent';
+  const value =
+    job.status === 'success'
+      ? 100
+      : job.status === 'failed' || job.status === 'timeout' || job.status === 'cancelled'
+        ? 100
+        : progress;
+
+  return (
+    <div className="job-progress" role="status" aria-live="polite">
+      <div className="job-progress-head">
+        <span>{statusLabel}</span>
+        <span className="muted-text small">
+          {running || job.status === 'queued' ? `${elapsedText(elapsed)} · ` : ''}
+          {value != null ? `${Math.round(value)}%` : 'выполняется…'}
+        </span>
+      </div>
+      <ProgressBar value={value} tone={tone} label={statusLabel} />
+      {job.error ? (
+        <p className="field-error" style={{ marginTop: 6 }}>
+          {job.error.message}
+        </p>
+      ) : null}
     </div>
   );
 }

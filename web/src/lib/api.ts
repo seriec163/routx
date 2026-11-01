@@ -39,6 +39,26 @@ export interface RequestOptions {
   signal?: AbortSignal;
 }
 
+type ActivityListener = (count: number) => void;
+let activeRequests = 0;
+const activityListeners = new Set<ActivityListener>();
+
+function notifyActivity(): void {
+  for (const listener of activityListeners) listener(activeRequests);
+}
+
+/**
+ * Подписка на количество запросов в полёте. Нужна для общей полосы
+ * «что-то происходит», чтобы пользователь видел реакцию на любое действие.
+ */
+export function subscribeActivity(listener: ActivityListener): () => void {
+  activityListeners.add(listener);
+  listener(activeRequests);
+  return () => {
+    activityListeners.delete(listener);
+  };
+}
+
 function buildUrl(path: string, query?: RequestOptions['query']): string {
   const url = new URL(path, window.location.origin);
   if (query) {
@@ -60,45 +80,59 @@ export async function api<T>(path: string, options: RequestOptions = {}): Promis
     if (csrf) headers['x-csrf-token'] = csrf;
   }
 
-  const response = await fetch(buildUrl(path, options.query), {
-    method,
-    headers,
-    body: options.body === undefined ? undefined : JSON.stringify(options.body),
-    credentials: 'same-origin',
-    cache: 'no-store',
-    signal: options.signal,
-  });
+  activeRequests += 1;
+  notifyActivity();
+  try {
+    const response = await fetch(buildUrl(path, options.query), {
+      method,
+      headers,
+      body: options.body === undefined ? undefined : JSON.stringify(options.body),
+      credentials: 'same-origin',
+      cache: 'no-store',
+      signal: options.signal,
+    });
 
-  if (response.status === 204) return undefined as T;
+    if (response.status === 204) return undefined as T;
 
-  const text = await response.text();
-  let payload: unknown = null;
-  if (text.length > 0) {
-    try {
-      payload = JSON.parse(text);
-    } catch {
-      payload = { error: { code: 'invalid_response', message: text.slice(0, 300) } };
+    const text = await response.text();
+    let payload: unknown = null;
+    if (text.length > 0) {
+      try {
+        payload = JSON.parse(text);
+      } catch {
+        payload = { error: { code: 'invalid_response', message: text.slice(0, 300) } };
+      }
     }
-  }
 
-  if (!response.ok) {
-    const body = (payload ?? {}) as ApiErrorBody;
-    throw new ApiError(
-      response.status,
-      body.error?.code ?? `http_${response.status}`,
-      body.error?.message ?? `Запрос завершился с кодом ${response.status}`,
-      body.error?.details,
-      body.error?.request_id ?? response.headers.get('x-request-id') ?? undefined,
-    );
-  }
+    if (!response.ok) {
+      const body = (payload ?? {}) as ApiErrorBody;
+      throw new ApiError(
+        response.status,
+        body.error?.code ?? `http_${response.status}`,
+        body.error?.message ?? `Запрос завершился с кодом ${response.status}`,
+        body.error?.details,
+        body.error?.request_id ?? response.headers.get('x-request-id') ?? undefined,
+      );
+    }
 
-  return payload as T;
+    return payload as T;
+  } finally {
+    activeRequests = Math.max(0, activeRequests - 1);
+    notifyActivity();
+  }
 }
 
 export async function apiText(path: string): Promise<string> {
-  const response = await fetch(path, { credentials: 'same-origin', cache: 'no-store' });
-  if (!response.ok) throw new ApiError(response.status, 'http_error', 'Не удалось скачать файл');
-  return response.text();
+  activeRequests += 1;
+  notifyActivity();
+  try {
+    const response = await fetch(path, { credentials: 'same-origin', cache: 'no-store' });
+    if (!response.ok) throw new ApiError(response.status, 'http_error', 'Не удалось скачать файл');
+    return response.text();
+  } finally {
+    activeRequests = Math.max(0, activeRequests - 1);
+    notifyActivity();
+  }
 }
 
 export function errorMessage(error: unknown): string {

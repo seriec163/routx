@@ -7,8 +7,10 @@ import {
   ErrorBanner,
   Field,
   InfoBanner,
+  JobProgress,
   Modal,
   Panel,
+  ProgressBar,
   Select,
   Spinner,
   StatusBadge,
@@ -190,6 +192,7 @@ export function RouterRulesPanel(props: {
     connection: RuleConnectionView;
   } | null>(null);
   const [deleteBusy, setDeleteBusy] = useState(false);
+  const [deleteJob, setDeleteJob] = useState<Job | null>(null);
   const [toggleTarget, setToggleTarget] = useState<RuleView | null>(null);
   const liveLoaded = useRef(false);
 
@@ -271,6 +274,7 @@ export function RouterRulesPanel(props: {
       return;
     }
     setDeleteTarget({ rule, connection });
+    setDeleteJob(null);
   }
 
   async function toggleRule(): Promise<void> {
@@ -293,9 +297,21 @@ export function RouterRulesPanel(props: {
     });
   }
 
+  async function waitDeleteJob(start: Job): Promise<Job> {
+    let current = start;
+    setDeleteJob(current);
+    while (current.status === 'queued' || current.status === 'running') {
+      await new Promise((resolve) => window.setTimeout(resolve, 1000));
+      current = (await api<{ job: Job }>(`/api/v1/jobs/${current.id}`)).job;
+      setDeleteJob(current);
+    }
+    return current;
+  }
+
   async function deleteConnection(): Promise<void> {
     if (!deleteTarget) return;
     setDeleteBusy(true);
+    setDeleteJob(null);
     try {
       const { rule, connection } = deleteTarget;
       if (connection.managed && connection.id) {
@@ -303,7 +319,7 @@ export function RouterRulesPanel(props: {
           `/api/v1/routers/${props.routerId}/connections/${connection.id}`,
           { method: 'DELETE' },
         );
-        const job = await waitForJob(response.job);
+        const job = await waitDeleteJob(response.job);
         if (job.status !== 'success') {
           throw new Error(job.error?.message ?? 'Не удалось удалить подключение');
         }
@@ -321,13 +337,14 @@ export function RouterRulesPanel(props: {
             },
           },
         );
-        const job = await waitForJob(response.job);
+        const job = await waitDeleteJob(response.job);
         if (job.status !== 'success') {
           throw new Error(job.error?.message ?? 'Не удалось удалить подключение');
         }
       }
       toast.success('Подключение удалено');
       setDeleteTarget(null);
+      setDeleteJob(null);
       await readLive();
       props.onChanged();
     } catch (caught) {
@@ -572,14 +589,22 @@ export function RouterRulesPanel(props: {
           danger
           busy={deleteBusy}
           confirmLabel="Удалить"
-          onCancel={() => setDeleteTarget(null)}
+          onCancel={() => {
+            setDeleteTarget(null);
+            setDeleteJob(null);
+          }}
           onConfirm={() => void deleteConnection()}
           message={
-            <p>
-              {deleteTarget.connection.kind === 'subscription' ? 'Подписка' : 'Ссылка'}{' '}
-              <strong>{deleteTarget.connection.masked}</strong> будет удалена из секции{' '}
-              <strong>{deleteTarget.rule.label}</strong>. Перед изменением создаётся снимок.
-            </p>
+            <>
+              <p>
+                {deleteTarget.connection.kind === 'subscription' ? 'Подписка' : 'Ссылка'}{' '}
+                <strong>{deleteTarget.connection.masked}</strong> будет удалена из секции{' '}
+                <strong>{deleteTarget.rule.label}</strong>. Перед изменением создаётся снимок.
+              </p>
+              {deleteBusy || deleteJob ? (
+                <JobProgress job={deleteJob} label="Удаляем подключение" />
+              ) : null}
+            </>
           }
         />
       ) : null}
@@ -1236,6 +1261,7 @@ function RuleDiffModal(props: {
   const [job, setJob] = useState<Job | null>(null);
   const [run, setRun] = useState<ApplyRunDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [postApply, setPostApply] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -1302,6 +1328,17 @@ function RuleDiffModal(props: {
     };
   }, [props.routerId, props.request]);
 
+  async function waitJobWithUpdates(start: Job): Promise<Job> {
+    let current = start;
+    setJob(current);
+    while (current.status === 'queued' || current.status === 'running') {
+      await new Promise((resolve) => window.setTimeout(resolve, 1000));
+      current = (await api<{ job: Job }>(`/api/v1/jobs/${current.id}`)).job;
+      setJob(current);
+    }
+    return current;
+  }
+
   async function confirm(): Promise<void> {
     if (!run) return;
     setPhase('applying');
@@ -1313,17 +1350,21 @@ function RuleDiffModal(props: {
           body: { diff_hash: run.apply_run.diff_hash },
         },
       );
-      const applied = await waitForJob(response.job, 600_000);
+      setJob(response.job);
+      const applied = await waitJobWithUpdates(response.job);
       if (applied.status !== 'success') {
         setPhase('error');
         setError(applied.error?.message ?? 'Применение не удалось');
         return;
       }
       toast.success('Правило применено');
+      setPostApply(true);
       await props.onApplied();
+      setPostApply(false);
       setPhase('applied');
       props.onClose();
     } catch (caught) {
+      setPostApply(false);
       setPhase('ready');
       toast.error(errorMessage(caught));
     }
@@ -1360,13 +1401,28 @@ function RuleDiffModal(props: {
       }
     >
       {phase === 'starting' || phase === 'waiting' || phase === 'loading' ? (
-        <Spinner
+        <JobProgress
+          job={job}
           label={
             phase === 'loading'
               ? 'Загружаем различия…'
               : 'Читаем состояние роутера и строим diff…'
           }
         />
+      ) : null}
+
+      {phase === 'applying' ? (
+        <JobProgress job={job} label="Применяем изменения на роутере" />
+      ) : null}
+
+      {postApply ? (
+        <div className="job-progress">
+          <div className="job-progress-head">
+            <span>Добавляем подключения…</span>
+            <span className="muted-text small">выполняется…</span>
+          </div>
+          <ProgressBar value={null} label="Добавляем подключения" />
+        </div>
       ) : null}
 
       {error ? <ErrorBanner message={error} /> : null}
@@ -1423,6 +1479,7 @@ function ConnectionModal(props: {
   const [catalogId, setCatalogId] = useState('');
   const [catalog, setCatalog] = useState<CatalogSubscription[]>([]);
   const [busy, setBusy] = useState(false);
+  const [job, setJob] = useState<Job | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -1432,9 +1489,21 @@ function ConnectionModal(props: {
       .catch(() => undefined);
   }, [editing, kind]);
 
+  async function waitWithProgress(start: Job): Promise<Job> {
+    let current = start;
+    setJob(current);
+    while (current.status === 'queued' || current.status === 'running') {
+      await new Promise((resolve) => window.setTimeout(resolve, 1000));
+      current = (await api<{ job: Job }>(`/api/v1/jobs/${current.id}`)).job;
+      setJob(current);
+    }
+    return current;
+  }
+
   async function submit(): Promise<void> {
     setBusy(true);
     setError(null);
+    setJob(null);
     try {
       if (editing) {
         if (value.trim() === '') throw new Error('Вставьте новую ссылку');
@@ -1443,7 +1512,7 @@ function ConnectionModal(props: {
             `/api/v1/routers/${props.routerId}/connections/${editing.id}`,
             { method: 'PATCH', body: { label: label.trim() || editing.label, value: value.trim() } },
           );
-          const job = await waitForJob(response.job);
+          const job = await waitWithProgress(response.job);
           if (job.status !== 'success') throw new Error(job.error?.message ?? 'Не удалось заменить');
         } else {
           const response = await api<{ job: Job }>(
@@ -1460,7 +1529,7 @@ function ConnectionModal(props: {
               },
             },
           );
-          const job = await waitForJob(response.job);
+          const job = await waitWithProgress(response.job);
           if (job.status !== 'success') throw new Error(job.error?.message ?? 'Не удалось заменить');
         }
         toast.success('Подключение заменено');
@@ -1476,7 +1545,7 @@ function ConnectionModal(props: {
           `/api/v1/routers/${props.routerId}/connections`,
           { method: 'POST', body },
         );
-        const job = await waitForJob(response.job);
+        const job = await waitWithProgress(response.job);
         if (job.status !== 'success') throw new Error(job.error?.message ?? 'Не удалось добавить');
         toast.success('Подключение добавлено');
       }
@@ -1508,6 +1577,7 @@ function ConnectionModal(props: {
       }
     >
       {error ? <ErrorBanner message={error} /> : null}
+      {busy || job ? <JobProgress job={job} label="Применяем подключение" /> : null}
       {!editing ? (
         <Field label="Тип">
           <Select value={kind} onChange={(next) => setKind(next as 'subscription' | 'vless')}>

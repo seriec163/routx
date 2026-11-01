@@ -8,6 +8,7 @@ import {
   ErrorBanner,
   Field,
   InfoBanner,
+  JobProgress,
   LatencyChart,
   Modal,
   PageHeader,
@@ -378,6 +379,7 @@ function DnsApplyModal(props: {
     warnings: string[];
   } | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [job, setJob] = useState<Job | null>(null);
   const onAppliedRef = useRef(props.onApplied);
 
   useEffect(() => {
@@ -425,8 +427,10 @@ function DnsApplyModal(props: {
           body: { diff_hash: run.diff_hash },
         },
       );
+      setJob(response.job);
       for (let attempt = 0; attempt < 120; attempt += 1) {
         const status = await api<{ job: Job }>(`/api/v1/jobs/${response.job.id}`);
+        setJob(status.job);
         if (status.job.status !== 'queued' && status.job.status !== 'running') {
           if (status.job.status === 'success') {
             setPhase('success');
@@ -484,6 +488,9 @@ function DnsApplyModal(props: {
       }
     >
       {phase === 'preparing' ? <Spinner label="Сравниваем DNS-настройки…" /> : null}
+      {phase === 'applying' ? (
+        <JobProgress job={job} label="Применяем DNS-настройки" />
+      ) : null}
       {error ? <ErrorBanner message={error} /> : null}
       {run?.warnings.map((warning) => (
         <InfoBanner key={warning} tone="warn">
@@ -556,6 +563,8 @@ export function RouterDetailPage({ id }: { id: string }) {
   const [binding, setBinding] = useState<BindingToken | null>(null);
   const [credential, setCredential] = useState<RotateCredential | null>(null);
   const [busy, setBusy] = useState(false);
+  const [activeJob, setActiveJob] = useState<Job | null>(null);
+  const [activeJobLabel, setActiveJobLabel] = useState('');
   const [restoreRouterBusy, setRestoreRouterBusy] = useState(false);
   const [purgeOpen, setPurgeOpen] = useState(false);
   const [purgeName, setPurgeName] = useState('');
@@ -728,8 +737,6 @@ export function RouterDetailPage({ id }: { id: string }) {
   const dnsData = dnsStatus.data;
   const agentSupportsDns = versionAtLeast(router?.agent_version, '1.1.0');
   const dnsRunning = dnsJob?.status === 'queued' || dnsJob?.status === 'running';
-  const dnsProgress =
-    dnsJob?.result && typeof dnsJob.result.progress === 'number' ? dnsJob.result.progress : 0;
   const dnsCurrent =
     dnsJob?.result && typeof dnsJob.result.current === 'string' ? dnsJob.result.current : '';
   const dnsBootstrap = dnsBenchmark?.bootstrap?.length
@@ -821,6 +828,27 @@ export function RouterDetailPage({ id }: { id: string }) {
       current = (await api<{ job: Job }>(`/api/v1/jobs/${current.id}`)).job;
     }
     return current;
+  }
+
+  /**
+   * Показывает прогресс задачи в верхней части страницы роутера. Используется
+   * для действий, которые не открывают собственное модальное окно.
+   */
+  async function trackJob(start: Job, label: string): Promise<Job | null> {
+    setActiveJob(start);
+    setActiveJobLabel(label);
+    let current = start;
+    try {
+      while (current.status === 'queued' || current.status === 'running') {
+        await new Promise((resolve) => window.setTimeout(resolve, 1000));
+        current = (await api<{ job: Job }>(`/api/v1/jobs/${current.id}`)).job;
+        setActiveJob(current);
+      }
+      return current;
+    } catch (caught) {
+      toast.error(errorMessage(caught));
+      return null;
+    }
   }
 
   async function loadExternalConnections(): Promise<void> {
@@ -1050,7 +1078,9 @@ export function RouterDetailPage({ id }: { id: string }) {
     setBusy(true);
     try {
       const res = await api<{ job: Job }>(`/api/v1/routers/${id}/refresh`, { method: 'POST' });
-      toast.info(`Чтение состояния запущено (${res.job.id.slice(0, 8)})`);
+      const finished = await trackJob(res.job, 'Читаем состояние роутера');
+      if (finished?.status === 'success') toast.success('Состояние обновлено');
+      else if (finished) toast.error(finished.error?.message ?? 'Не удалось прочитать состояние');
       await reloadAll();
     } catch (caught) {
       toast.error(errorMessage(caught));
@@ -1107,7 +1137,17 @@ export function RouterDetailPage({ id }: { id: string }) {
         method: 'POST',
         body: { action },
       });
-      const finished = await waitForJob(response.job.id);
+      const label =
+        action === 'restart'
+          ? 'Перезапускаем службу'
+          : action === 'start'
+            ? 'Запускаем службу'
+            : action === 'stop'
+              ? 'Останавливаем службу'
+              : action === 'enable'
+                ? 'Включаем автозапуск'
+                : 'Выключаем автозапуск';
+      const finished = await trackJob(response.job, label);
       if (!finished) {
         toast.info('Задача выполняется дольше обычного — следите за ней во вкладке «Задачи»');
       } else if (finished.status !== 'success') {
@@ -1137,8 +1177,13 @@ export function RouterDetailPage({ id }: { id: string }) {
   async function createSnapshot(): Promise<void> {
     setSnapshotBusy(true);
     try {
-      await api(`/api/v1/routers/${id}/snapshot`, { method: 'POST', body: { reason: 'manual' } });
-      toast.info('Создание снимка поставлено в очередь');
+      const res = await api<{ job: Job }>(`/api/v1/routers/${id}/snapshot`, {
+        method: 'POST',
+        body: { reason: 'manual' },
+      });
+      const finished = await trackJob(res.job, 'Создаём снимок конфигурации');
+      if (finished?.status === 'success') toast.success('Снимок создан');
+      else if (finished) toast.error(finished.error?.message ?? 'Не удалось создать снимок');
       await Promise.all([snapshots.reload(), jobs.reload()]);
     } catch (caught) {
       toast.error(errorMessage(caught));
@@ -1151,10 +1196,15 @@ export function RouterDetailPage({ id }: { id: string }) {
     if (!restoring) return;
     setBusy(true);
     try {
-      await api(`/api/v1/routers/${id}/snapshots/${restoring.id}/restore`, { method: 'POST' });
-      toast.info('Восстановление запущено. После записи будет проверено состояние.');
+      const res = await api<{ job: Job }>(
+        `/api/v1/routers/${id}/snapshots/${restoring.id}/restore`,
+        { method: 'POST' },
+      );
+      const finished = await trackJob(res.job, 'Восстанавливаем снимок');
+      if (finished?.status === 'success') toast.success('Снимок восстановлен');
+      else if (finished) toast.error(finished.error?.message ?? 'Не удалось восстановить снимок');
       setRestoring(null);
-      await jobs.reload();
+      await Promise.all([jobs.reload(), detail.reload()]);
     } catch (caught) {
       toast.error(errorMessage(caught));
     } finally {
@@ -1323,7 +1373,7 @@ export function RouterDetailPage({ id }: { id: string }) {
     if (!installVersion) return;
     setBusy(true);
     try {
-      await api(`/api/v1/routers/${id}/singbox/install`, {
+      const res = await api<{ job: Job }>(`/api/v1/routers/${id}/singbox/install`, {
         method: 'POST',
         body: {
           variant: 'extended',
@@ -1331,10 +1381,12 @@ export function RouterDetailPage({ id }: { id: string }) {
           acknowledge_risk: true,
         },
       });
-      toast.info(`Установка sing-box ${installVersion.tag} запущена`);
+      const finished = await trackJob(res.job, `Устанавливаем sing-box ${installVersion.tag}`);
+      if (finished?.status === 'success') toast.success(`sing-box ${installVersion.tag} установлен`);
+      else if (finished) toast.error(finished.error?.message ?? 'Не удалось установить sing-box');
       setSelectedVariantId('extended');
       setInstallVersion(null);
-      await jobs.reload();
+      await Promise.all([jobs.reload(), detail.reload()]);
     } catch (caught) {
       toast.error(errorMessage(caught));
     } finally {
@@ -1346,14 +1398,19 @@ export function RouterDetailPage({ id }: { id: string }) {
     if (!installVariant) return;
     setBusy(true);
     try {
-      await api(`/api/v1/routers/${id}/singbox/install`, {
+      const res = await api<{ job: Job }>(`/api/v1/routers/${id}/singbox/install`, {
         method: 'POST',
         body: { variant: installVariant.id, acknowledge_risk: true },
       });
-      toast.info(`Переключение sing-box на ${installVariant.label} запущено`);
+      const finished = await trackJob(res.job, `Переключаем sing-box на ${installVariant.label}`);
+      if (finished?.status === 'success') {
+        toast.success(`sing-box переключён на ${installVariant.label}`);
+      } else if (finished) {
+        toast.error(finished.error?.message ?? 'Не удалось переключить sing-box');
+      }
       setSelectedVariantId(installVariant.id);
       setInstallVariant(null);
-      await jobs.reload();
+      await Promise.all([jobs.reload(), detail.reload()]);
     } catch (caught) {
       toast.error(errorMessage(caught));
     } finally {
@@ -1364,10 +1421,14 @@ export function RouterDetailPage({ id }: { id: string }) {
   async function rollbackSingBox(): Promise<void> {
     setBusy(true);
     try {
-      await api(`/api/v1/routers/${id}/singbox/rollback`, { method: 'POST' });
-      toast.info('Возврат предыдущего варианта sing-box запущен');
+      const res = await api<{ job: Job }>(`/api/v1/routers/${id}/singbox/rollback`, {
+        method: 'POST',
+      });
+      const finished = await trackJob(res.job, 'Возвращаем предыдущий sing-box');
+      if (finished?.status === 'success') toast.success('Предыдущий sing-box восстановлен');
+      else if (finished) toast.error(finished.error?.message ?? 'Не удалось откатить sing-box');
       setRollbackOpen(false);
-      await jobs.reload();
+      await Promise.all([jobs.reload(), detail.reload()]);
     } catch (caught) {
       toast.error(errorMessage(caught));
     } finally {
@@ -1486,6 +1547,20 @@ export function RouterDetailPage({ id }: { id: string }) {
           hint={router.sing_box_variant ?? 'вариант неизвестен'}
         />
       </div>
+
+      {activeJob ? (
+        <div className="active-job">
+          <div className="active-job-head">
+            <strong>{activeJobLabel}</strong>
+            {activeJob.status !== 'queued' && activeJob.status !== 'running' ? (
+              <Button size="sm" variant="ghost" onClick={() => setActiveJob(null)}>
+                Скрыть
+              </Button>
+            ) : null}
+          </div>
+          <JobProgress job={activeJob} />
+        </div>
+      ) : null}
 
       <Tabs tabs={TABS} active={tab} onChange={setTab} />
 
@@ -1717,14 +1792,7 @@ export function RouterDetailPage({ id }: { id: string }) {
             </div>
 
             {dnsRunning ? (
-              <div className="dns-progress">
-                <p>
-                  {dnsProgress}% · {dnsCurrent || 'Подготовка…'}
-                </p>
-                <div className="dns-progress-bar">
-                  <span style={{ width: `${Math.min(100, Math.max(0, dnsProgress))}%` }} />
-                </div>
-              </div>
+              <JobProgress job={dnsJob} label={dnsCurrent || 'Проверяем DNS…'} />
             ) : null}
 
             {dnsError ? <ErrorBanner message={dnsError} /> : null}

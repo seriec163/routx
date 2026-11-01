@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link } from './components/link';
 import { Button, Empty, ErrorBanner, Spinner, StatusBadge, ToastProvider, useToast } from './components/ui';
-import { api, errorMessage } from './lib/api';
+import { api, errorMessage, subscribeActivity } from './lib/api';
 import { formatRelative, SEVERITY } from './lib/format';
 import { useRoute, navigate } from './lib/router';
 import type { NotificationRow } from './lib/types';
@@ -72,10 +72,42 @@ const NAV: Array<{ section: string; items: NavItem[] }> = [
 export default function App() {
   return (
     <ToastProvider>
+      <NetworkActivityBar />
       <SessionProvider>
         <Root />
       </SessionProvider>
     </ToastProvider>
+  );
+}
+
+/**
+ * Тонкая полоса вверху окна. Появляется при любом запросе к серверу,
+ * чтобы даже короткие действия не выглядели «ничего не произошло».
+ */
+function NetworkActivityBar() {
+  const [visible, setVisible] = useState(false);
+  useEffect(() => {
+    let hideTimer: number | undefined;
+    const unsubscribe = subscribeActivity((count) => {
+      if (count > 0) {
+        if (hideTimer) window.clearTimeout(hideTimer);
+        hideTimer = undefined;
+        setVisible(true);
+        return;
+      }
+      if (hideTimer) window.clearTimeout(hideTimer);
+      hideTimer = window.setTimeout(() => setVisible(false), 700);
+    });
+    return () => {
+      unsubscribe();
+      if (hideTimer) window.clearTimeout(hideTimer);
+    };
+  }, []);
+  if (!visible) return null;
+  return (
+    <div className="network-activity" role="progressbar" aria-label="Запрос выполняется">
+      <span />
+    </div>
   );
 }
 

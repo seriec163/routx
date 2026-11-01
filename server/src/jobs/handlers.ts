@@ -122,13 +122,28 @@ async function runCommand(
   return asRecord(outcome.result);
 }
 
+/** Обновляет фазу задачи для прогресс-бара в интерфейсе. */
+async function setJobPhase(
+  ctx: HandlerContext,
+  jobId: string,
+  phase: string,
+  progress?: number,
+): Promise<void> {
+  const value = progress == null ? { phase } : { phase, progress };
+  await ctx.pool
+    .query(
+      `update jobs set result = coalesce(result, '{}'::jsonb) || $2::jsonb where id = $1`,
+      [jobId, JSON.stringify(value)],
+    )
+    .catch(() => undefined);
+}
+
 async function saveState(
   pool: Pool,
   routerId: string,
   raw: Json,
   source: string,
-): Promise<Record<string, UciValue>> {
-  const managed = sanitizeAgentState(raw.managed ?? raw);
+): Promise<Record<string, UciValue>> {  const managed = sanitizeAgentState(raw.managed ?? raw);
   const hash = stateHash(managed);
 
   await pool.query(
@@ -257,6 +272,7 @@ export async function diffTemplate(ctx: HandlerContext, job: JobRow): Promise<Js
 
   const { payload, exclusions } = await loadRevision(ctx.pool, templateId, revision);
   const current = await readState(ctx, job);
+  await setJobPhase(ctx, job.id, 'plan', 60);
   const provided = asRecord(job.payload.section_map ?? {});
   const providedMap = Object.fromEntries(
     Object.entries(provided).filter(([, value]) => typeof value === 'string'),
@@ -338,6 +354,7 @@ export async function diffTemplate(ctx: HandlerContext, job: JobRow): Promise<Js
   };
 
   await recomputeDrift(ctx.pool, routerId, current);
+  await setJobPhase(ctx, job.id, 'done', 100);
 
   return {
     apply_run_id: runId,
@@ -364,6 +381,7 @@ export async function diffCustom(ctx: HandlerContext, job: JobRow): Promise<Json
   );
 
   const current = await readState(ctx, job);
+  await setJobPhase(ctx, job.id, 'plan', 60);
   const extras = await loadListExtras(ctx.pool, routerId);
   const plan = computePlan(payload, current, exclusions, extras);
   const items = plan.items;
@@ -413,6 +431,7 @@ export async function diffCustom(ctx: HandlerContext, job: JobRow): Promise<Json
   };
 
   await recomputeDrift(ctx.pool, routerId, current);
+  await setJobPhase(ctx, job.id, 'done', 100);
 
   return {
     apply_run_id: runId,
@@ -478,6 +497,7 @@ export async function applyRun(ctx: HandlerContext, job: JobRow): Promise<Json> 
       where id = $1`,
     [applyRunId],
   );
+  await setJobPhase(ctx, job.id, 'snapshot', 5);
 
   // 1. Обязательный снимок перед любыми изменениями.
   let snapshotRef: string | null = null;
@@ -504,6 +524,7 @@ export async function applyRun(ctx: HandlerContext, job: JobRow): Promise<Json> 
       'update apply_runs set snapshot_ref = $2, backup_ok = true where id = $1',
       [applyRunId, snapshotRef],
     );
+    await setJobPhase(ctx, job.id, 'apply', 30);
   } catch (error) {
     await ctx.pool.query(
       `update apply_runs set status = 'failed', finished_at = now(),
@@ -538,9 +559,11 @@ export async function applyRun(ctx: HandlerContext, job: JobRow): Promise<Json> 
       },
       Math.max(60_000, job.timeout_seconds * 1000 - 10_000),
     );
+    await setJobPhase(ctx, job.id, 'reload', 60);
 
     // 3. Перезагрузка и проверка результата чтением состояния.
     await runCommand(ctx, job, 'reload', {}, 90_000);
+    await setJobPhase(ctx, job.id, 'verify', 85);
     const raw = await runCommand(ctx, job, 'read_state', {}, 60_000);
     const current = await saveState(ctx.pool, routerId, raw, 'verify');
     const mismatched = verifyApplied(expectedState(items), current);
@@ -576,6 +599,7 @@ export async function applyRun(ctx: HandlerContext, job: JobRow): Promise<Json> 
       message: `Конфигурация применена: ${items.length} изменений`,
       dedupeKey: `apply:${applyRunId}`,
     });
+    await setJobPhase(ctx, job.id, 'done', 100);
 
     return {
       apply_run_id: applyRunId,
@@ -596,6 +620,7 @@ export async function applyRun(ctx: HandlerContext, job: JobRow): Promise<Json> 
     let rollback: 'ok' | 'failed' | 'skipped' = 'skipped';
     let rollbackError: string | null = null;
     if (snapshotRef) {
+      await setJobPhase(ctx, job.id, 'rollback', 90);
       try {
         await runCommand(ctx, job, 'snapshot_restore', { snapshot: snapshotRef, kind: 'local' }, 180_000);
         await runCommand(ctx, job, 'reload', {}, 90_000);
@@ -607,6 +632,13 @@ export async function applyRun(ctx: HandlerContext, job: JobRow): Promise<Json> 
         rollbackError = (restoreError as Error).message.slice(0, 500);
       }
     }
+
+    await setJobPhase(
+      ctx,
+      job.id,
+      rollback === 'ok' ? 'rolled_back' : 'failed',
+      100,
+    );
 
     const status = rollback === 'ok' ? 'rolled_back' : rollback === 'failed' ? 'rollback_failed' : 'needs_attention';
     await ctx.pool.query(
@@ -1185,6 +1217,7 @@ export async function applyRouterConnections(ctx: HandlerContext, job: JobRow): 
   };
 
   let snapshotRef: string | null = null;
+  await setJobPhase(ctx, job.id, 'snapshot', 5);
   try {
     const snapshot = await runCommand(ctx, job, 'snapshot_create', { reason: 'connections' }, 90_000);
     snapshotRef = asString(snapshot.external_id) ?? asString(snapshot.id) ?? `local-${Date.now()}`;
@@ -1203,6 +1236,7 @@ export async function applyRouterConnections(ctx: HandlerContext, job: JobRow): 
         ctx.settings.retention.days,
       ],
     );
+    await setJobPhase(ctx, job.id, 'connections', 30);
   } catch (error) {
     throw new JobFailure(
       'backup_failed',
@@ -1212,6 +1246,7 @@ export async function applyRouterConnections(ctx: HandlerContext, job: JobRow): 
 
   const appliedSections: Array<{ section: string; links: number; subscriptions: number }> = [];
   try {
+    let appliedIndex = 0;
     for (const [section, group] of bySection) {
       const expectedEnabled = group.links.length + group.subscriptions.length > 0;
       const currentAction = sectionOption(section, 'action');
@@ -1234,9 +1269,18 @@ export async function applyRouterConnections(ctx: HandlerContext, job: JobRow): 
         links: group.links.length,
         subscriptions: group.subscriptions.length,
       });
+      appliedIndex += 1;
+      await setJobPhase(
+        ctx,
+        job.id,
+        'connections',
+        30 + Math.round((appliedIndex / Math.max(1, bySection.size)) * 35),
+      );
     }
 
+    await setJobPhase(ctx, job.id, 'reload', 70);
     await runCommand(ctx, job, 'reload', {}, 90_000);
+    await setJobPhase(ctx, job.id, 'verify', 85);
     const raw = await runCommand(ctx, job, 'read_state', {}, 60_000);
     const current = await saveState(ctx.pool, routerId, raw, 'connections');
 
@@ -1251,9 +1295,11 @@ export async function applyRouterConnections(ctx: HandlerContext, job: JobRow): 
         );
       }
     }
+    await setJobPhase(ctx, job.id, 'done', 100);
   } catch (error) {
     let rollback: 'ok' | 'failed' = 'failed';
     if (snapshotRef) {
+      await setJobPhase(ctx, job.id, 'rollback', 90);
       try {
         await runCommand(ctx, job, 'snapshot_restore', { snapshot: snapshotRef, kind: 'local' }, 180_000);
         await runCommand(ctx, job, 'reload', {}, 90_000);
@@ -1265,6 +1311,7 @@ export async function applyRouterConnections(ctx: HandlerContext, job: JobRow): 
       }
     }
     const failure = error as JobFailure;
+    await setJobPhase(ctx, job.id, rollback === 'ok' ? 'rolled_back' : 'failed', 100);
     await ctx.pool.query(
       `update routers set last_error = $2, updated_at = now() where id = $1`,
       [routerId, prokopReloadHint(failure.message ?? '').slice(0, 500) || 'Ошибка применения подключений'],
@@ -1397,6 +1444,7 @@ export async function manageConnection(ctx: HandlerContext, job: JobRow): Promis
     }
 
     let snapshotRef: string | null = null;
+    await setJobPhase(ctx, job.id, 'snapshot', 5);
     try {
       const snapshot = await runCommand(ctx, job, 'snapshot_create', { reason: 'connection_manage' }, 90_000);
       snapshotRef =
@@ -1416,6 +1464,7 @@ export async function manageConnection(ctx: HandlerContext, job: JobRow): Promis
           ctx.settings.retention.days,
         ],
       );
+      await setJobPhase(ctx, job.id, 'apply', 30);
     } catch (error) {
       throw new JobFailure(
         'backup_failed',
@@ -1431,7 +1480,9 @@ export async function manageConnection(ctx: HandlerContext, job: JobRow): Promis
         { section, action, kind, name, hash, value },
         60_000,
       );
+      await setJobPhase(ctx, job.id, 'reload', 60);
       await runCommand(ctx, job, 'reload', {}, 90_000);
+      await setJobPhase(ctx, job.id, 'verify', 85);
       const raw = await runCommand(ctx, job, 'read_state', {}, 60_000);
       await saveState(ctx.pool, routerId, raw, 'connection_manage');
 
@@ -1451,6 +1502,7 @@ export async function manageConnection(ctx: HandlerContext, job: JobRow): Promis
       await ctx.pool.query('update routers set last_error = null, updated_at = now() where id = $1', [
         routerId,
       ]);
+      await setJobPhase(ctx, job.id, 'done', 100);
       return {
         action,
         kind,
@@ -1461,6 +1513,7 @@ export async function manageConnection(ctx: HandlerContext, job: JobRow): Promis
     } catch (error) {
       let rollback: 'ok' | 'failed' = 'failed';
       if (snapshotRef) {
+        await setJobPhase(ctx, job.id, 'rollback', 90);
         try {
           await runCommand(ctx, job, 'snapshot_restore', { snapshot: snapshotRef, kind: 'local' }, 180_000);
           await runCommand(ctx, job, 'reload', {}, 90_000);
@@ -1472,6 +1525,7 @@ export async function manageConnection(ctx: HandlerContext, job: JobRow): Promis
         }
       }
       const failure = error as JobFailure;
+      await setJobPhase(ctx, job.id, rollback === 'ok' ? 'rolled_back' : 'failed', 100);
       await ctx.pool.query(
         `update routers set last_error = $2, updated_at = now() where id = $1`,
         [routerId, prokopReloadHint(failure.message ?? '').slice(0, 500) || 'Ошибка изменения подключения'],

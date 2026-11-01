@@ -1,8 +1,9 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
   Button,
   Empty,
   ErrorBanner,
+  JobProgress,
   Modal,
   PageHeader,
   Panel,
@@ -33,6 +34,16 @@ export function JobsPage() {
     for (const router of routers.data?.items ?? []) map.set(router.id, router.name);
     return map;
   }, [routers.data]);
+
+  const hasActive = (jobs.data?.items ?? []).some(
+    (job) => job.status === 'queued' || job.status === 'running',
+  );
+
+  useEffect(() => {
+    if (!hasActive) return;
+    const timer = window.setInterval(() => void jobs.reload(), 2000);
+    return () => window.clearInterval(timer);
+  }, [hasActive, jobs.reload]);
 
   async function cancel(job: Job): Promise<void> {
     setBusyId(job.id);
@@ -151,6 +162,7 @@ export function JobsPage() {
 
       {selected ? (
         <Modal title={`Задача ${selected.id.slice(0, 8)}`} wide onClose={() => setSelected(null)}>
+          <JobProgress job={selected} />
           <div className="kv">
             <span>Тип</span>
             <strong>{JOB_TYPE[selected.type] ?? selected.type}</strong>

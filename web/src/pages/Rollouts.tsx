@@ -10,6 +10,7 @@ import {
   Modal,
   PageHeader,
   Panel,
+  ProgressBar,
   Select,
   Spinner,
   StatusBadge,
@@ -389,6 +390,9 @@ export function RolloutDetailPage({ id }: { id: string }) {
     (target) => target.status !== 'success' && target.status !== 'skipped',
   ).length;
   const currentFailed = currentTargets.filter((target) => target.status === 'failed').length;
+  const currentDone = currentTargets.filter(
+    (target) => target.status === 'success' || target.status === 'skipped',
+  ).length;
 
   async function action(path: string, body?: unknown): Promise<void> {
     setBusy(true);
@@ -498,6 +502,20 @@ export function RolloutDetailPage({ id }: { id: string }) {
         }
         subtitle="Внутри волны все роутеры обновляются параллельно. Следующая волна не начнётся сама."
       >
+        {rollout.stage > 0 && currentTargets.length > 0 ? (
+          <div className="job-progress">
+            <div className="job-progress-head">
+              <span>Текущая волна {rollout.stage}</span>
+              <span className="muted-text small">
+                {currentDone}/{currentTargets.length} готово
+              </span>
+            </div>
+            <ProgressBar
+              value={Math.round((currentDone / currentTargets.length) * 100)}
+              label="Прогресс текущей волны"
+            />
+          </div>
+        ) : null}
         {stages.length === 0 ? (
           <Empty>Целей нет.</Empty>
         ) : (
