@@ -39,6 +39,7 @@ const NAV: Array<{ section: string; items: NavItem[] }> = [
     items: [
       { to: '/', label: 'Панель', exact: true },
       { to: '/routers', label: 'Роутеры' },
+      { to: '/app', label: 'Приложение' },
     ],
   },
   {
