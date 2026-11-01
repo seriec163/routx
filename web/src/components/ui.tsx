@@ -201,6 +201,9 @@ const JOB_PHASE: Record<string, string> = {
   verify: 'Проверяем состояние',
   rollback: 'Откатываем изменения',
   rolled_back: 'Изменения откачены',
+  init: 'Готовим тест DNS',
+  udp: 'Проверяем UDP DNS',
+  doh: 'Проверяем DoH',
   done: 'Готово',
   failed: 'Ошибка',
 };
