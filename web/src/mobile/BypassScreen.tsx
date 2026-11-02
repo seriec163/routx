@@ -14,6 +14,24 @@ const KIND_LABEL: Record<Kind, string> = {
   subnet: 'Подсеть',
 };
 
+const ACTION_LABEL: Record<string, string> = {
+  connection: 'через VPN',
+  bypass: 'напрямую',
+  block: 'блокировка',
+  dns: 'только DNS',
+};
+
+const ACTION_HINT: Record<string, string> = {
+  connection: 'пойдут через VPN-подключение',
+  bypass: 'будут открываться напрямую, минуя VPN',
+  block: 'будут заблокированы',
+  dns: 'будут использоваться только для DNS',
+};
+
+// Мобильный редактор поддерживает только действия, которые принимает API.
+const EDITABLE_ACTIONS = new Set(Object.keys(ACTION_LABEL));
+const SECTION_KEY_PREFIX = 'rc.mobile.section.';
+
 const DOMAIN_RE = /^(\*\.)?([a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,}$/i;
 const IPV4_RE = /^(\d{1,3}\.){3}\d{1,3}$/;
 
@@ -69,6 +87,7 @@ export function BypassScreen() {
     selected ? `/api/v1/routers/${selected.id}/rules` : null,
   );
 
+  const [sectionName, setSectionName] = useState<string | null>(null);
   const [kind, setKind] = useState<Kind>('domain');
   const [value, setValue] = useState('');
   const [busy, setBusy] = useState(false);
@@ -76,87 +95,108 @@ export function BypassScreen() {
   const [readJob, setReadJob] = useState<Job | null>(null);
   const readOnce = useRef<string | null>(null);
 
-  const bypassRule: RuleView | null = useMemo(
-    () => rules.data?.rules.find((rule) => rule.action === 'bypass') ?? null,
+  const sections = useMemo(
+    () => (rules.data?.rules ?? []).filter((rule) => EDITABLE_ACTIONS.has(rule.action)),
     [rules.data],
   );
 
-  const entries = useMemo(() => {
-    if (!bypassRule) return [];
-    return [
-      ...bypassRule.manual_domains.map((item) => ({ value: item, kind: entryKind(item) })),
-      ...bypassRule.manual_ips.map((item) => ({ value: item, kind: entryKind(item) })),
-    ];
-  }, [bypassRule]);
+  const selectedRule: RuleView | null = useMemo(() => {
+    const stored = sectionName ? sections.find((rule) => rule.section === sectionName) : null;
+    return stored ?? sections.find((rule) => rule.action === 'bypass') ?? sections[0] ?? null;
+  }, [sections, sectionName]);
 
-  // Свежий список с роутера при входе на экран.
-  const refreshFromRouter = useCallback(async (): Promise<void> => {
-    if (!selected || selected.status !== 'online') {
-      await rules.reload();
+  const sectionStorageKey = selected ? `${SECTION_KEY_PREFIX}${selected.id}` : null;
+
+  const entries = useMemo(() => {
+    if (!selectedRule) return [];
+    return [
+      ...selectedRule.manual_domains.map((item) => ({ value: item, kind: entryKind(item) })),
+      ...selectedRule.manual_ips.map((item) => ({ value: item, kind: entryKind(item) })),
+    ];
+  }, [selectedRule]);
+
+  useEffect(() => {
+    if (!sectionStorageKey) {
+      setSectionName(null);
       return;
     }
+    setSectionName(window.localStorage.getItem(sectionStorageKey));
+  }, [sectionStorageKey]);
+
+  useEffect(() => {
+    if (!selectedRule) return;
+    if (sectionName === selectedRule.section) return;
+    setSectionName(selectedRule.section);
+  }, [sectionName, selectedRule]);
+
+  /** Свежее чтение правил с роутера. Возвращает актуальный список секций. */
+  const readLiveRules = useCallback(async (): Promise<RuleView[] | null> => {
+    if (!selected || selected.status !== 'online') return null;
     try {
       const started = await api<{ job: Job }>(`/api/v1/routers/${selected.id}/rules/read`, {
         method: 'POST',
       });
       setReadJob(started.job);
       const done = await waitForJob(started.job, setReadJob);
-      if (done.status === 'success') await rules.reload();
+      if (done.status !== 'success') return null;
+      const fresh = await rules.reload();
+      return fresh?.rules ?? null;
     } catch {
-      // Кэш правил остаётся доступным — молча продолжаем.
+      return null;
     } finally {
       setReadJob(null);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selected?.id, selected?.status]);
 
+  const refreshFromRouter = useCallback(async (): Promise<void> => {
+    if (!selected) return;
+    if (selected.status !== 'online') {
+      await rules.reload();
+      return;
+    }
+    const fresh = await readLiveRules();
+    if (!fresh) await rules.reload();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selected?.id, selected?.status, readLiveRules]);
+
   useEffect(() => {
-    if (!selected || selected.status !== 'online') return;
-    if (readOnce.current === selected.id) return;
+    if (!selected) return;
+    if (readOnce.current === selected.id && selected.status === 'online') return;
     readOnce.current = selected.id;
     void refreshFromRouter();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selected?.id, selected?.status]);
 
-  function nextSection(): string {
-    const used = new Set((rules.data?.rules ?? []).map((rule) => rule.section));
-    if (!used.has('bypass')) return 'bypass';
-    for (let index = 2; index < 100; index += 1) {
-      if (!used.has(`bypass${index}`)) return `bypass${index}`;
-    }
-    return `bypass${Date.now() % 1000}`;
-  }
-
-  async function save(nextDomains: string[], nextIps: string[]): Promise<void> {
+  async function applyEntries(
+    target: RuleView,
+    nextDomains: string[],
+    nextIps: string[],
+  ): Promise<void> {
     if (!selected) return;
-    setBusy(true);
-    try {
-      await applyRuleBody(
-        selected.id,
-        {
-          section: bypassRule?.section ?? nextSection(),
-          label: bypassRule?.label ?? 'Обход',
-          action: 'bypass',
-          enabled: bypassRule?.enabled ?? true,
-          create: !bypassRule,
-          resources: bypassRule?.resources ?? {},
-          settings: {},
-          manual_domains: nextDomains,
-          manual_ips: nextIps,
-        },
-        setJob,
-      );
-      // Кэш ручных списков обновляется отдельным чтением с роутера.
-      await refreshFromRouter();
-    } catch (caught) {
-      toast.error(errorMessage(caught));
-    } finally {
-      setBusy(false);
-      setJob(null);
-    }
+    await applyRuleBody(
+      selected.id,
+      {
+        section: target.section,
+        label: target.label,
+        action: target.action,
+        enabled: target.enabled,
+        create: false,
+        resources: target.resources,
+        settings: {},
+        manual_domains: nextDomains,
+        manual_ips: nextIps,
+      },
+      setJob,
+    );
   }
 
   async function add(): Promise<void> {
+    if (!selected || !selectedRule) {
+      toast.error('Сначала выберите существующую секцию');
+      return;
+    }
+
     const normalized = normalize(value, kind);
     if (!normalized) {
       toast.error(
@@ -169,34 +209,73 @@ export function BypassScreen() {
       return;
     }
 
-    const domains = [...(bypassRule?.manual_domains ?? [])];
-    const ips = [...(bypassRule?.manual_ips ?? [])];
-    if (entryKind(normalized) === 'domain') {
-      if (domains.includes(normalized)) {
-        toast.info('Такой домен уже есть в списке');
+    setBusy(true);
+    try {
+      // Перед изменением читаем роутер, чтобы не затереть чужие правки
+      // и не создать секцию, которая уже существует.
+      const fresh = await readLiveRules();
+      const target = fresh?.find((rule) => rule.section === selectedRule.section);
+      if (!fresh || !target) {
+        toast.error('Не удалось прочитать актуальные правила. Попробуйте ещё раз.');
         return;
       }
-      domains.push(normalized);
-    } else {
-      if (ips.includes(normalized)) {
-        toast.info('Такой адрес уже есть в списке');
-        return;
-      }
-      ips.push(normalized);
-    }
 
-    await save(domains, ips);
-    setValue('');
-    toast.success('Адрес добавлен в обход');
+      const domains = [...target.manual_domains];
+      const ips = [...target.manual_ips];
+      if (entryKind(normalized) === 'domain') {
+        if (domains.includes(normalized)) {
+          toast.info('Такой домен уже есть в этой секции');
+          return;
+        }
+        domains.push(normalized);
+      } else {
+        if (ips.includes(normalized)) {
+          toast.info('Такой адрес уже есть в этой секции');
+          return;
+        }
+        ips.push(normalized);
+      }
+
+      await applyEntries(target, domains, ips);
+      await refreshFromRouter();
+      setValue('');
+      toast.success(`Адрес добавлен в «${target.label}»`);
+    } catch (caught) {
+      toast.error(errorMessage(caught));
+    } finally {
+      setBusy(false);
+      setJob(null);
+    }
   }
 
   async function remove(entry: { value: string; kind: Kind }): Promise<void> {
-    if (!bypassRule) return;
-    if (!window.confirm(`Убрать «${entry.value}» из обхода?`)) return;
-    const domains = bypassRule.manual_domains.filter((item) => item !== entry.value);
-    const ips = bypassRule.manual_ips.filter((item) => item !== entry.value);
-    await save(domains, ips);
-    toast.success('Адрес убран из обхода');
+    if (!selected || !selectedRule) return;
+    if (!window.confirm(`Убрать «${entry.value}» из секции «${selectedRule.label}»?`)) return;
+
+    setBusy(true);
+    try {
+      const fresh = await readLiveRules();
+      const target = fresh?.find((rule) => rule.section === selectedRule.section);
+      if (!fresh || !target) {
+        toast.error('Не удалось прочитать актуальные правила. Попробуйте ещё раз.');
+        return;
+      }
+      const domains = target.manual_domains.filter((item) => item !== entry.value);
+      const ips = target.manual_ips.filter((item) => item !== entry.value);
+      await applyEntries(target, domains, ips);
+      await refreshFromRouter();
+      toast.success(`Адрес убран из «${target.label}»`);
+    } catch (caught) {
+      toast.error(errorMessage(caught));
+    } finally {
+      setBusy(false);
+      setJob(null);
+    }
+  }
+
+  function chooseSection(name: string): void {
+    setSectionName(name);
+    if (sectionStorageKey) window.localStorage.setItem(sectionStorageKey, name);
   }
 
   if (!selected) {
@@ -213,6 +292,10 @@ export function BypassScreen() {
   }
 
   const offline = selected.status !== 'online';
+  const loadingRules = rules.loading && !rules.data;
+  const actionHint = selectedRule ? ACTION_HINT[selectedRule.action] : null;
+  const addDisabled =
+    busy || offline || loadingRules || readJob !== null || !selectedRule || value.trim() === '';
 
   return (
     <div className="m-screen">
@@ -220,65 +303,109 @@ export function BypassScreen() {
 
       <div className="m-body">
         <p className="m-lead">
-          Эти адреса будут открываться напрямую, минуя VPN. Изменения применяются на роутере
-          «{selected.name}» без перезагрузки VPN.
+          {actionHint
+            ? `Эти адреса ${actionHint}. Изменения применяются на роутере «${selected.name}» без перезагрузки VPN.`
+            : `Выберите существующую секцию на роутере «${selected.name}».`}
         </p>
 
-        <div className="m-tabs" role="tablist">
-          {(['domain', 'ip', 'subnet'] as Kind[]).map((item) => (
+        {sections.length > 0 ? (
+          <div className="m-card m-addbox">
+            <label className="m-inputlabel" htmlFor="bypass-section">
+              Секция
+            </label>
+            <select
+              id="bypass-section"
+              className="m-input"
+              value={selectedRule?.section ?? ''}
+              onChange={(event) => chooseSection(event.target.value)}
+              disabled={busy || offline || readJob !== null}
+            >
+              {sections.map((rule) => (
+                <option key={rule.section} value={rule.section}>
+                  {rule.label} ({rule.section}) — {ACTION_LABEL[rule.action] ?? rule.action}
+                </option>
+              ))}
+            </select>
+          </div>
+        ) : null}
+
+        {sections.length > 0 && selectedRule ? (
+          <>
+            <div className="m-tabs" role="tablist">
+              {(['domain', 'ip', 'subnet'] as Kind[]).map((item) => (
+                <button
+                  type="button"
+                  key={item}
+                  role="tab"
+                  aria-selected={kind === item}
+                  className={`m-tab ${kind === item ? 'm-tab-active' : ''}`}
+                  onClick={() => setKind(item)}
+                >
+                  {KIND_LABEL[item]}
+                </button>
+              ))}
+            </div>
+
+            <div className="m-card m-addbox">
+              <label className="m-inputlabel" htmlFor="bypass-value">
+                Адрес
+              </label>
+              <input
+                id="bypass-value"
+                className="m-input"
+                value={value}
+                onChange={(event) => setValue(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter') void add();
+                }}
+                placeholder={
+                  kind === 'domain'
+                    ? 'sberbank.ru'
+                    : kind === 'ip'
+                      ? '8.8.8.8'
+                      : '192.168.50.0/24'
+                }
+                autoComplete="off"
+                spellCheck={false}
+                disabled={busy || offline}
+              />
+              <button
+                type="button"
+                className="m-action m-action-sm"
+                onClick={() => void add()}
+                disabled={addDisabled}
+              >
+                {busy ? 'Применяем…' : 'Добавить'}
+              </button>
+              {offline ? (
+                <p className="m-note m-note-warn">
+                  Роутер не в сети — изменения применить нельзя.
+                </p>
+              ) : null}
+            </div>
+          </>
+        ) : null}
+
+        {!loadingRules && sections.length === 0 ? (
+          <div className="m-card m-empty">
+            <p>
+              На роутере нет секций, которые можно редактировать. Создайте секцию в полной
+              панели RoutX, затем обновите список.
+            </p>
             <button
               type="button"
-              key={item}
-              role="tab"
-              aria-selected={kind === item}
-              className={`m-tab ${kind === item ? 'm-tab-active' : ''}`}
-              onClick={() => setKind(item)}
+              className="m-link"
+              onClick={() => void refreshFromRouter()}
+              disabled={readJob !== null || offline}
             >
-              {KIND_LABEL[item]}
+              Обновить
             </button>
-          ))}
-        </div>
-
-        <div className="m-card m-addbox">
-          <label className="m-inputlabel" htmlFor="bypass-value">
-            Адрес
-          </label>
-          <input
-            id="bypass-value"
-            className="m-input"
-            value={value}
-            onChange={(event) => setValue(event.target.value)}
-            onKeyDown={(event) => {
-              if (event.key === 'Enter') void add();
-            }}
-            placeholder={
-              kind === 'domain'
-                ? 'sberbank.ru'
-                : kind === 'ip'
-                  ? '8.8.8.8'
-                  : '192.168.50.0/24'
-            }
-            autoComplete="off"
-            spellCheck={false}
-            disabled={busy || offline}
-          />
-          <button
-            type="button"
-            className="m-action m-action-sm"
-            onClick={() => void add()}
-            disabled={busy || offline || value.trim() === ''}
-          >
-            {busy ? 'Применяем…' : 'Добавить'}
-          </button>
-          {offline ? (
-            <p className="m-note m-note-warn">
-              Роутер не в сети — изменения применить нельзя.
-            </p>
-          ) : null}
-        </div>
+          </div>
+        ) : null}
 
         <JobProgress job={job} label="Применяем на роутере" />
         {readJob ? <JobProgress job={readJob} label="Читаем правила" /> : null}
+        {loadingRules ? <p className="m-note">Читаем правила с роутера…</p> : null}
 
         <div className="m-card m-list">
           <div className="m-list-head">
@@ -287,7 +414,7 @@ export function BypassScreen() {
               type="button"
               className="m-mini"
               onClick={() => void refreshFromRouter()}
-              disabled={rules.loading || readJob !== null}
+              disabled={rules.loading || readJob !== null || offline}
             >
               Обновить
             </button>
@@ -295,7 +422,7 @@ export function BypassScreen() {
 
           {entries.length === 0 ? (
             <p className="m-empty-text">
-              Список пуст. Добавьте домен или адрес — он сразу начнёт открываться напрямую.
+              Список секции пуст. Добавьте домен или адрес — он появится в выбранной секции.
             </p>
           ) : (
             entries.map((entry) => (
@@ -317,7 +444,11 @@ export function BypassScreen() {
         </div>
 
         <p className="m-footnote">
-          Правило обхода: {bypassRule ? `«${bypassRule.label}»` : 'будет создано при первом адресе'}.
+          {selectedRule
+            ? `Секция «${selectedRule.label}» (${selectedRule.section}), действие: ${
+                ACTION_LABEL[selectedRule.action] ?? selectedRule.action
+              }.`
+            : 'Секция не выбрана.'}
         </p>
       </div>
     </div>
