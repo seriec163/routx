@@ -42,10 +42,12 @@ export function UsersPage() {
   } | null>(null);
   const [revoking, setRevoking] = useState<InviteRow | null>(null);
   const [resetTarget, setResetTarget] = useState<UserRow | null>(null);
+  const [resetMfa, setResetMfa] = useState(false);
   const [createdReset, setCreatedReset] = useState<{
     url: string;
     expires_at: string;
     email: string;
+    mfa_reset: boolean;
   } | null>(null);
   const [confirmUser, setConfirmUser] = useState<{
     user: UserRow;
@@ -110,13 +112,17 @@ export function UsersPage() {
     setError(null);
     try {
       const result = await api<{
-        reset: { url: string; expires_at: string };
+        reset: { url: string; expires_at: string; reset_mfa: boolean };
         user: { email: string };
-      }>(`/api/v1/users/${resetTarget.id}/password-reset`, { method: 'POST' });
+      }>(`/api/v1/users/${resetTarget.id}/password-reset`, {
+        method: 'POST',
+        body: { reset_mfa: resetMfa },
+      });
       setCreatedReset({
         url: result.reset.url,
         expires_at: result.reset.expires_at,
         email: result.user.email,
+        mfa_reset: result.reset.reset_mfa,
       });
       setResetTarget(null);
     } catch (caught) {
@@ -300,8 +306,15 @@ export function UsersPage() {
                         </>
                       ) : (
                         <>
-                          <Button size="sm" variant="ghost" onClick={() => setResetTarget(user)}>
-                            Сбросить пароль
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            onClick={() => {
+                              setResetMfa(false);
+                              setResetTarget(user);
+                            }}
+                          >
+                            Восстановить доступ
                           </Button>
                           <Button
                             size="sm"
@@ -485,7 +498,7 @@ export function UsersPage() {
 
       {resetTarget ? (
         <ConfirmDialog
-          title="Сбросить пароль?"
+          title="Восстановить доступ?"
           busy={busy}
           confirmLabel="Создать ссылку"
           onCancel={() => {
@@ -501,6 +514,25 @@ export function UsersPage() {
                 Она действует 1 час. После смены пароля все активные сессии пользователя будут
                 завершены.
               </p>
+              <label
+                style={{
+                  display: 'flex',
+                  alignItems: 'flex-start',
+                  gap: 10,
+                  cursor: 'pointer',
+                }}
+              >
+                <input
+                  type="checkbox"
+                  checked={resetMfa}
+                  onChange={(event) => setResetMfa(event.target.checked)}
+                  style={{ marginTop: 3, flex: '0 0 auto' }}
+                />
+                <span>
+                  <strong>Потерян телефон с 2FA.</strong> Сбросить второй фактор вместе с паролем.
+                  После входа пользователь настроит 2FA заново, если этого требует политика.
+                </span>
+              </label>
             </>
           }
         />
@@ -517,6 +549,12 @@ export function UsersPage() {
           <InfoBanner tone="warn">
             Ссылка показывается один раз. Передайте её пользователю по защищённому каналу.
           </InfoBanner>
+          {createdReset.mfa_reset ? (
+            <InfoBanner>
+              Вместе с паролем будет сброшен второй фактор. После входа пользователю нужно будет
+              заново подключить приложение-аутентификатор.
+            </InfoBanner>
+          ) : null}
           <Field label={`Ссылка для ${createdReset.email}`}>
             <pre className="code-block" style={{ userSelect: 'all' }}>
               {createdReset.url}

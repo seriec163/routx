@@ -336,6 +336,10 @@ export async function registerUserRoutes(app: FastifyInstance, ctx: RouteContext
   app.post('/api/v1/users/:id/password-reset', async (request) => {
     const auth = requireSuperadmin(request);
     const params = z.object({ id: z.string().uuid() }).parse(request.params);
+    const body = z
+      .object({ reset_mfa: z.boolean().optional().default(false) })
+      .strict()
+      .parse(request.body ?? {});
 
     const target = await pool.query<{ id: string; email: string }>(
       'select id, email from users where id = $1',
@@ -353,10 +357,10 @@ export async function registerUserRoutes(app: FastifyInstance, ctx: RouteContext
     const token = randomToken(32);
     const id = uuidv7();
     const result = await pool.query<{ expires_at: Date }>(
-      `insert into password_resets (id, user_id, token_hash, created_by, expires_at)
-       values ($1,$2,$3,$4, now() + interval '1 hour')
+      `insert into password_resets (id, user_id, token_hash, created_by, expires_at, reset_mfa)
+       values ($1,$2,$3,$4, now() + interval '1 hour', $5)
        returning expires_at`,
-      [id, user.id, sha256Hex(token), auth.userId],
+      [id, user.id, sha256Hex(token), auth.userId, body.reset_mfa],
     );
 
     await audit(pool, {
@@ -368,13 +372,14 @@ export async function registerUserRoutes(app: FastifyInstance, ctx: RouteContext
       result: 'ok',
       ip: request.ip,
       userAgent: request.headers['user-agent'],
-      metadata: { email: user.email },
+      metadata: { email: user.email, reset_mfa: body.reset_mfa },
     });
 
     return {
       reset: {
         url: `${ctx.publicUrl}/#/reset-password/${encodeURIComponent(token)}`,
         expires_at: result.rows[0]!.expires_at.toISOString(),
+        reset_mfa: body.reset_mfa,
       },
       user: { email: user.email },
     };

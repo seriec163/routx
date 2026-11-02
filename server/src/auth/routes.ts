@@ -450,8 +450,13 @@ export async function registerAuthRoutes(app: FastifyInstance, ctx: RouteContext
     { config: { public: true } },
     async (request) => {
       const query = z.object({ token: resetTokenSchema }).parse(request.query);
-      const result = await pool.query<{ email: string; expires_at: Date; used_at: Date | null }>(
-        `select u.email, pr.expires_at, pr.used_at
+      const result = await pool.query<{
+        email: string;
+        expires_at: Date;
+        used_at: Date | null;
+        reset_mfa: boolean;
+      }>(
+        `select u.email, pr.expires_at, pr.used_at, pr.reset_mfa
            from password_resets pr
            join users u on u.id = pr.user_id
           where pr.token_hash = $1`,
@@ -462,6 +467,7 @@ export async function registerAuthRoutes(app: FastifyInstance, ctx: RouteContext
       return {
         email_masked: maskEmail(reset.email),
         expires_at: reset.expires_at.toISOString(),
+        mfa_reset: reset.reset_mfa,
         valid: !reset.used_at && reset.expires_at.getTime() > Date.now(),
       };
     },
@@ -478,6 +484,7 @@ export async function registerAuthRoutes(app: FastifyInstance, ctx: RouteContext
 
       const client = await pool.connect();
       let user: { id: string; email: string; role: 'superadmin' | 'user' };
+      let resetMfa = false;
       try {
         await client.query('begin');
         const resetResult = await client.query<{
@@ -485,10 +492,11 @@ export async function registerAuthRoutes(app: FastifyInstance, ctx: RouteContext
           user_id: string;
           expires_at: Date;
           used_at: Date | null;
+          reset_mfa: boolean;
           email: string;
           role: 'superadmin' | 'user';
         }>(
-          `select pr.id, pr.user_id, pr.expires_at, pr.used_at, u.email, u.role
+          `select pr.id, pr.user_id, pr.expires_at, pr.used_at, pr.reset_mfa, u.email, u.role
              from password_resets pr
              join users u on u.id = pr.user_id
             where pr.token_hash = $1
@@ -503,11 +511,20 @@ export async function registerAuthRoutes(app: FastifyInstance, ctx: RouteContext
           );
         }
 
+        // Если администратор отметил «потерян телефон», вместе с паролем
+        // сбрасываем 2FA: иначе пользователь не сможет войти без кода.
         await client.query(
           `update users
-              set password_hash = $2, failed_logins = 0, locked_until = null, updated_at = now()
+              set password_hash = $2,
+                  failed_logins = 0,
+                  locked_until = null,
+                  totp_enabled = case when $3 then false else totp_enabled end,
+                  totp_secret_enc = case when $3 then null else totp_secret_enc end,
+                  totp_confirmed_at = case when $3 then null else totp_confirmed_at end,
+                  totp_last_step = case when $3 then null else totp_last_step end,
+                  updated_at = now()
             where id = $1`,
-          [reset.user_id, passwordHash],
+          [reset.user_id, passwordHash, reset.reset_mfa],
         );
         await client.query('update password_resets set used_at = now() where id = $1', [reset.id]);
         await client.query(
@@ -515,6 +532,7 @@ export async function registerAuthRoutes(app: FastifyInstance, ctx: RouteContext
           [reset.user_id],
         );
         await client.query('commit');
+        resetMfa = reset.reset_mfa;
         user = { id: reset.user_id, email: reset.email, role: reset.role };
       } catch (error) {
         await client.query('rollback');
@@ -532,10 +550,10 @@ export async function registerAuthRoutes(app: FastifyInstance, ctx: RouteContext
         result: 'ok',
         ip: request.ip,
         userAgent: request.headers['user-agent'],
-        metadata: { email: user.email },
+        metadata: { email: user.email, mfa_reset: resetMfa },
       });
 
-      return { ok: true };
+      return { ok: true, mfa_reset: resetMfa };
     },
   );
 

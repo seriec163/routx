@@ -497,6 +497,7 @@ export function InvitePage({
 interface ResetPreview {
   email_masked: string;
   expires_at: string;
+  mfa_reset: boolean;
   valid: boolean;
 }
 
@@ -582,6 +583,9 @@ export function ResetPasswordPage({ token }: { token: string }) {
               <InfoBanner>
                 Пароль изменён. Все активные сессии этой учётной записи завершены. Теперь можно
                 войти с новым паролем.
+                {preview?.mfa_reset
+                  ? ' Второй фактор тоже сброшен — при входе потребуется заново настроить 2FA.'
+                  : ''}
               </InfoBanner>
               <Button onClick={() => navigate('/')}>Войти</Button>
             </>
@@ -593,6 +597,12 @@ export function ResetPasswordPage({ token }: { token: string }) {
                 Учётная запись: <strong>{preview.email_masked}</strong>. Ссылка действует до{' '}
                 {new Date(preview.expires_at).toLocaleString('ru-RU')}.
               </p>
+              {preview.mfa_reset ? (
+                <InfoBanner>
+                  Вместе с паролем будет сброшен второй фактор (2FA). После входа потребуется
+                  заново подключить приложение-аутентификатор.
+                </InfoBanner>
+              ) : null}
               {error ? <ErrorBanner message={error} /> : null}
               <Field
                 label="Новый пароль"
