@@ -476,6 +476,26 @@
   overflow-wrap: anywhere;
 }
 
+.m-conn {
+  min-width: 0;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.m-conn-label {
+  font-size: 0.92rem;
+  overflow-wrap: anywhere;
+}
+
+.m-conn-meta {
+  font-size: 0.72rem;
+  line-height: 1.4;
+  color: var(--m-muted);
+  overflow-wrap: anywhere;
+}
+
 .m-tag {
   flex: 0 0 auto;
   padding: 4px 8px;

@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { api, errorMessage } from '../lib/api';
 import { waitForJob } from '../lib/jobs';
-import type { Job, MonitoringItem, RulesResponse } from '../lib/types';
+import type { Job, MonitoringItem, RuleConnectionView, RulesResponse } from '../lib/types';
 import { useApi } from '../lib/useApi';
 import { JobProgress, useToast } from '../components/ui';
 import { navigate } from '../lib/router';
@@ -15,6 +15,11 @@ const STATUS: Record<string, { label: string; tone: string }> = {
   conflict: { label: 'Конфликт продуктов', tone: 'bad' },
 };
 
+interface ConnectionEntry extends RuleConnectionView {
+  section: string;
+  sectionLabel: string;
+}
+
 export function HomeScreen() {
   const { routers, selected, selectedId, select, reload, loading } = useMobile();
   const toast = useToast();
@@ -22,6 +27,11 @@ export function HomeScreen() {
   const [sheet, setSheet] = useState(false);
   const [job, setJob] = useState<Job | null>(null);
   const [action, setAction] = useState<'idle' | 'ping' | 'vpn' | 'reboot'>('idle');
+  const [replaceTarget, setReplaceTarget] = useState<ConnectionEntry | null>(null);
+  const [replaceValue, setReplaceValue] = useState('');
+  const [replaceBusy, setReplaceBusy] = useState(false);
+  const [replaceError, setReplaceError] = useState<string | null>(null);
+  const [replaceJob, setReplaceJob] = useState<Job | null>(null);
 
   const rules = useApi<RulesResponse>(
     selected ? `/api/v1/routers/${selected.id}/rules` : null,
@@ -39,6 +49,20 @@ export function HomeScreen() {
       if (rule.links.length > 0) chips.add('VLESS');
     }
     return [...chips];
+  }, [rules.data]);
+
+  const connections = useMemo<ConnectionEntry[]>(() => {
+    const items: ConnectionEntry[] = [];
+    for (const rule of rules.data?.rules ?? []) {
+      for (const connection of [...rule.subscriptions, ...rule.links]) {
+        items.push({
+          ...connection,
+          section: rule.section,
+          sectionLabel: rule.label,
+        });
+      }
+    }
+    return items;
   }, [rules.data]);
 
   const status = selected ? STATUS[selected.status] ?? { label: selected.status, tone: 'warn' } : null;
@@ -122,6 +146,72 @@ export function HomeScreen() {
     }
   }
 
+  async function replaceConnection(): Promise<void> {
+    if (!selected || !replaceTarget) return;
+    const value = replaceValue.trim();
+    if (value === '') {
+      setReplaceError(
+        replaceTarget.kind === 'subscription'
+          ? 'Вставьте новую ссылку подписки https://…'
+          : 'Вставьте новую ссылку подключения',
+      );
+      return;
+    }
+    if (replaceTarget.kind === 'subscription' && !/^https?:\/\//i.test(value)) {
+      setReplaceError('Ссылка подписки должна начинаться с http:// или https://');
+      return;
+    }
+    if (!replaceTarget.id && !replaceTarget.name && !replaceTarget.hash) {
+      setReplaceError('Не удалось определить подключение на роутере. Обновите список.');
+      return;
+    }
+
+    setReplaceBusy(true);
+    setReplaceError(null);
+    try {
+      let response: { job: Job };
+      if (replaceTarget.managed && replaceTarget.id) {
+        response = await api<{ job: Job }>(
+          `/api/v1/routers/${selected.id}/connections/${replaceTarget.id}`,
+          {
+            method: 'PATCH',
+            body: { label: replaceTarget.label, value },
+          },
+        );
+      } else {
+        response = await api<{ job: Job }>(
+          `/api/v1/routers/${selected.id}/connections/manage`,
+          {
+            method: 'POST',
+            body: {
+              action: 'replace',
+              kind: replaceTarget.kind === 'subscription' ? 'subscription' : 'link',
+              name: replaceTarget.name ?? undefined,
+              hash: replaceTarget.hash ?? undefined,
+              value,
+              section: replaceTarget.section,
+            },
+          },
+        );
+      }
+
+      setReplaceJob(response.job);
+      const done = await waitForJob(response.job, setReplaceJob);
+      if (done.status !== 'success') {
+        throw new Error(done.error?.message ?? 'Не удалось заменить подключение');
+      }
+      await rules.reload();
+      toast.success('Подключение заменено');
+      setReplaceTarget(null);
+      setReplaceValue('');
+    } catch (caught) {
+      setReplaceError(errorMessage(caught));
+    } finally {
+      setReplaceBusy(false);
+      setReplaceJob(null);
+    }
+  }
+
   return (
     <div className="m-screen">
       <MobileHeader
@@ -183,6 +273,56 @@ export function HomeScreen() {
               </span>
             ))}
           </div>
+        ) : null}
+
+        {connections.length > 0 ? (
+          <section className="m-card m-list">
+            <div className="m-list-head">
+              <span className="m-label">Подключения · {connections.length}</span>
+              <button
+                type="button"
+                className="m-mini"
+                onClick={() => void rules.reload()}
+                disabled={rules.loading}
+              >
+                Обновить
+              </button>
+            </div>
+            {connections.map((connection) => (
+              <div
+                className="m-listrow"
+                key={`${connection.section}:${connection.kind}:${
+                  connection.id ?? connection.name ?? connection.hash
+                }`}
+              >
+                <span className="m-conn">
+                  <span className="m-conn-label">{connection.label}</span>
+                  <span className="m-conn-meta">
+                    {connection.kind === 'subscription' ? 'Подписка' : 'VLESS'} ·{' '}
+                    {connection.sectionLabel} · {connection.masked}
+                    {connection.missing ? ' · нет на роутере' : ''}
+                    {!connection.enabled ? ' · выключено' : ''}
+                  </span>
+                </span>
+                <button
+                  type="button"
+                  className="m-mini"
+                  onClick={() => {
+                    setReplaceTarget(connection);
+                    setReplaceValue('');
+                    setReplaceError(null);
+                  }}
+                  disabled={
+                    !selected ||
+                    selected.status !== 'online' ||
+                    (!connection.id && !connection.name && !connection.hash)
+                  }
+                >
+                  Заменить
+                </button>
+              </div>
+            ))}
+          </section>
         ) : null}
 
         <section className="m-card m-latency">
@@ -252,6 +392,63 @@ export function HomeScreen() {
           </div>
         ) : null}
       </div>
+
+      {replaceTarget ? (
+        <div
+          className="m-overlay"
+          role="dialog"
+          aria-modal="true"
+          onClick={replaceBusy ? undefined : () => setReplaceTarget(null)}
+        >
+          <div className="m-sheet" onClick={(event) => event.stopPropagation()}>
+            <div className="m-sheet-grip" />
+            <h2 className="m-sheet-title">Заменить подключение</h2>
+            <p className="m-note">
+              Секция «{replaceTarget.sectionLabel}». Сейчас используется:{' '}
+              <strong>{replaceTarget.label}</strong> · {replaceTarget.masked}
+            </p>
+            {replaceError ? <p className="m-note m-note-warn">{replaceError}</p> : null}
+            <label className="m-inputlabel" htmlFor="replace-value">
+              {replaceTarget.kind === 'subscription' ? 'Новая ссылка подписки' : 'Новая ссылка VLESS'}
+            </label>
+            <textarea
+              id="replace-value"
+              className="m-input m-textarea"
+              rows={4}
+              value={replaceValue}
+              onChange={(event) => setReplaceValue(event.target.value)}
+              placeholder={
+                replaceTarget.kind === 'subscription'
+                  ? 'https://example.com/subscription'
+                  : 'vless://…'
+              }
+              spellCheck={false}
+              disabled={replaceBusy}
+            />
+            <p className="m-note">
+              Новая ссылка заменит текущую в секции «{replaceTarget.sectionLabel}». Старый сервер
+              перестанет использоваться.
+            </p>
+            <JobProgress job={replaceJob} label="Заменяем на роутере" />
+            <button
+              type="button"
+              className="m-action m-action-sm"
+              onClick={() => void replaceConnection()}
+              disabled={replaceBusy || replaceValue.trim() === ''}
+            >
+              {replaceBusy ? 'Заменяем…' : 'Заменить'}
+            </button>
+            <button
+              type="button"
+              className="m-link m-link-center"
+              onClick={() => setReplaceTarget(null)}
+              disabled={replaceBusy}
+            >
+              Отмена
+            </button>
+          </div>
+        </div>
+      ) : null}
 
       {sheet ? (
         <div className="m-overlay" role="dialog" aria-modal="true" onClick={() => setSheet(false)}>
