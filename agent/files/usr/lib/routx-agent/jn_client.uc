@@ -6,7 +6,7 @@ const store = require("jn_store");
 const platform = require("jn_platform");
 const uci_state = require("jn_uci_state");
 
-const VERSION = "1.2.7";
+const VERSION = "1.2.8";
 
 function build_probe(product) {
 	let pver = platform.product_version(product);
@@ -122,7 +122,7 @@ function mobile_link() {
 	if (!cfg.bound)
 		return { ok: false, error: "агент ещё не привязан" };
 	let st = store.load();
-	let res = http.request(cfg, "POST", "/agent/v1/mobile-link", {}, { timeout: 30, time_offset: st.time_offset });
+	let res = http.request(cfg, "POST", "/agent/v1/mobile-link", {}, { timeout: 15, time_offset: st.time_offset });
 	if (!res.ok || type(res.json) != "object")
 		return { ok: false, error: res.stderr != "" ? res.stderr : ("HTTP " + res.status) };
 	let j = res.json;
@@ -147,7 +147,7 @@ function mobile_devices() {
 	if (!cfg.bound)
 		return { ok: false, error: "агент ещё не привязан" };
 	let st = store.load();
-	let res = http.request(cfg, "GET", "/agent/v1/mobile-devices", null, { timeout: 30, time_offset: st.time_offset });
+	let res = http.request(cfg, "GET", "/agent/v1/mobile-devices", null, { timeout: 15, time_offset: st.time_offset });
 	if (!res.ok || type(res.json) != "object")
 		return { ok: false, error: res.stderr != "" ? res.stderr : ("HTTP " + res.status) };
 	let items = type(res.json.items) == "array" ? res.json.items : [];
@@ -159,7 +159,7 @@ function mobile_revoke(id) {
 	if (!cfg.bound)
 		return { ok: false, error: "агент ещё не привязан" };
 	let st = store.load();
-	let res = http.request(cfg, "POST", "/agent/v1/mobile-devices/" + id + "/revoke", {}, { timeout: 30, time_offset: st.time_offset });
+	let res = http.request(cfg, "POST", "/agent/v1/mobile-devices/" + id + "/revoke", {}, { timeout: 15, time_offset: st.time_offset });
 	if (!res.ok)
 		return { ok: false, error: res.stderr != "" ? res.stderr : ("HTTP " + res.status) };
 	return { ok: true };
