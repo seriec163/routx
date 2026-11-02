@@ -10,13 +10,13 @@ interface BeforeInstallPromptEvent extends Event {
 }
 
 interface ExchangeResponse {
-  user: { email: string; first_name?: string | null };
   router_id: string;
 }
 
 /**
  * Страница, на которую ведёт QR. Токен лежит во фрагменте URL и сразу
  * обменивается на обычную сессию. После этого можно установить PWA.
+ * Без токена страница тоже работает: показывает инструкцию по установке.
  */
 export function InstallPage({
   token,
@@ -31,7 +31,6 @@ export function InstallPage({
     token ? 'exchanging' : 'idle',
   );
   const [error, setError] = useState<string | null>(null);
-  const [email, setEmail] = useState<string | null>(null);
   const [targetRouter, setTargetRouter] = useState<string | null>(routerId);
   const [promptEvent, setPromptEvent] = useState<BeforeInstallPromptEvent | null>(null);
   const [standalone, setStandalone] = useState(false);
@@ -79,7 +78,6 @@ export function InstallPage({
         });
         if (!active) return;
         await onLoggedInRef.current();
-        setEmail(response.user.first_name || response.user.email);
         setTargetRouter(response.router_id || routerId);
         if (response.router_id) {
           window.localStorage.setItem('rc.mobile.router', response.router_id);
@@ -104,6 +102,7 @@ export function InstallPage({
   }
 
   const openTarget = '/app';
+  const isInstalled = standalone || installed;
 
   return (
     <div className="auth-shell auth-shell-single">
@@ -126,20 +125,15 @@ export function InstallPage({
               <ErrorBanner message={error ?? 'Ссылка недействительна'} />
               <p className="page-sub">
                 Ссылка действует 5 минут и используется один раз. Создайте новый QR на роутере:
-                LuCI → Служба → RoutX, — или войдите обычным способом.
+                LuCI → Служба → RoutX, — или войдите обычным способом. Установить приложение можно
+                и без ссылки — инструкция ниже.
               </p>
-              <div className="row">
-                <Button onClick={() => navigate('/login')}>Войти</Button>
-                <Button variant="ghost" onClick={() => navigate('/routers')}>
-                  К роутерам
-                </Button>
-              </div>
             </>
           ) : null}
 
           {status === 'ready' ? (
             <InfoBanner>
-              Готово: вы вошли{email ? ` как ${email}` : ''}. Теперь приложение можно установить на
+              Готово: вы вошли. Роутер добавлен в приложение — теперь его можно установить на
               телефон.
             </InfoBanner>
           ) : null}
@@ -151,40 +145,56 @@ export function InstallPage({
             </InfoBanner>
           ) : null}
 
-          {status !== 'error' ? (
+          {status !== 'exchanging' ? (
             <>
-              <h2>{standalone ? 'Приложение уже открыто' : 'Установить RoutX'}</h2>
+              <h2>
+                {isInstalled ? 'Приложение установлено' : 'Установите RoutX на телефон'}
+              </h2>
               <p className="page-sub">
-                {standalone || installed
-                  ? 'Приложение установлено. Можно открыть роутер и менять правила, подключения, DNS или перезапускать службу.'
-                  : 'Установите приложение на домашний экран — оно откроется без адресной строки и сохранит вход.'}
+                {isInstalled
+                  ? 'Открывайте RoutX с домашнего экрана: адресной строки нет, вход сохраняется. Обновления приходят автоматически.'
+                  : 'RoutX работает как PWA — это обычное приложение с иконкой на домашнем экране. Магазин приложений не нужен.'}
               </p>
 
-              {promptEvent ? (
-                <Button onClick={() => void install()}>Установить приложение</Button>
+              {promptEvent && !isInstalled ? (
+                <div className="stack" style={{ marginBottom: 12 }}>
+                  <Button onClick={() => void install()}>Установить приложение</Button>
+                  <p className="muted-text small" style={{ margin: 0 }}>
+                    Если кнопка не сработала, используйте шаги ниже.
+                  </p>
+                </div>
               ) : null}
 
-              {!standalone && !installed && !promptEvent ? (
-                <ul className="bullets">
+              {!isInstalled ? (
+                <ol className="steps">
                   <li>
-                    <strong>iPhone / iPad:</strong> откройте в Safari → «Поделиться» → «На экран
-                    „Домой“».
+                    <strong>Откройте страницу в браузере.</strong> Если она открылась внутри
+                    Telegram, WhatsApp или другого приложения, нажмите «Открыть в браузере»:
+                    из встроенного окна установка не работает.
                   </li>
                   <li>
-                    <strong>Android:</strong> меню браузера → «Установить приложение» или «Добавить
-                    на главный экран».
+                    <strong>Android (Chrome):</strong> меню ⋮ → «Установить приложение» или
+                    «Добавить на главный экран» → «Установить».
                   </li>
                   <li>
-                    <strong>Компьютер:</strong> значок установки в адресной строке Chrome или Edge.
+                    <strong>iPhone / iPad (Safari):</strong> «Поделиться» → «На экран „Домой“» →
+                    «Добавить». В Chrome на iPhone установка PWA недоступна — нужен Safari.
                   </li>
-                </ul>
+                  <li>
+                    <strong>Компьютер (Chrome или Edge):</strong> значок установки в адресной
+                    строке либо меню → «Установить RoutX».
+                  </li>
+                  <li>
+                    Откройте RoutX с домашнего экрана. Вход сохранится, адресная строка исчезнет.
+                  </li>
+                </ol>
               ) : null}
 
               <div className="row" style={{ marginTop: 12 }}>
                 <Button onClick={() => navigate(openTarget)}>
                   {targetRouter ? 'Открыть роутер' : 'Открыть панель'}
                 </Button>
-                {status === 'idle' ? (
+                {status === 'idle' || status === 'error' ? (
                   <Button variant="ghost" onClick={() => navigate('/login')}>
                     Войти
                   </Button>
@@ -194,6 +204,8 @@ export function InstallPage({
               {token ? (
                 <p className="muted-text small" style={{ marginTop: 12 }}>
                   Ссылка одноразовая и действует 5 минут. После входа она больше не работает.
+                  Инструкция по установке остаётся доступной по адресу{' '}
+                  <code>/#/install</code>.
                 </p>
               ) : null}
             </>
