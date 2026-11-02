@@ -7,6 +7,7 @@ body.routx-app-body {
   height: 100%;
   overflow: hidden;
   overscroll-behavior: none;
+  background: #f3e9fb;
 }
 
 body.routx-app-body {
@@ -14,6 +15,7 @@ body.routx-app-body {
   position: fixed;
   inset: 0;
   width: 100%;
+  background: #f3e9fb;
 }
 
 body.routx-app-body #root {
@@ -31,6 +33,10 @@ body.routx-app-body #root {
 
   height: 100vh;
   height: 100dvh;
+  /* На iOS 100dvh иногда меньше реального экрана в standalone-режиме.
+     100% от зафиксированного body гарантированно закрывает низ экрана. */
+  height: 100%;
+  min-height: 100%;
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -872,17 +878,17 @@ body.routx-app-body #root {
 .m-bottomnav {
   position: fixed;
   left: 50%;
-  bottom: calc(12px + env(safe-area-inset-bottom));
+  bottom: 0;
   z-index: 40;
   display: grid;
   grid-template-columns: repeat(3, 1fr);
   gap: 4px;
-  width: min(488px, calc(100% - 24px));
-  padding: 8px;
-  border-radius: 24px;
-  background: rgba(255, 255, 255, 0.94);
+  width: min(520px, 100%);
+  padding: 8px 8px calc(8px + env(safe-area-inset-bottom));
+  border-radius: 24px 24px 0 0;
+  background: rgba(255, 255, 255, 0.96);
   backdrop-filter: blur(14px);
-  box-shadow: 0 18px 38px rgba(96, 48, 84, 0.18);
+  box-shadow: 0 -12px 30px rgba(96, 48, 84, 0.12);
   transform: translateX(-50%);
 }
 
