@@ -177,8 +177,9 @@ h3 {
 }
 
 .brand-mark svg {
-  width: 26px;
-  height: 26px;
+  width: 30px;
+  height: 30px;
+  color: var(--accent);
   fill: none;
   stroke: var(--accent);
   stroke-width: 1.4;

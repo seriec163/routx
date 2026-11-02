@@ -1,6 +1,5 @@
-# Продукт: RoutX. Имя проекта compose оставлено прежним, чтобы не потерять
-# существующие тома с базой и ключом шифрования при обновлении.
-name: router-control
+# Продукт: RoutX.
+name: routx
 
 services:
   db:
@@ -101,7 +100,13 @@ services:
       - no-new-privileges:true
 
 volumes:
+  # Имена томов закреплены: они созданы прошлым именем проекта,
+  # переименование проекта не должно привести к потере данных.
   pgdata:
+    name: router-control_pgdata
   rc_data:
+    name: router-control_rc_data
   caddy_data:
+    name: router-control_caddy_data
   caddy_config:
+    name: router-control_caddy_config

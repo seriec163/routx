@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { api, errorMessage } from '../lib/api';
 import { navigate } from '../lib/router';
 import { Button, ErrorBanner, Field, InfoBanner, Spinner, TextInput } from '../components/ui';
+import { LogoMark } from '../components/Logo';
 import { useSession } from '../session';
 
 interface LoginResponse {
@@ -13,15 +14,7 @@ interface LoginResponse {
 }
 
 export function BrandMark() {
-  return (
-    <span className="brand-mark" aria-hidden="true">
-      <svg viewBox="0 0 32 32" role="presentation">
-        <path d="M7 11.5 16 6l9 5.5v9L16 26l-9-5.5z" />
-        <circle cx="16" cy="16" r="3.2" />
-        <path d="M16 6v6.8M7 11.5l6 3.2M25 11.5l-6 3.2M9.5 23.5l3.7-4.4M22.5 23.5l-3.7-4.4" />
-      </svg>
-    </span>
-  );
+  return <LogoMark />;
 }
 
 export function LoginPage() {
