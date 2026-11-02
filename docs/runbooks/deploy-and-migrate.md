@@ -86,3 +86,4 @@ Docker, домен и доступ к панели. Файл переноса с
 
 Готовая схема с Caddy на 443 и LuCI на 8443 лежит в `deploy/openwrt/`.
 Сертификат выдаётся Let's Encrypt через TLS-ALPN, порт 80 не используется.
+A-запись DuckDNS обновляет служба `routx-ddns` из `deploy/openwrt/ddns/`.
