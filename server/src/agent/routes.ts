@@ -93,7 +93,7 @@ function agentContext(request: FastifyRequest): AgentAuthContext {
 
 const INSTALL_SCRIPT = `#!/bin/sh
 # RoutX agent installer.
-# Usage: sh install.sh --server URL --token BINDING_TOKEN [--product prokop|forkop] [--sing-box tiny|stable|extended]
+# Usage: sh install.sh --server URL --token BINDING_TOKEN [--product prokop|forkop] [--sing-box tiny|stable|extended] [--reboot]
 set -eu
 
 SERVER=""
@@ -101,12 +101,14 @@ TOKEN=""
 PRODUCT=""
 SINGBOX=""
 PRODUCT_ARG=""
+REBOOT="0"
 while [ $# -gt 0 ]; do
   case "$1" in
     --server) SERVER="$2"; shift 2 ;;
     --token) TOKEN="$2"; shift 2 ;;
     --product) PRODUCT_ARG="$2"; shift 2 ;;
     --sing-box) SINGBOX="$2"; shift 2 ;;
+    --reboot) REBOOT="1"; shift ;;
     *) echo "unknown argument: $1" >&2; exit 2 ;;
   esac
 done
@@ -333,6 +335,14 @@ while [ "$i" -lt 30 ]; do
 done
 if grep -q '"bound": true' /var/run/routx-agent/status.json 2>/dev/null; then
   echo "RoutX установлен и привязан. Продукт: $PRODUCT. Сервер: $SERVER."
+  if [ "$REBOOT" = "1" ]; then
+    echo "Перезагружаю роутер через 5 секунд — это нужно, чтобы LuCI и продукт применили изменения." >&2
+    sync
+    sleep 5
+    reboot
+  else
+    echo "Перезагрузите роутер, чтобы LuCI и продукт применили изменения: reboot"
+  fi
 else
   echo "RoutX установлен. Продукт: $PRODUCT. Привязка к $SERVER ещё выполняется; проверьте статус на странице Службы → RoutX." >&2
   echo "--- диагностика агента ---" >&2
@@ -342,6 +352,7 @@ else
   else
     echo "status.json не создан: проверьте /etc/init.d/routx-agent status и logread -e routx-agent" >&2
   fi
+  echo "После успешной привязки перезагрузите роутер: reboot" >&2
 fi
 echo "LuCI: Службы → RoutX. Если пункта меню не видно — закройте вкладку LuCI и откройте её заново (меню кэшируется браузером)."
 `;

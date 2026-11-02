@@ -502,6 +502,29 @@ h3 {
   min-width: 0;
 }
 
+.template-locked {
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.template-locked:disabled .panel {
+  opacity: 0.92;
+}
+
+.template-locked:disabled input,
+.template-locked:disabled textarea,
+.template-locked:disabled select {
+  opacity: 0.65;
+  cursor: not-allowed;
+}
+
+.template-locked:disabled button {
+  cursor: not-allowed;
+  opacity: 0.65;
+}
+
 .row {
   display: flex;
   align-items: center;

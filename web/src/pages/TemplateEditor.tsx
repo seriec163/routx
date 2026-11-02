@@ -24,6 +24,7 @@ import type {
   TemplateRevision,
 } from '../lib/types';
 import { useApi } from '../lib/useApi';
+import { useSession } from '../session';
 
 /**
  * Шаблон — это пресет: действие, ресурсы и глобальные настройки.
@@ -95,6 +96,7 @@ function trimmedOrNull(value: string): string | null {
 
 export function TemplateEditorPage({ id }: { id: string }) {
   const toast = useToast();
+  const { me } = useSession();
   const template = useApi<{ template: TemplateFull }>(`/api/v1/templates/${id}`);
   const revisions = useApi<{ items: TemplateRevision[] }>(`/api/v1/templates/${id}/revisions`);
   const catalog = useApi<{ services: RoutingService[]; actions: RoutingAction[] }>(
@@ -323,6 +325,9 @@ export function TemplateEditorPage({ id }: { id: string }) {
 
   const current = template.data.template;
   const revision = current.revision ?? current.current_revision;
+  const canEdit =
+    me?.permissions.is_superadmin === true ||
+    (me != null && current.owner_id === me.user.id);
 
   return (
     <div className="page">
@@ -335,15 +340,26 @@ export function TemplateEditorPage({ id }: { id: string }) {
             <Button variant="ghost" onClick={() => navigate('/templates')}>
               К шаблонам
             </Button>
-            <Button variant="ghost" onClick={() => setArchiveOpen(true)} disabled={busy}>
-              В архив
-            </Button>
-            <Button onClick={() => void save()} busy={busy}>
-              Сохранить ревизию
-            </Button>
+            {canEdit ? (
+              <>
+                <Button variant="ghost" onClick={() => setArchiveOpen(true)} disabled={busy}>
+                  В архив
+                </Button>
+                <Button onClick={() => void save()} busy={busy}>
+                  Сохранить ревизию
+                </Button>
+              </>
+            ) : null}
           </>
         }
       />
+
+      {!canEdit ? (
+        <InfoBanner>
+          Общий шаблон{current.owner_email ? ` пользователя ${current.owner_email}` : ''}. Его можно
+          применять к своим роутерам, но редактировать и удалять может только владелец.
+        </InfoBanner>
+      ) : null}
 
       {error ? <ErrorBanner message={error} /> : null}
       {saved ? <InfoBanner>{saved}</InfoBanner> : null}
@@ -354,7 +370,8 @@ export function TemplateEditorPage({ id }: { id: string }) {
         </InfoBanner>
       ) : null}
 
-      <div className="stack">
+      <fieldset className="template-locked" disabled={!canEdit}>
+        <div className="stack">
         <Panel title="Основное" subtitle="Название видно только в панели; в UCI оно не попадает.">
           <Field label="Название">
             <TextInput value={name} onChange={setName} placeholder="YouTube через VPN" required />
@@ -584,7 +601,8 @@ export function TemplateEditorPage({ id }: { id: string }) {
             </div>
           )}
         </Panel>
-      </div>
+        </div>
+      </fieldset>
 
       {archiveOpen ? (
         <ConfirmDialog
@@ -640,13 +658,13 @@ export function TemplateEditorPage({ id }: { id: string }) {
         </InfoBanner>
       ) : null}
 
-      {purgeOpen ? null : (
+      {purgeOpen ? null : canEdit && !current.archived_at ? (
         <p className="muted-text small" style={{ marginTop: 12 }}>
           <button type="button" className="link-button" onClick={() => setPurgeOpen(true)}>
             Удалить шаблон навсегда
           </button>
         </p>
-      )}
+      ) : null}
     </div>
   );
 }

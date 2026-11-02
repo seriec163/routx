@@ -18,9 +18,11 @@ import { formatDate } from '../lib/format';
 import { navigate } from '../lib/router';
 import type { TemplateListItem } from '../lib/types';
 import { useApi } from '../lib/useApi';
+import { useSession } from '../session';
 
 export function TemplatesPage() {
   const toast = useToast();
+  const { me } = useSession();
   const templates = useApi<{ items: TemplateListItem[] }>('/api/v1/templates?include_archived=true');
   const [view, setView] = useState<'active' | 'archive'>('active');
   const [createOpen, setCreateOpen] = useState(false);
@@ -36,6 +38,34 @@ export function TemplatesPage() {
   const activeItems = allItems.filter((item) => !item.archived_at);
   const archivedItems = allItems.filter((item) => item.archived_at);
   const items = view === 'active' ? activeItems : archivedItems;
+
+  function canManage(template: TemplateListItem): boolean {
+    return me?.permissions.is_superadmin === true || template.owner_id === me?.user.id;
+  }
+
+  function isMine(template: TemplateListItem): boolean {
+    return template.owner_id === me?.user.id;
+  }
+
+  async function toggleShare(template: TemplateListItem): Promise<void> {
+    setBusy(true);
+    try {
+      await api(`/api/v1/templates/${template.id}`, {
+        method: 'PATCH',
+        body: { shared: !template.shared },
+      });
+      toast.success(
+        template.shared
+          ? 'Шаблон больше не виден другим пользователям'
+          : 'Шаблон открыт всем пользователям панели',
+      );
+      await templates.reload();
+    } catch (caught) {
+      toast.error(errorMessage(caught));
+    } finally {
+      setBusy(false);
+    }
+  }
 
   async function create(): Promise<void> {
     setBusy(true);
@@ -131,7 +161,7 @@ export function TemplatesPage() {
       {templates.error ? <ErrorBanner message={templates.error} onRetry={() => void templates.reload()} /> : null}
 
       <Panel
-        title="Мои шаблоны"
+        title="Шаблоны и общий доступ"
         actions={
           <div className="toolbar">
             <div className="segmented">
@@ -170,6 +200,7 @@ export function TemplatesPage() {
               <thead>
                 <tr>
                   <th>Название</th>
+                  <th>Доступ</th>
                   <th>Ревизия</th>
                   <th>{view === 'archive' ? 'В архиве' : 'Обновлён'}</th>
                   <th />
@@ -188,45 +219,69 @@ export function TemplatesPage() {
                         <div className="muted-text small">{template.description}</div>
                       ) : null}
                     </td>
+                    <td>
+                      {template.shared ? (
+                        <span className="badge badge-ok">Общий</span>
+                      ) : (
+                        <span className="badge">Личный</span>
+                      )}
+                      {template.shared && !isMine(template) && template.owner_email ? (
+                        <div className="muted-text small">{template.owner_email}</div>
+                      ) : null}
+                    </td>
                     <td>{template.current_revision}</td>
                     <td className="muted-text small">
                       {formatDate(template.archived_at ?? template.updated_at)}
                     </td>
                     <td className="row-actions">
                       {template.archived_at ? (
-                        <>
-                          <Button size="sm" variant="ghost" onClick={() => void restore(template)} busy={busy}>
-                            Восстановить
-                          </Button>
-                          <Button
-                            size="sm"
-                            variant="danger"
-                            onClick={() => {
-                              setPurging(template);
-                              setPurgeName('');
-                            }}
-                          >
-                            Удалить навсегда
-                          </Button>
-                        </>
+                        canManage(template) ? (
+                          <>
+                            <Button size="sm" variant="ghost" onClick={() => void restore(template)} busy={busy}>
+                              Восстановить
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="danger"
+                              onClick={() => {
+                                setPurging(template);
+                                setPurgeName('');
+                              }}
+                            >
+                              Удалить навсегда
+                            </Button>
+                          </>
+                        ) : null
                       ) : (
                         <>
                           <Link className="btn btn-ghost btn-sm" to={`/templates/${template.id}`}>
-                            Открыть
+                            {canManage(template) ? 'Открыть' : 'Посмотреть'}
                           </Link>
-                          <Button size="sm" variant="subtle" onClick={() => setArchiving(template)}>
-                            В архив
-                          </Button>
-                          <Button
-                            size="sm"
-                            variant="danger"
-                            onClick={() => {
-                              setPurging(template);
-                              setPurgeName('');
-                            }}
-                          >
-                            Удалить
-                          </Button>
+                          {canManage(template) ? (
+                            <>
+                              <Button
+                                size="sm"
+                                variant="subtle"
+                                onClick={() => void toggleShare(template)}
+                                busy={busy}
+                              >
+                                {template.shared ? 'Сделать личным' : 'Сделать общим'}
+                              </Button>
+                              <Button size="sm" variant="subtle" onClick={() => setArchiving(template)}>
+                                В архив
+                              </Button>
+                              <Button
+                                size="sm"
+                                variant="danger"
+                                onClick={() => {
+                                  setPurging(template);
+                                  setPurgeName('');
+                                }}
+                              >
+                                Удалить
+                              </Button>
+                            </>
+                          ) : null}
                         </>
                       )}
                     </td>
@@ -250,6 +305,11 @@ export function TemplatesPage() {
           </li>
           <li>
             Подписки и VLESS-ссылки хранятся отдельно от шаблона и никогда им не перезаписываются.
+          </li>
+          <li>
+            Кнопка «Сделать общим» открывает шаблон всем пользователям панели. Они видят его в
+            списке и могут применять к своим роутерам, но редактировать и удалять может только
+            владелец.
           </li>
           <li>
             Старые назначения шаблонов на роутеры больше не используются: шаблон применяется к

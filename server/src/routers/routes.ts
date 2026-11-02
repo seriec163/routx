@@ -447,7 +447,7 @@ export async function registerRouterRoutes(app: FastifyInstance, ctx: RouteConte
 
     const productArg =
       router.product === 'forkop' || router.product === 'prokop' ? ` --product ${router.product}` : '';
-    const command = `wget -qO- ${ctx.publicUrl}/agent/install.sh | sh -s -- --server ${ctx.publicUrl} --token ${token.token}${productArg}`;
+    const command = `wget -qO- ${ctx.publicUrl}/agent/install.sh | sh -s -- --server ${ctx.publicUrl} --token ${token.token}${productArg} --reboot`;
 
     return {
       token: token.token,
@@ -588,12 +588,15 @@ export async function registerRouterRoutes(app: FastifyInstance, ctx: RouteConte
       owner_id: string;
       current_revision: number;
       archived_at: Date | null;
-    }>('select id, owner_id, current_revision, archived_at from templates where id = $1', [
+      shared: boolean;
+    }>('select id, owner_id, current_revision, archived_at, shared from templates where id = $1', [
       body.template_id,
     ]);
     const tpl = template.rows[0];
     if (!tpl) throw notFound('Шаблон не найден');
-    if (auth.role !== 'superadmin' && tpl.owner_id !== auth.userId) throw notFound('Шаблон не найден');
+    if (auth.role !== 'superadmin' && tpl.owner_id !== auth.userId && !tpl.shared) {
+      throw notFound('Шаблон не найден');
+    }
     if (tpl.archived_at) throw badRequest('template_archived', 'Шаблон архивирован');
 
     const revision = body.revision ?? tpl.current_revision;
@@ -708,10 +711,13 @@ export async function registerRouterRoutes(app: FastifyInstance, ctx: RouteConte
       current_revision: number;
       owner_id: string;
       archived_at: Date | null;
-    }>('select current_revision, owner_id, archived_at from templates where id = $1', [params.templateId]);
+      shared: boolean;
+    }>('select current_revision, owner_id, archived_at, shared from templates where id = $1', [params.templateId]);
     const template = tpl.rows[0];
     if (!template) throw notFound('Шаблон не найден');
-    if (auth.role !== 'superadmin' && template.owner_id !== auth.userId) throw notFound('Шаблон не найден');
+    if (auth.role !== 'superadmin' && template.owner_id !== auth.userId && !template.shared) {
+      throw notFound('Шаблон не найден');
+    }
     if (template.archived_at) throw badRequest('template_archived', 'Шаблон архивирован');
 
     const revision = body.revision ?? template.current_revision;

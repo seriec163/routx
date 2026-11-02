@@ -13,8 +13,11 @@
 
 ```sh
 wget -qO- https://routx.example/agent/install.sh | sh -s -- \
-  --server https://routx.example --token <token>
+  --server https://routx.example --token <token> --reboot
 ```
+
+`--reboot` перезагружает роутер после успешной привязки. Без него
+установщик просто напишет, что нужно выполнить `reboot`.
 
 Установщик:
 
@@ -35,6 +38,9 @@ apk add --upgrade --allow-untrusted --force-overwrite ./routx-agent.apk
 
 6. Если пакетный менеджер недоступен или установка не удалась, использует
    `routx-agent.tar.gz`, сохраняя старый `/etc/config/routx`.
+7. После успешной привязки перезагружает роутер, если передан `--reboot`.
+   Панель добавляет этот флаг в команду установки автоматически: LuCI и
+   продукт должны применить изменения после перезагрузки.
 
 ## Обновление вручную
 

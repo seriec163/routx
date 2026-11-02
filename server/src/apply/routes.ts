@@ -211,13 +211,19 @@ export async function registerApplyRoutes(app: FastifyInstance, ctx: RouteContex
     const router = await getRouterForMutation(pool, auth, params.id);
     assertOnline(router);
 
-    const template = await pool.query<{ owner_id: string; current_revision: number }>(
-      'select owner_id, current_revision from templates where id = $1 and archived_at is null',
+    const template = await pool.query<{
+      owner_id: string;
+      current_revision: number;
+      shared: boolean;
+    }>(
+      'select owner_id, current_revision, shared from templates where id = $1 and archived_at is null',
       [body.template_id],
     );
     const tpl = template.rows[0];
     if (!tpl) throw notFound('Шаблон не найден');
-    if (auth.role !== 'superadmin' && tpl.owner_id !== auth.userId) throw notFound('Шаблон не найден');
+    if (auth.role !== 'superadmin' && tpl.owner_id !== auth.userId && !tpl.shared) {
+      throw notFound('Шаблон не найден');
+    }
 
     const job = await enqueueJob(pool, {
       type: 'diff',

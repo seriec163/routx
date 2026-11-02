@@ -98,10 +98,12 @@ export interface Job {
 export interface TemplateListItem {
   id: string;
   owner_id: string;
+  owner_email?: string | null;
   name: string;
   description: string | null;
   schema_version: number;
   current_revision: number;
+  shared: boolean;
   archived_at: string | null;
   created_at: string;
   updated_at: string;

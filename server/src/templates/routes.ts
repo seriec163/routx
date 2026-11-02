@@ -49,14 +49,16 @@ export async function registerTemplateRoutes(app: FastifyInstance, ctx: RouteCon
       .parse(request.query);
     const includeArchived = query.include_archived === 'true';
     const result = await pool.query(
-      `select t.id, t.owner_id, t.name, t.description, t.schema_version, t.current_revision,
+      `select t.id, t.owner_id, u.email as owner_email, t.name, t.description,
+              t.schema_version, t.current_revision, t.shared,
               t.archived_at, t.created_at, t.updated_at,
               (select count(*)::int from template_assignments a where a.template_id = t.id) as assignment_count,
               tr.payload as payload
          from templates t
+         join users u on u.id = t.owner_id
          left join template_revisions tr
            on tr.template_id = t.id and tr.revision = t.current_revision
-        where ($1::uuid is null or t.owner_id = $1)
+        where ($1::uuid is null or t.owner_id = $1 or (t.shared and t.archived_at is null))
           and ($2::boolean or t.archived_at is null)
         order by t.updated_at desc`,
       [auth.role === 'superadmin' ? null : auth.userId, includeArchived],
@@ -154,12 +156,18 @@ export async function registerTemplateRoutes(app: FastifyInstance, ctx: RouteCon
     const auth = requireUser(request);
     const params = z.object({ id: z.string().uuid() }).parse(request.params);
     const result = await pool.query(
-      'select * from templates where id = $1 and archived_at is null',
+      `select t.*, u.email as owner_email
+         from templates t join users u on u.id = t.owner_id
+        where t.id = $1 and t.archived_at is null`,
       [params.id],
     );
     const template = result.rows[0];
     if (!template) throw notFound('Шаблон не найден');
-    if (auth.role !== 'superadmin' && template.owner_id !== auth.userId) {
+    if (
+      auth.role !== 'superadmin' &&
+      template.owner_id !== auth.userId &&
+      template.shared !== true
+    ) {
       throw notFound('Шаблон не найден');
     }
 
@@ -199,6 +207,7 @@ export async function registerTemplateRoutes(app: FastifyInstance, ctx: RouteCon
       .object({
         name: z.string().trim().min(1).max(120).optional(),
         description: z.string().trim().max(2000).nullable().optional(),
+        shared: z.boolean().optional(),
       })
       .strict()
       .parse(request.body);
@@ -215,6 +224,7 @@ export async function registerTemplateRoutes(app: FastifyInstance, ctx: RouteCon
       `update templates set
           name = coalesce($2,name),
           description = case when $3::boolean then $4 else description end,
+          shared = coalesce($5::boolean, shared),
           updated_at = now()
         where id = $1 returning *`,
       [
@@ -222,6 +232,7 @@ export async function registerTemplateRoutes(app: FastifyInstance, ctx: RouteCon
         body.name ?? null,
         body.description !== undefined,
         body.description ?? null,
+        body.shared ?? null,
       ],
     );
 
@@ -326,9 +337,13 @@ export async function registerTemplateRoutes(app: FastifyInstance, ctx: RouteCon
   app.get('/api/v1/templates/:id/revisions', async (request) => {
     const auth = requireUser(request);
     const params = z.object({ id: z.string().uuid() }).parse(request.params);
-    const found = await pool.query('select owner_id from templates where id = $1', [params.id]);
+    const found = await pool.query('select owner_id, shared from templates where id = $1', [params.id]);
     if (!found.rows[0]) throw notFound('Шаблон не найден');
-    if (auth.role !== 'superadmin' && found.rows[0].owner_id !== auth.userId) {
+    if (
+      auth.role !== 'superadmin' &&
+      found.rows[0].owner_id !== auth.userId &&
+      found.rows[0].shared !== true
+    ) {
       throw notFound('Шаблон не найден');
     }
     const result = await pool.query(

@@ -2832,6 +2832,9 @@ export function RouterDetailPage({ id }: { id: string }) {
           <Field label="Команда установки">
             <pre className="code-block">{binding.install_command}</pre>
           </Field>
+          <p className="muted-text small">
+            После успешной привязки установщик перезагрузит роутер автоматически.
+          </p>
           <div className="row">
             <Button
               variant="ghost"
