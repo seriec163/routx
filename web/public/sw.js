@@ -1,7 +1,7 @@
 // RoutX: service worker для установки PWA и Web Push.
 // API и запросы агента не кэшируются; навигация — network-first, чтобы
 // после обновления панели не залипала старая оболочка.
-const CACHE = 'routx-shell-v6';
+const CACHE = 'routx-shell-v9';
 const SHELL = [
   '/',
   '/index.html',

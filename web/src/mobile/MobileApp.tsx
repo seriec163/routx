@@ -47,7 +47,22 @@ export function MobileApp() {
       window.matchMedia('(display-mode: standalone)').matches ||
       (navigator as unknown as { standalone?: boolean }).standalone === true;
     html.classList.toggle('routx-standalone', standalone);
+
+    // iOS PWA (особенно iOS 26) может отдавать 100dvh/100vh неверно.
+    // Берём реально видимую высоту окна и фиксируем её для html/body.
+    const applyHeight = () => {
+      html.style.setProperty('--routx-app-height', `${window.innerHeight}px`);
+    };
+    applyHeight();
+    window.addEventListener('resize', applyHeight);
+    window.addEventListener('orientationchange', applyHeight);
+    window.visualViewport?.addEventListener('resize', applyHeight);
+
     return () => {
+      window.removeEventListener('resize', applyHeight);
+      window.removeEventListener('orientationchange', applyHeight);
+      window.visualViewport?.removeEventListener('resize', applyHeight);
+      html.style.removeProperty('--routx-app-height');
       html.classList.remove('routx-standalone');
       html.classList.remove('routx-app-root');
       body.classList.remove('routx-app-body');

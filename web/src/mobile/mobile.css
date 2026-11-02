@@ -4,7 +4,7 @@
 
 html.routx-app-root,
 body.routx-app-body {
-  height: 100%;
+  height: var(--routx-app-height, 100dvh);
   overflow: hidden;
   overscroll-behavior: none;
   background: #f3e9fb;
@@ -15,6 +15,7 @@ body.routx-app-body {
   position: fixed;
   inset: 0;
   width: 100%;
+  min-height: 0;
   background: #f3e9fb;
 }
 
@@ -33,9 +34,6 @@ body.routx-app-body #root {
 
   height: 100vh;
   height: 100dvh;
-  /* iOS PWA: 100dvh на холодном старте может не учитывать нижний
-     safe-area и оставлять полосу под приложением. Для standalone
-     принудительно используем 100vh (см. html.routx-standalone ниже). */
   height: 100%;
   min-height: 100%;
   display: flex;
@@ -53,13 +51,6 @@ body.routx-app-body #root {
   -webkit-font-smoothing: antialiased;
 }
 
-/* iOS standalone: 100vh включает нижнюю safe-area, 100dvh — нет. */
-html.routx-standalone body.routx-app-body,
-html.routx-standalone .m-app {
-  height: 100vh;
-  min-height: 100vh;
-}
-
 .m-screen {
   flex: 1 1 auto;
   width: 100%;
@@ -70,7 +61,7 @@ html.routx-standalone .m-app {
   overflow-y: auto;
   overscroll-behavior-y: contain;
   -webkit-overflow-scrolling: touch;
-  padding-bottom: 16px;
+  padding-bottom: calc(104px + env(safe-area-inset-bottom));
   scrollbar-width: none;
 }
 
@@ -884,23 +875,22 @@ html.routx-standalone .m-app {
 /* Нижняя навигация -------------------------------------------------------- */
 
 .m-bottomnav {
-  position: relative;
-  left: auto;
-  bottom: auto;
+  position: fixed;
+  left: 50%;
+  /* Отрицательный bottom вытягивает белый фон панели в нижний safe-area,
+     не сдвигая кнопки: padding-bottom компенсирует этот выступ. */
+  bottom: calc(-1 * env(safe-area-inset-bottom));
   z-index: 40;
-  flex: 0 0 auto;
   display: grid;
   grid-template-columns: repeat(3, 1fr);
   gap: 4px;
-  width: 100%;
-  max-width: 520px;
-  margin: 0 auto;
-  padding: 8px 8px calc(8px + env(safe-area-inset-bottom));
+  width: min(520px, 100%);
+  padding: 8px 8px clamp(10px, calc(env(safe-area-inset-bottom) - 8px), 26px);
   border-radius: 24px 24px 0 0;
   background: rgba(255, 255, 255, 0.96);
   backdrop-filter: blur(14px);
   box-shadow: 0 -12px 30px rgba(96, 48, 84, 0.12);
-  transform: none;
+  transform: translateX(-50%);
 }
 
 .m-navlink {
