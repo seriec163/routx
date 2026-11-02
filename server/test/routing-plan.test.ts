@@ -37,7 +37,7 @@ describe('план шаблона', () => {
     const plan = buildPlan(payload(), []);
 
     expect(plan.localLists).toHaveLength(1);
-    expect(plan.localLists[0]?.path).toMatch(/^\/etc\/janusnew\/lists\/router_control-[a-f0-9]{12}\.lst$/);
+    expect(plan.localLists[0]?.path).toMatch(/^\/etc\/routx-agent\/lists\/router_control-[a-f0-9]{12}\.lst$/);
     expect(plan.localLists[0]?.entries).toEqual([
       '2001:db8::/32',
       '203.0.113.10',
@@ -323,7 +323,7 @@ describe('план шаблона', () => {
         'section.bypass.action': 'bypass',
         'section.bypass.enabled': '1',
         'section.bypass.label': 'Обход',
-        'section.bypass.domain_ip_lists': ['/etc/janusnew/lists/bypass-aaaaaaaaaaaa.lst'],
+        'section.bypass.domain_ip_lists': ['/etc/routx-agent/lists/bypass-aaaaaaaaaaaa.lst'],
       },
       [],
     );
@@ -348,7 +348,7 @@ describe('план шаблона', () => {
         'section.bypass.action': 'bypass',
         'section.bypass.enabled': '1',
         'section.bypass.label': 'Обход',
-        'section.bypass.domain_ip_lists': ['/etc/janusnew/lists/bypass-aaaaaaaaaaaa.lst'],
+        'section.bypass.domain_ip_lists': ['/etc/routx-agent/lists/bypass-aaaaaaaaaaaa.lst'],
       },
       [],
       { bypass: { manual_domains: ['example.com'], manual_ips: [] } },

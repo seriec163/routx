@@ -587,7 +587,7 @@ export function RouterOnboardingPage() {
             <span className="onb-hero-icon">2</span>
             <div>
               <h2>Подключите роутер по SSH</h2>
-              <p>Одна команда установит агент JanusNew и дождётся привязки.</p>
+              <p>Одна команда установит агент RoutX и дождётся привязки.</p>
             </div>
           </div>
 
@@ -629,7 +629,7 @@ export function RouterOnboardingPage() {
               )}
             </li>
             <li>
-              Дождитесь сообщения «JanusNew установлен и привязан». Обычно это занимает 1–3 минуты.
+              Дождитесь сообщения «RoutX установлен и привязан». Обычно это занимает 1–3 минуты.
             </li>
           </ol>
 

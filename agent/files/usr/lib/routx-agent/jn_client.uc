@@ -1,4 +1,4 @@
-// JanusNew: клиент протокола RoutX
+// RoutX: клиент протокола RoutX
 const util = require("jn_util");
 const http = require("jn_http");
 const config = require("jn_config");
@@ -6,7 +6,7 @@ const store = require("jn_store");
 const platform = require("jn_platform");
 const uci_state = require("jn_uci_state");
 
-const VERSION = "1.1.14";
+const VERSION = "1.2.0";
 
 function build_probe(product) {
 	let pver = platform.product_version(product);

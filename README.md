@@ -10,7 +10,7 @@
 * Редактор шаблона переведён с JSON на галочки: каталог ресурсов Prokop/Forkop (`community_lists`), URL-списки (`rule_set`, `remote_domain_lists`, `remote_subnet_lists`) и ручные домены/IP (`domain_ip_lists`).
 * Шаблон может явно создать управляемую секцию (`create_sections`) и задать её действие. Пользовательские секции и VLESS/Sub-подключения не перезаписываются.
 * В настройках роутера появилась вкладка «Свои списки»: дополнения к шаблону (URL или домены/IP) хранятся на сервере и подмешиваются в diff/apply.
-* Вкладка «Подключения»: подписка и/или VLESS-ссылки. Ссылки передаются по TLS, хранятся в AES-256-GCM и показываются в UI маской. JanusNew пишет их в отдельную секцию `router_control` (`subscription_url` / `selector_proxy_links`).
+* Вкладка «Подключения»: подписка и/или VLESS-ссылки. Ссылки передаются по TLS, хранятся в AES-256-GCM и показываются в UI маской. RoutX пишет их в отдельную секцию `router_control` (`subscription_url` / `selector_proxy_links`).
 
 ---
 
@@ -27,7 +27,7 @@
 | [`docs/architecture/TEMPLATES.md`](docs/architecture/TEMPLATES.md) | Грамматика путей, правило полноты, жёсткие исключения, трёхсторонний diff, apply/rollback |
 | [`docs/architecture/SECURITY.md`](docs/architecture/SECURITY.md) | Модель угроз, RBAC, токены, 2FA, защита агента, аудит и редакция |
 | [`docs/runbooks/phase-1.md`](docs/runbooks/phase-1.md) | Запуск, проверка, диагностика и откат этапа 1 |
-| [`docs/runbooks/phase-11-routing-ui.md`](docs/runbooks/phase-11-routing-ui.md) | Имена, галочки списков, свои списки роутера, подписки/VLESS, установка JanusNew и страница LuCI |
+| [`docs/runbooks/phase-11-routing-ui.md`](docs/runbooks/phase-11-routing-ui.md) | Имена, галочки списков, свои списки роутера, подписки/VLESS, установка RoutX и страница LuCI |
 | [`docs/runbooks/singbox-variants.md`](docs/runbooks/singbox-variants.md) | Варианты sing-box Tiny/Extended/Stable, проверка и откат |
 | [`docs/runbooks/monitoring-and-rollouts.md`](docs/runbooks/monitoring-and-rollouts.md) | Мониторинг прокси и поэтапное обновление sing-box |
 | [`docs/runbooks/router-onboarding.md`](docs/runbooks/router-onboarding.md) | Мастер добавления роутера из четырёх шагов |

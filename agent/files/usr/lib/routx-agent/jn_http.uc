@@ -1,4 +1,4 @@
-// JanusNew: HTTPS-клиент к RoutX.
+// RoutX: HTTPS-клиент к RoutX.
 // Токен и подпись передаются через временный curl-config (0600), а не в argv.
 // Тело ответа и HTTP-код пишутся в разные файлы: output в config, write-out в stdout.
 
@@ -104,9 +104,9 @@ function request(cfg, method, path, body, options) {
 	}
 	fs.chmod(cfg_path, 0600);
 
-	// /usr/libexec/janusnew-exec <timeout> <stdout> <stderr> -- argv...
+	// /usr/libexec/routx-agent-exec <timeout> <stdout> <stderr> -- argv...
 	// stdout содержит только write-out (HTTP-код), тело ответа curl пишет сам.
-	let full = ["/usr/libexec/janusnew-exec", "" + (timeout + 5), code_path, err_path, "--",
+	let full = ["/usr/libexec/routx-agent-exec", "" + (timeout + 5), code_path, err_path, "--",
 		"curl", "-q", "--config", cfg_path];
 	let command = "";
 	for (let arg in full)

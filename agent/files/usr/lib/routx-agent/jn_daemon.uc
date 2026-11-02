@@ -1,4 +1,4 @@
-// JanusNew: демон
+// RoutX: демон
 const fs = require("fs");
 const util = require("jn_util");
 const config = require("jn_config");
@@ -265,7 +265,7 @@ function run() {
 	let cfg = config.load();
 	if (!cfg.enabled) {
 		write_status(cfg, "unknown", { error: "агент отключён" });
-		warn("JanusNew disabled\n");
+		warn("RoutX disabled\n");
 		return 0;
 	}
 

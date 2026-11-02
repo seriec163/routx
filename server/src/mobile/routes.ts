@@ -18,7 +18,7 @@ interface RouteContext {
 /**
  * Обмен одноразового токена на обычную сессию.
  *
- * Ссылку и QR создаёт сам роутер (LuCI → Службы → JanusNew) и отдаёт её
+ * Ссылку и QR создаёт сам роутер (LuCI → Службы → RoutX) и отдаёт её
  * только локально, поэтому панель RoutX таких ссылок не выпускает.
  * Токен живёт 5 минут, используется один раз и хранится в виде SHA-256.
  */
@@ -91,7 +91,7 @@ export async function registerMobileRoutes(
       const settings = await loadSettings(pool);
 
       // Один роутер — ограниченное число авторизованных телефонов.
-      // Удалять их можно только на самом роутере (LuCI → JanusNew).
+      // Удалять их можно только на самом роутере (LuCI → RoutX).
       const active = await pool.query<{ count: string }>(
         `select count(*)::text as count from mobile_devices
           where router_id = $1 and revoked_at is null`,
@@ -100,7 +100,7 @@ export async function registerMobileRoutes(
       if (Number(active.rows[0]?.count ?? 0) >= 50) {
         throw badRequest(
           'too_many_devices',
-          'Слишком много авторизованных телефонов. Удалите лишние на роутере: LuCI → Служба → JanusNew.',
+          'Слишком много авторизованных телефонов. Удалите лишние на роутере: LuCI → Служба → RoutX.',
         );
       }
 

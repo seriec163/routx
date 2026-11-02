@@ -56,7 +56,7 @@ export function RoutersScreen() {
 
           {routers.length === 0 && !loading ? (
             <p className="m-empty-text">
-              Роутеров пока нет. Отсканируйте QR на странице JanusNew роутера или вставьте ссылку.
+              Роутеров пока нет. Отсканируйте QR на странице RoutX роутера или вставьте ссылку.
             </p>
           ) : (
             routers.map((router) => (
@@ -89,7 +89,7 @@ export function RoutersScreen() {
         </div>
 
         <p className="m-footnote">
-          QR создаётся на самом роутере: LuCI → Служба → JanusNew. Ссылка одноразовая и действует
+          QR создаётся на самом роутере: LuCI → Служба → RoutX. Ссылка одноразовая и действует
           5 минут.
         </p>
 
@@ -339,7 +339,7 @@ function QrScanner(props: { onResult: (value: string) => void; disabled: boolean
 
       {state === 'starting' ? <p className="m-note">Включаем камеру…</p> : null}
       {state === 'scanning' ? (
-        <p className="m-note">Наведите камеру на QR-код на странице JanusNew.</p>
+        <p className="m-note">Наведите камеру на QR-код на странице RoutX.</p>
       ) : null}
       {state === 'done' ? <p className="m-note">QR распознан, подключаем…</p> : null}
     </div>

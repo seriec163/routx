@@ -1,4 +1,4 @@
-// JanusNew: операции apply/precheck/reload/service/verify
+// RoutX: операции apply/precheck/reload/service/verify
 const fs = require("fs");
 const uci = require("uci");
 const util = require("jn_util");
@@ -107,7 +107,7 @@ function apply_uci(product, items, base_state_hash, create_sections, local_lists
 	for (let name in (create_sections || []))
 		create[util.as_string(name)] = true;
 
-	let list_prefix = "/etc/janusnew/lists/";
+	let list_prefix = "/etc/routx-agent/lists/";
 	for (let list in (local_lists || [])) {
 		let path = util.as_string(list.path);
 		if (substr(path, 0, length(list_prefix)) != list_prefix ||
@@ -440,7 +440,7 @@ function read_rules(product) {
 			paths = paths == null ? [] : [ paths ];
 		for (let item in paths) {
 			let path = util.as_string(item);
-			if (match(path, /^\/etc\/janusnew\/lists\/[A-Za-z0-9_.\/-]+\.lst$/) == null)
+			if (match(path, /^\/etc\/routx-agent\/lists\/[A-Za-z0-9_.\/-]+\.lst$/) == null)
 				continue;
 			let text = util.read_file(path, "");
 			if (text == "")

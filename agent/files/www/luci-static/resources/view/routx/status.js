@@ -4,7 +4,7 @@
 'require poll';
 'require ui';
 
-const STATUS_PATH = '/var/run/janusnew/status.json';
+const STATUS_PATH = '/var/run/routx-agent/status.json';
 const FRESH_SECONDS = 150;
 
 const STYLE = `
@@ -489,16 +489,16 @@ return view.extend({
 			notes.push('Агент ещё не записал файл статуса. Если установка только что завершилась, подождите несколько секунд и нажмите «Обновить».');
 		}
 		else if (st.product === 'conflict') {
-			notes.push('На роутере одновременно найдены Prokop и Forkop. JanusNew не вносит изменений, пока конфликт не устранён вручную.');
+			notes.push('На роутере одновременно найдены Prokop и Forkop. RoutX не вносит изменений, пока конфликт не устранён вручную.');
 		}
 		else if (st.enabled === false) {
-			notes.push('Агент отключён: в /etc/config/janusnew указано enabled=0.');
+			notes.push('Агент отключён: в /etc/config/routx указано enabled=0.');
 		}
 		else if (st.bound !== true) {
 			notes.push('Агент установлен, но не привязан. Возьмите одноразовую команду установки в карточке роутера на сервере.');
 		}
 		else if (secondsSince(st.updated_at) == null || secondsSince(st.updated_at) >= FRESH_SECONDS) {
-			notes.push('Статус не обновлялся более двух минут. Проверьте /etc/init.d/janusnew status и журнал: logread -e janusnew.');
+			notes.push('Статус не обновлялся более двух минут. Проверьте /etc/init.d/routx-agent status и журнал: logread -e routx-agent.');
 		}
 		else if (String(st.last_error || '').trim()) {
 			notes.push('Последняя ошибка связи: ' + String(st.last_error).trim());
@@ -535,7 +535,7 @@ return view.extend({
 	},
 
 	handleRestart: function(root) {
-		ui.showModal('Перезапустить агент JanusNew?', [
+		ui.showModal('Перезапустить агент RoutX?', [
 			E('p', {}, 'Агент ненадолго прервёт связь с сервером и затем подключится снова. Настройки роутера не изменятся.'),
 			E('div', { 'class': 'right' }, [
 				E('button', {
@@ -546,7 +546,7 @@ return view.extend({
 				E('button', {
 					'class': 'btn cbi-button cbi-button-apply',
 					'click': ui.createHandlerFn(this, function() {
-						return fs.exec('/etc/init.d/janusnew', [ 'restart' ])
+						return fs.exec('/etc/init.d/routx-agent', [ 'restart' ])
 							.then(() => {
 								ui.hideModal();
 								ui.addNotification(null, E('p', {}, 'Агент перезапущен'), 'info');
@@ -574,7 +574,7 @@ return view.extend({
 				E('button', {
 					'class': 'btn cbi-button cbi-button-apply',
 					'click': ui.createHandlerFn(this, function() {
-						return fs.exec('/usr/bin/janusnew', [ 'rotate' ])
+						return fs.exec('/usr/bin/routx-agent', [ 'rotate' ])
 							.then((res) => {
 								if (res.code !== 0)
 									throw new Error((res.stderr || res.stdout || ('код ' + res.code)).trim());
@@ -603,7 +603,7 @@ return view.extend({
 			r.qrStatus.textContent = '';
 		};
 
-		return fs.exec('/usr/bin/janusnew', [ 'mobile-qr' ])
+		return fs.exec('/usr/bin/routx-agent', [ 'mobile-qr' ])
 			.then((res) => {
 				const lines = String(res.stdout || '').split('\n').filter((line) => line.trim() !== '');
 				let data = null;
@@ -677,7 +677,7 @@ return view.extend({
 			r.devicesStatus.textContent = '';
 		};
 
-		return fs.exec('/usr/bin/janusnew', [ 'mobile-devices' ])
+		return fs.exec('/usr/bin/routx-agent', [ 'mobile-devices' ])
 			.then((res) => {
 				const lines = String(res.stdout || '').split('\n').filter((line) => line.trim() !== '');
 				let data = null;
@@ -750,7 +750,7 @@ return view.extend({
 				E('button', {
 					'class': 'btn cbi-button cbi-button-negative',
 					'click': ui.createHandlerFn(this, function() {
-						return fs.exec('/usr/bin/janusnew', [ 'mobile-revoke', device.id ])
+						return fs.exec('/usr/bin/routx-agent', [ 'mobile-revoke', device.id ])
 							.then((res) => {
 								const lines = String(res.stdout || '').split('\n').filter((line) => line.trim() !== '');
 								let data = null;
@@ -788,7 +788,7 @@ return view.extend({
 		const hero = E('div', { 'class': 'jn-hero' }, [
 			orb,
 			E('div', { 'class': 'jn-hero-text' }, [
-				E('div', { 'class': 'jn-title' }, 'JanusNew'),
+				E('div', { 'class': 'jn-title' }, 'RoutX'),
 				sub
 			]),
 			badge

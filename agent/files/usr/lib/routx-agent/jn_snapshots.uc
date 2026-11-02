@@ -1,4 +1,4 @@
-// JanusNew: снимки конфигурации
+// RoutX: снимки конфигурации
 const fs = require("fs");
 const util = require("jn_util");
 const run = require("jn_run");

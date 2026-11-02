@@ -1,4 +1,4 @@
-// JanusNew: сбор управляемого состояния UCI (только allowlist).
+// RoutX: сбор управляемого состояния UCI (только allowlist).
 const fs = require("fs");
 const uci = require("uci");
 const util = require("jn_util");

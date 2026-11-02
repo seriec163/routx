@@ -1,4 +1,4 @@
-// JanusNew: диагностика
+// RoutX: диагностика
 const util = require("jn_util");
 const platform = require("jn_platform");
 const run = require("jn_run");

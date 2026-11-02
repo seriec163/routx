@@ -1,5 +1,5 @@
-// JanusNew: небольшое персистентное состояние демона.
-// /var/run/janusnew/state.json, 0600, атомарная замена.
+// RoutX: небольшое персистентное состояние демона.
+// /var/run/routx-agent/state.json, 0600, атомарная замена.
 
 const util = require("jn_util");
 

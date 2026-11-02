@@ -6,25 +6,25 @@
 
 ## Требования
 
-Нужен агент JanusNew **1.1.0+**. Обновление на роутере:
+Нужен агент RoutX **1.1.0+**. Обновление на роутере:
 
 OpenWrt 24.10 / opkg:
 
 ```sh
-wget -qO /tmp/janusnew.ipk https://routx.example/agent/janusnew.ipk
-opkg install --force-reinstall /tmp/janusnew.ipk
-/etc/init.d/janusnew restart
+wget -qO /tmp/routx-agent.ipk https://routx.example/agent/routx-agent.ipk
+opkg install --force-reinstall /tmp/routx-agent.ipk
+/etc/init.d/routx-agent restart
 ```
 
 OpenWrt 25+ / apk:
 
 ```sh
-wget -qO /tmp/janusnew.apk https://routx.example/agent/janusnew.apk
-apk add --upgrade --allow-untrusted --force-overwrite /tmp/janusnew.apk
-/etc/init.d/janusnew restart
+wget -qO /tmp/routx-agent.apk https://routx.example/agent/routx-agent.apk
+apk add --upgrade --allow-untrusted --force-overwrite /tmp/routx-agent.apk
+/etc/init.d/routx-agent restart
 ```
 
-`/etc/config/janusnew` при обновлении сохраняется.
+`/etc/config/routx` при обновлении сохраняется.
 
 ## Что меняется
 

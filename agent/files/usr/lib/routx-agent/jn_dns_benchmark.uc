@@ -1,4 +1,4 @@
-// JanusNew: замер DNS-резолверов для Prokop/Forkop.
+// RoutX: замер DNS-резолверов для Prokop/Forkop.
 // Работает в фоне: start запускает worker, status отдаёт прогресс, stop гасит.
 // Настройки не меняет — только измеряет и возвращает рекомендации.
 
@@ -6,10 +6,10 @@ const fs = require("fs");
 const util = require("jn_util");
 const run = require("jn_run");
 
-const STATE_DIR = "/var/run/janusnew/dns-benchmark";
+const STATE_DIR = "/var/run/routx-agent/dns-benchmark";
 const STATE_FILE = STATE_DIR + "/state.json";
 const PID_FILE = STATE_DIR + "/worker.pid";
-const LIB_DIR = "/usr/lib/janusnew";
+const LIB_DIR = "/usr/lib/routx-agent";
 const ROUNDS = 5;
 const MAX_RESULTS = 64;
 const PROBE_TIMEOUT = 4;

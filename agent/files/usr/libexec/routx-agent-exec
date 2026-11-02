@@ -1,6 +1,6 @@
 #!/bin/sh
-# JanusNew helper: run command with clean env and timeouts
-# Usage: janusnew-exec <timeout> <stdout> <stderr> -- <argv...>
+# RoutX helper: run command with clean env and timeouts
+# Usage: routx-agent-exec <timeout> <stdout> <stderr> -- <argv...>
 TIMEOUT="$1"
 OUT="$2"
 ERR="$3"

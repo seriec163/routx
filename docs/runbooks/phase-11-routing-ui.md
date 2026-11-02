@@ -1,7 +1,7 @@
 # Итерация: имена, списки и подключения
 
 Документ описывает изменения после этапа 1: персонализацию, галочки списков Prokop/Forkop,
-серверные дополнения к шаблону, подписки/VLESS и подготовку JanusNew к установке.
+серверные дополнения к шаблону, подписки/VLESS и подготовку RoutX к установке.
 
 ---
 
@@ -69,8 +69,8 @@ Payload шаблона дополнен полями:
 * Если подходящей секции нет или их несколько, diff останавливается с понятной
   ошибкой. Это защищает от создания правила `connection` без подключения, из-за
   которого Prokop отказывается загружать конфигурацию.
-* Ручные домены/IP не пишутся в UCI напрямую: JanusNew собирает локальный `.lst`
-  в `/etc/janusnew/lists/<section>-<hash>.lst` и добавляет путь в `domain_ip_lists`.
+* Ручные домены/IP не пишутся в UCI напрямую: RoutX собирает локальный `.lst`
+  в `/etc/routx-agent/lists/<section>-<hash>.lst` и добавляет путь в `domain_ip_lists`.
   Хэш в имени меняется при изменении содержимого, поэтому diff всегда видит изменение.
 * Секреты (`selector_proxy_links`, `subscription_url.url`, `outbound_jsons`) в шаблон
   по-прежнему попасть не могут.
@@ -129,7 +129,7 @@ Payload шаблона дополнен полями:
   Сервер проверит доступ, расшифрует ссылку и сохранит её копию в подключении.
 * Ссылка передаётся по TLS, хранится в `router_connections.secret_enc`
   (AES-256-GCM), в UI показывается маской.
-* JanusNew пишет данные только в секцию `routers.managed_section` (по умолчанию
+* RoutX пишет данные только в секцию `routers.managed_section` (по умолчанию
   `router_control`):
   * `section.<name>.action = connection`;
   * `section.<name>.selector_proxy_links` — VLESS-ссылки;
@@ -154,7 +154,7 @@ docker compose logs --tail=30 app
 
 ---
 
-## 6. Установка JanusNew на роутер
+## 6. Установка RoutX на роутер
 
 Одна команда — из модального окна «Выпустить токен привязки» на странице роутера:
 
@@ -192,24 +192,24 @@ sh install.sh --server URL --token TOKEN \
 
 ### Страница в LuCI
 
-Пакет `janusnew` кладёт в LuCI отдельное приложение:
+Пакет `routx-agent` кладёт в LuCI отдельное приложение:
 
-* `usr/share/luci/menu.d/luci-app-janusnew.json` — **Службы → JanusNew**;
-* `usr/share/rpcd/acl.d/luci-app-janusnew.json` — доступ только на чтение
-  `/var/run/janusnew/status.json` и перезапуск агента;
-* `www/luci-static/resources/view/janusnew/status.js` — сама страница.
+* `usr/share/luci/menu.d/luci-app-routx-agent.json` — **Службы → RoutX**;
+* `usr/share/rpcd/acl.d/luci-app-routx-agent.json` — доступ только на чтение
+  `/var/run/routx-agent/status.json` и перезапуск агента;
+* `www/luci-static/resources/view/routx-agent/status.js` — сама страница.
 
 Страница показывает: состояние связи (подключён / ожидает привязки / не отвечает),
 сервер, ID роутера, продукт и его версию, вариант и версию sing-box, версию агента,
 модель и версию OpenWrt. Есть кнопки «Обновить», «Перезапустить агент» и
 «Сменить секрет».
 
-«Сменить секрет» вызывает `janusnew rotate`: агент отправляет
+«Сменить секрет» вызывает `routx-agent rotate`: агент отправляет
 `POST /agent/v1/rotate` со своим текущим токеном, сервер выдаёт новый, агент
-сохраняет его в `/etc/config/janusnew`. Старый токен остаётся действителен
+сохраняет его в `/etc/config/routx`. Старый токен остаётся действителен
 10 минут на случай обрыва. Привязка и настройки роутера не меняются.
 
-Данные берутся из `/var/run/janusnew/status.json` (0644, без токенов). Файл
+Данные берутся из `/var/run/routx-agent/status.json` (0644, без токенов). Файл
 обновляется после каждого длинного опроса (25 с) и после каждой команды сервера.
 Статус считается устаревшим через 150 секунд без обновления.
 
@@ -229,11 +229,11 @@ rm -f /tmp/luci-indexcache*
 
 * Нужны `ucode-mod-fs`, `ucode-mod-uci`, `ucode-mod-digest`, `coreutils-timeout`, `curl`.
   Установщик доустанавливает недостающие пакеты через `opkg`.
-* `/etc/config/janusnew` объявлен conffile: обновление пакета не стирает привязку.
+* `/etc/config/routx` объявлен conffile: обновление пакета не стирает привязку.
   Установщик всё равно перезаписывает `server`/`bind_token` значениями из команды.
 * `.ipk` для OpenWrt 24.10 собирается как gzip-tar (`debian-binary` + `control.tar.gz` +
   `data.tar.gz`), а не как `ar`-архив.
-* `fs.popen()` в ucode принимает только строку, поэтому JanusNew собирает argv в
+* `fs.popen()` в ucode принимает только строку, поэтому RoutX собирает argv в
   экранированную shell-команду.
 * Ошибка `reload` вида `{"status":"existing", ...}` означает, что снимок уже существует;
   агент использует CLI `reload` первым, чтобы не конкурировать с init-скриптом.

@@ -1,4 +1,4 @@
-// JanusNew: CLI
+// RoutX: CLI
 const config = require("jn_config");
 const platform = require("jn_platform");
 const client = require("jn_client");
@@ -6,8 +6,8 @@ const daemon = require("jn_daemon");
 const util = require("jn_util");
 
 function usage() {
-	print("JanusNew - RoutX agent\n\n");
-	print("Usage: janusnew <command>\n\n");
+	print("RoutX agent\n\n");
+	print("Usage: routx-agent <command>\n\n");
 	print("Commands:\n");
 	print("  status      Show agent status\n");
 	print("  bind        Bind using bind_token\n");
@@ -120,8 +120,8 @@ function main() {
 	if (cmd == "mobile-devices") return cmd_mobile_devices();
 	if (cmd == "mobile-revoke") return cmd_mobile_revoke(ARGV[1]);
 	if (cmd == "run") return daemon.run();
-	if (cmd == "start") { system("/etc/init.d/janusnew start"); return 0; }
-	if (cmd == "stop") { system("/etc/init.d/janusnew stop"); return 0; }
+	if (cmd == "start") { system("/etc/init.d/routx-agent start"); return 0; }
+	if (cmd == "stop") { system("/etc/init.d/routx-agent stop"); return 0; }
 	if (cmd == "version") { print(client.VERSION + "\n"); return 0; }
 	usage();
 	return 1;

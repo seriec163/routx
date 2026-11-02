@@ -1,13 +1,13 @@
-// JanusNew: чтение и запись /etc/config/janusnew.
+// RoutX: чтение и запись /etc/config/routx.
 // Файл всегда 0600: в нём лежит токен агента.
 
 const fs = require("fs");
 const uci = require("uci");
 const util = require("jn_util");
 
-const CONFIG = "janusnew";
+const CONFIG = "routx";
 const SECTION = "main";
-const CONFIG_PATH = "/etc/config/janusnew";
+const CONFIG_PATH = "/etc/config/routx";
 
 const DEFAULTS = {
 	enabled: "1",

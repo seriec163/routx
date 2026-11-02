@@ -92,7 +92,7 @@ function agentContext(request: FastifyRequest): AgentAuthContext {
 }
 
 const INSTALL_SCRIPT = `#!/bin/sh
-# JanusNew installer for RoutX.
+# RoutX agent installer.
 # Usage: sh install.sh --server URL --token BINDING_TOKEN [--product prokop|forkop] [--sing-box tiny|stable|extended]
 set -eu
 
@@ -202,68 +202,78 @@ elif command -v apk >/dev/null 2>&1; then
   apk info -e ucode-mod-digest >/dev/null 2>&1 || apk add ucode-mod-digest >/dev/null 2>&1 || true
 fi
 
-if command -v wget >/dev/null 2>&1; then
-  wget -q "$SERVER/agent/janusnew.sha256" -O janusnew.sha256
-  wget -q "$SERVER/agent/janusnew.ipk" -O janusnew.ipk || true
-  wget -q "$SERVER/agent/janusnew.apk" -O janusnew.apk || true
-  wget -q "$SERVER/agent/janusnew.tar.gz" -O janusnew.tar.gz || true
-else
-  curl -fsS "$SERVER/agent/janusnew.sha256" -o janusnew.sha256
-  curl -fsS "$SERVER/agent/janusnew.ipk" -o janusnew.ipk 2>/dev/null || true
-  curl -fsS "$SERVER/agent/janusnew.apk" -o janusnew.apk 2>/dev/null || true
-  curl -fsS "$SERVER/agent/janusnew.tar.gz" -o janusnew.tar.gz 2>/dev/null || true
+# Переход с прежнего имени JanusNew: сохраняем конфиг и снимаем старый пакет.
+if [ -f /etc/config/janusnew ] && [ ! -f /etc/config/routx ]; then
+  cp -p /etc/config/janusnew /etc/config/routx || true
+fi
+if command -v opkg >/dev/null 2>&1; then
+  opkg remove janusnew --force-depends >/dev/null 2>&1 || true
+elif command -v apk >/dev/null 2>&1; then
+  apk del janusnew >/dev/null 2>&1 || true
 fi
 
-if command -v sha256sum >/dev/null 2>&1 && [ -f janusnew.sha256 ]; then
-  sha256sum -c janusnew.sha256 2>/dev/null || true
+if command -v wget >/dev/null 2>&1; then
+  wget -q "$SERVER/agent/routx-agent.sha256" -O routx-agent.sha256
+  wget -q "$SERVER/agent/routx-agent.ipk" -O routx-agent.ipk || true
+  wget -q "$SERVER/agent/routx-agent.apk" -O routx-agent.apk || true
+  wget -q "$SERVER/agent/routx-agent.tar.gz" -O routx-agent.tar.gz || true
+else
+  curl -fsS "$SERVER/agent/routx-agent.sha256" -o routx-agent.sha256
+  curl -fsS "$SERVER/agent/routx-agent.ipk" -o routx-agent.ipk 2>/dev/null || true
+  curl -fsS "$SERVER/agent/routx-agent.apk" -o routx-agent.apk 2>/dev/null || true
+  curl -fsS "$SERVER/agent/routx-agent.tar.gz" -o routx-agent.tar.gz 2>/dev/null || true
+fi
+
+if command -v sha256sum >/dev/null 2>&1 && [ -f routx-agent.sha256 ]; then
+  sha256sum -c routx-agent.sha256 2>/dev/null || true
 fi
 
 install_tar() {
-  [ -f janusnew.tar.gz ] || return 1
+  [ -f routx-agent.tar.gz ] || return 1
   # tar.gz не знает о conffiles: сохраняем привязку вручную.
-  if [ -f /etc/config/janusnew ]; then
-    cp -p /etc/config/janusnew "$TMP/janusnew.config" || true
+  if [ -f /etc/config/routx ]; then
+    cp -p /etc/config/routx "$TMP/routx-agent.config" || true
   fi
-  tar -C / -xzf janusnew.tar.gz || return 1
-  if [ -f "$TMP/janusnew.config" ]; then
-    cp -p "$TMP/janusnew.config" /etc/config/janusnew || true
+  tar -C / -xzf routx-agent.tar.gz || return 1
+  if [ -f "$TMP/routx-agent.config" ]; then
+    cp -p "$TMP/routx-agent.config" /etc/config/routx || true
   fi
   return 0
 }
 
-if command -v opkg >/dev/null 2>&1 && [ -f janusnew.ipk ]; then
-  opkg install --force-reinstall ./janusnew.ipk || {
+if command -v opkg >/dev/null 2>&1 && [ -f routx-agent.ipk ]; then
+  opkg install --force-reinstall ./routx-agent.ipk || {
     echo "ipk install failed, falling back to tar.gz" >&2
     install_tar || true
   }
-elif command -v apk >/dev/null 2>&1 && [ -f janusnew.apk ]; then
-  apk add --upgrade --allow-untrusted --force-overwrite ./janusnew.apk || {
+elif command -v apk >/dev/null 2>&1 && [ -f routx-agent.apk ]; then
+  apk add --upgrade --allow-untrusted --force-overwrite ./routx-agent.apk || {
     echo "apk install failed, falling back to tar.gz" >&2
     install_tar || true
   }
 elif command -v apk >/dev/null 2>&1; then
   install_tar || true
 else
-  [ -f janusnew.ipk ] && opkg install --force-reinstall ./janusnew.ipk 2>/dev/null || true
+  [ -f routx-agent.ipk ] && opkg install --force-reinstall ./routx-agent.ipk 2>/dev/null || true
   install_tar || true
 fi
 
 uci -q batch <<EOF
-set janusnew.main.server='$SERVER'
-set janusnew.main.bind_token='$TOKEN'
-set janusnew.main.agent_token=''
-set janusnew.main.router_id=''
-set janusnew.main.enabled='1'
-commit janusnew
+set routx.main.server='$SERVER'
+set routx.main.bind_token='$TOKEN'
+set routx.main.agent_token=''
+set routx.main.router_id=''
+set routx.main.enabled='1'
+commit routx
 EOF
-chmod 600 /etc/config/janusnew 2>/dev/null || true
+chmod 600 /etc/config/routx 2>/dev/null || true
 
 # Старый статус мог остаться от предыдущей привязки: иначе проверка ниже
 # примет его за свежий и соврёт об успехе.
-rm -f /var/run/janusnew/status.json
+rm -f /var/run/routx-agent/status.json
 
-[ -x /etc/init.d/janusnew ] && /etc/init.d/janusnew enable 2>/dev/null || true
-[ -x /etc/init.d/janusnew ] && /etc/init.d/janusnew restart 2>/dev/null || /etc/init.d/janusnew start 2>/dev/null || true
+[ -x /etc/init.d/routx-agent ] && /etc/init.d/routx-agent enable 2>/dev/null || true
+[ -x /etc/init.d/routx-agent ] && /etc/init.d/routx-agent restart 2>/dev/null || /etc/init.d/routx-agent start 2>/dev/null || true
 
 # Агент уже привязан. Теперь ставим продукт, только если его действительно нет.
 # Повторная проверка защищает от гонки и от ложного «продукта нет».
@@ -284,10 +294,10 @@ if ! has_prokop && ! has_forkop; then
     exit 1
   fi
   if ! has_prokop && ! has_forkop; then
-    echo "Не удалось установить $PRODUCT. Агент остаётся привязанным; установите продукт вручную и перезапустите /etc/init.d/janusnew." >&2
+    echo "Не удалось установить $PRODUCT. Агент остаётся привязанным; установите продукт вручную и перезапустите /etc/init.d/routx-agent." >&2
     exit 1
   fi
-  [ -x /etc/init.d/janusnew ] && /etc/init.d/janusnew restart 2>/dev/null || true
+  [ -x /etc/init.d/routx-agent ] && /etc/init.d/routx-agent restart 2>/dev/null || true
 else
   echo "Продукт уже установлен; шаг установки пропущен."
 fi
@@ -298,16 +308,16 @@ rm -f /tmp/luci-indexcache* 2>/dev/null || true
 # Ждём первую привязку, чтобы команда не врала про успех.
 i=0
 while [ "$i" -lt 30 ]; do
-  grep -q '"bound": true' /var/run/janusnew/status.json 2>/dev/null && break
+  grep -q '"bound": true' /var/run/routx-agent/status.json 2>/dev/null && break
   sleep 1
   i=$((i + 1))
 done
-if grep -q '"bound": true' /var/run/janusnew/status.json 2>/dev/null; then
-  echo "JanusNew установлен и привязан. Продукт: $PRODUCT. Сервер: $SERVER."
+if grep -q '"bound": true' /var/run/routx-agent/status.json 2>/dev/null; then
+  echo "RoutX установлен и привязан. Продукт: $PRODUCT. Сервер: $SERVER."
 else
-  echo "JanusNew установлен. Продукт: $PRODUCT. Привязка к $SERVER ещё выполняется; проверьте статус на странице Службы → JanusNew." >&2
+  echo "RoutX установлен. Продукт: $PRODUCT. Привязка к $SERVER ещё выполняется; проверьте статус на странице Службы → RoutX." >&2
 fi
-echo "LuCI: Службы → JanusNew. Если пункта меню не видно — закройте вкладку LuCI и откройте её заново (меню кэшируется браузером)."
+echo "LuCI: Службы → RoutX. Если пункта меню не видно — закройте вкладку LuCI и откройте её заново (меню кэшируется браузером)."
 `;
 
 export async function registerAgentRoutes(
@@ -322,14 +332,14 @@ export async function registerAgentRoutes(
   });
 
   const agentDist = (global as any).__RC_AGENT_DIST || process.env.RC_AGENT_DIST || null;
-  app.get('/agent/janusnew.ipk', async (_request, reply) => {
+  app.get('/agent/routx-agent.ipk', async (_request, reply) => {
     if (agentDist) {
       const { existsSync, readFileSync } = await import('node:fs');
       const { join } = await import('node:path');
-      const p = join(agentDist, 'janusnew.ipk');
+      const p = join(agentDist, 'routx-agent.ipk');
       if (existsSync(p)) {
         reply.type('application/octet-stream');
-        reply.header('Content-Disposition', 'attachment; filename="janusnew.ipk"');
+        reply.header('Content-Disposition', 'attachment; filename="routx-agent.ipk"');
         return readFileSync(p);
       }
     }
@@ -337,14 +347,14 @@ export async function registerAgentRoutes(
     return { error: { code: 'not_bundled', message: 'Пакет не собран в этом образе' } };
   });
 
-  app.get('/agent/janusnew.apk', async (_request, reply) => {
+  app.get('/agent/routx-agent.apk', async (_request, reply) => {
     if (agentDist) {
       const { existsSync, readFileSync } = await import('node:fs');
       const { join } = await import('node:path');
-      const p = join(agentDist, 'janusnew.apk');
+      const p = join(agentDist, 'routx-agent.apk');
       if (existsSync(p)) {
         reply.type('application/octet-stream');
-        reply.header('Content-Disposition', 'attachment; filename="janusnew.apk"');
+        reply.header('Content-Disposition', 'attachment; filename="routx-agent.apk"');
         return readFileSync(p);
       }
     }
@@ -352,14 +362,14 @@ export async function registerAgentRoutes(
     return { error: { code: 'not_bundled', message: 'APK не собран в этом образе' } };
   });
 
-  app.get('/agent/janusnew.tar.gz', async (_request, reply) => {
+  app.get('/agent/routx-agent.tar.gz', async (_request, reply) => {
     if (agentDist) {
       const { existsSync, readFileSync } = await import('node:fs');
       const { join } = await import('node:path');
-      const p = join(agentDist, 'janusnew.tar.gz');
+      const p = join(agentDist, 'routx-agent.tar.gz');
       if (existsSync(p)) {
         reply.type('application/gzip');
-        reply.header('Content-Disposition', 'attachment; filename="janusnew.tar.gz"');
+        reply.header('Content-Disposition', 'attachment; filename="routx-agent.tar.gz"');
         return readFileSync(p);
       }
     }
@@ -367,11 +377,11 @@ export async function registerAgentRoutes(
     return { error: { code: 'not_bundled', message: 'Архив не собран в этом образе' } };
   });
 
-  app.get('/agent/janusnew.sha256', async (_request, reply) => {
+  app.get('/agent/routx-agent.sha256', async (_request, reply) => {
     if (agentDist) {
       const { existsSync, readFileSync } = await import('node:fs');
       const { join } = await import('node:path');
-      const p = join(agentDist, 'janusnew.sha256');
+      const p = join(agentDist, 'routx-agent.sha256');
       if (existsSync(p)) {
         reply.type('text/plain; charset=utf-8');
         return readFileSync(p);
@@ -660,7 +670,7 @@ export async function registerAgentRoutes(
     },
   );
 
-  // QR для мобильного входа показывает сам роутер: LuCI → Службы → JanusNew.
+  // QR для мобильного входа показывает сам роутер: LuCI → Службы → RoutX.
   // Ссылку выпускает только привязанный агент, поэтому панель её не создаёт.
   app.post(
     '/agent/v1/mobile-link',
@@ -801,7 +811,7 @@ export async function registerAgentRoutes(
   );
 
   // Авторизованные телефоны. Список и удаление доступны только с самого
-  // роутера (LuCI → Служба → JanusNew), панель их не трогает.
+  // роутера (LuCI → Служба → RoutX), панель их не трогает.
   app.get(
     '/agent/v1/mobile-devices',
     { config: { public: true, skipAuth: true, rateLimit: { max: 30, timeWindow: '1 minute' } } },

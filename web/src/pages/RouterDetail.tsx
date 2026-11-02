@@ -1492,7 +1492,7 @@ export function RouterDetailPage({ id }: { id: string }) {
       {router.archived_at ? (
         <InfoBanner tone="warn">
           Роутер находится в архиве с {formatDate(router.archived_at)}. Мониторинг остановлен, задачи
-          не выполняются. Восстановление вернёт тот же токен агента — переустанавливать JanusNew не
+          не выполняются. Восстановление вернёт тот же токен агента — переустанавливать RoutX не
           нужно.
           <div className="row" style={{ marginTop: 8 }}>
             <Button size="sm" onClick={() => void restoreRouter()} busy={restoreRouterBusy}>
@@ -1516,7 +1516,7 @@ export function RouterDetailPage({ id }: { id: string }) {
       {router.status === 'pending' ? (
         <InfoBanner>
           Роутер ещё не подключался. Выпустите токен привязки на вкладке «Настройки» и установите
-          JanusNew на устройство.
+          RoutX на устройство.
         </InfoBanner>
       ) : null}
       {router.last_error ? <InfoBanner tone="warn">Последняя ошибка: {router.last_error}</InfoBanner> : null}
@@ -1975,7 +1975,7 @@ export function RouterDetailPage({ id }: { id: string }) {
       {tab === 'snapshots' ? (
         <Panel
           title="Снимки конфигурации"
-          subtitle="Локальные снимки JanusNew и нативные снимки Prokop. Секреты не выгружаются на сервер."
+          subtitle="Локальные снимки RoutX и нативные снимки Prokop. Секреты не выгружаются на сервер."
           actions={
             <Button size="sm" onClick={() => void createSnapshot()} busy={snapshotBusy} disabled={!canMutate}>
               Создать снимок
@@ -2004,7 +2004,7 @@ export function RouterDetailPage({ id }: { id: string }) {
                   {snapshots.data!.items.map((snapshot) => (
                     <tr key={snapshot.id}>
                       <td>{formatDate(snapshot.created_at)}</td>
-                      <td>{snapshot.kind === 'native' ? 'Prokop (нативный)' : 'JanusNew (локальный)'}</td>
+                      <td>{snapshot.kind === 'native' ? 'Prokop (нативный)' : 'RoutX (локальный)'}</td>
                       <td>{snapshot.reason}</td>
                       <td>{formatBytes(snapshot.size_bytes)}</td>
                       <td className="mono small">{snapshot.sha256?.slice(0, 16) ?? '—'}…</td>
@@ -2861,7 +2861,7 @@ export function RouterDetailPage({ id }: { id: string }) {
             <pre className="code-block">{credential.token}</pre>
           </Field>
           <p className="muted-text">
-            Обновите токен в конфигурации JanusNew на роутере. Старый токен продолжит работать{' '}
+            Обновите токен в конфигурации RoutX на роутере. Старый токен продолжит работать{' '}
             {Math.round(credential.overlap_seconds / 60)} минут.
           </p>
         </Modal>
@@ -3032,7 +3032,7 @@ export function RouterDetailPage({ id }: { id: string }) {
             Это действие необратимо.
           </p>
           <p className="muted-text">
-            На самом роутере Forkop/Prokop и JanusNew не удаляются. Агент получит отказ и перестанет
+            На самом роутере Forkop/Prokop и RoutX не удаляются. Агент получит отказ и перестанет
             передавать данные.
           </p>
           <Field label={`Для подтверждения введите имя «${router.name}»`}>

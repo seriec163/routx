@@ -1,0 +1,19 @@
+{
+	"luci-app-routx": {
+		"description": "Статус агента RoutX",
+		"read": {
+			"file": {
+				"/var/run/routx-agent/status.json": [ "read" ]
+			}
+		},
+		"write": {
+			"file": {
+				"/etc/init.d/routx-agent restart": [ "exec" ],
+				"/usr/bin/routx-agent rotate": [ "exec" ],
+				"/usr/bin/routx-agent mobile-qr": [ "exec" ],
+				"/usr/bin/routx-agent mobile-devices": [ "exec" ],
+				"/usr/bin/routx-agent mobile-revoke *": [ "exec" ]
+			}
+		}
+	}
+}

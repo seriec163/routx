@@ -90,7 +90,7 @@ describe('пресет шаблона без имени секции', () => {
     expect(plan.createSections).toEqual(['youtube']);
     expect(plan.desired.get('section.youtube.action')).toBe('connection');
     expect(plan.desired.get('section.youtube.community_lists')).toEqual(['youtube']);
-    expect(plan.localLists[0]?.path).toMatch(/^\/etc\/janusnew\/lists\/youtube-[a-f0-9]{12}\.lst$/);
+    expect(plan.localLists[0]?.path).toMatch(/^\/etc\/routx-agent\/lists\/youtube-[a-f0-9]{12}\.lst$/);
   });
 
   it('строит правило с выключенным действием и ручными адресами', () => {
@@ -168,7 +168,7 @@ describe('представление правил', () => {
         'section.youtube.action': 'connection',
         'section.youtube.label': 'YouTube',
         'section.youtube.domain': 'keyword:ads',
-        'section.youtube.domain_ip_lists': ['/etc/janusnew/lists/youtube-abc.lst'],
+        'section.youtube.domain_ip_lists': ['/etc/routx-agent/lists/youtube-abc.lst'],
       },
       agentSections: [
         {
@@ -177,12 +177,12 @@ describe('представление правил', () => {
             action: 'connection',
             label: 'YouTube',
             domain: 'keyword:ads',
-            domain_ip_lists: ['/etc/janusnew/lists/youtube-abc.lst'],
+            domain_ip_lists: ['/etc/routx-agent/lists/youtube-abc.lst'],
           },
           subscriptions: [],
           links: [],
           lists: {
-            '/etc/janusnew/lists/youtube-abc.lst': [
+            '/etc/routx-agent/lists/youtube-abc.lst': [
               'example.com',
               '203.0.113.10',
               '2001:db8::/32',

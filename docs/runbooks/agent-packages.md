@@ -1,11 +1,11 @@
-# Установка и удаление агента JanusNew
+# Установка и удаление агента RoutX
 
 Поддерживаются обе схемы пакетов OpenWrt:
 
-* OpenWrt 24.10 и older — `opkg` (`janusnew.ipk`);
-* OpenWrt 25+ / apk-based — `apk` (`janusnew.apk`).
+* OpenWrt 24.10 и older — `opkg` (`routx-agent.ipk`);
+* OpenWrt 25+ / apk-based — `apk` (`routx-agent.apk`).
 
-Во всех случаях `/etc/config/janusnew` с привязкой сохраняется.
+Во всех случаях `/etc/config/routx` с привязкой сохраняется.
 
 ## Установка через установщик RoutX
 
@@ -21,68 +21,68 @@ wget -qO- https://routx.example/agent/install.sh | sh -s -- \
 1. Проверяет `opkg` или `apk`.
 2. Доустанавливает `coreutils-timeout` и `ucode-mod-digest` доступным менеджером.
 3. Скачивает `.ipk`, `.apk` и `.tar.gz`.
-4. На `opkg` ставит `janusnew.ipk`.
-5. На `apk` ставит `janusnew.apk`:
+4. На `opkg` ставит `routx-agent.ipk`.
+5. На `apk` ставит `routx-agent.apk`:
 
 ```sh
-apk add --upgrade --allow-untrusted --force-overwrite ./janusnew.apk
+apk add --upgrade --allow-untrusted --force-overwrite ./routx-agent.apk
 ```
 
 6. Если пакетный менеджер недоступен или установка не удалась, использует
-   `janusnew.tar.gz`, сохраняя старый `/etc/config/janusnew`.
+   `routx-agent.tar.gz`, сохраняя старый `/etc/config/routx`.
 
 ## Обновление вручную
 
 OpenWrt 24.10 / opkg:
 
 ```sh
-wget -qO /tmp/janusnew.ipk https://routx.example/agent/janusnew.ipk
-opkg install --force-reinstall /tmp/janusnew.ipk
-/etc/init.d/janusnew restart
+wget -qO /tmp/routx-agent.ipk https://routx.example/agent/routx-agent.ipk
+opkg install --force-reinstall /tmp/routx-agent.ipk
+/etc/init.d/routx-agent restart
 ```
 
 OpenWrt 25+ / apk:
 
 ```sh
-wget -qO /tmp/janusnew.apk https://routx.example/agent/janusnew.apk
-apk add --upgrade --allow-untrusted --force-overwrite /tmp/janusnew.apk
-/etc/init.d/janusnew restart
+wget -qO /tmp/routx-agent.apk https://routx.example/agent/routx-agent.apk
+apk add --upgrade --allow-untrusted --force-overwrite /tmp/routx-agent.apk
+/etc/init.d/routx-agent restart
 ```
 
-Конфиг `/etc/config/janusnew` в apk-пакете намеренно не поставляется: его
-создаёт `90-janusnew`, а при обновлении существующий файл не перезаписывается.
+Конфиг `/etc/config/routx` в apk-пакете намеренно не поставляется: его
+создаёт `90-routx-agent`, а при обновлении существующий файл не перезаписывается.
 
 ## Удаление
 
 opkg:
 
 ```sh
-opkg remove janusnew
+opkg remove routx-agent
 ```
 
 apk:
 
 ```sh
-apk del janusnew
+apk del routx-agent
 ```
 
-Скрипт `pre-deinstall`/`prerm` останавливает и отключает `janusnew` перед
+Скрипт `pre-deinstall`/`prerm` останавливает и отключает `routx-agent` перед
 удалением. Если использовался tar-фолбэк без пакетного менеджера, удаляйте
 файлы вручную:
 
 ```sh
-/etc/init.d/janusnew stop
-/etc/init.d/janusnew disable
-rm -rf /usr/lib/janusnew /usr/bin/janusnew /etc/init.d/janusnew \
-  /etc/uci-defaults/90-janusnew /www/luci-static/resources/view/janusnew
-# /etc/config/janusnew удаляйте только если действительно хотите сбросить привязку
+/etc/init.d/routx-agent stop
+/etc/init.d/routx-agent disable
+rm -rf /usr/lib/routx-agent /usr/bin/routx-agent /etc/init.d/routx-agent \
+  /etc/uci-defaults/90-routx-agent /www/luci-static/resources/view/routx-agent
+# /etc/config/routx удаляйте только если действительно хотите сбросить привязку
 ```
 
 ## Проверка
 
 ```sh
-janusnew version
-janusnew status
+routx-agent version
+routx-agent status
 ```
 
 Ожидаемая версия:

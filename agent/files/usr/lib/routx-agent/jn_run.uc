@@ -1,11 +1,11 @@
-// JanusNew: запуск внешних команд без shell и без унаследованного окружения.
-// Все аргументы передаются массивом в /usr/libexec/janusnew-exec, который
+// RoutX: запуск внешних команд без shell и без унаследованного окружения.
+// Все аргументы передаются массивом в /usr/libexec/routx-agent-exec, который
 // вызывает env -i и timeout. Секретов в argv не бывает.
 
 const fs = require("fs");
 const util = require("jn_util");
 
-const EXEC = "/usr/libexec/janusnew-exec";
+const EXEC = "/usr/libexec/routx-agent-exec";
 const EXEC_DIR = util.RUN_DIR + "/exec";
 
 function ensure_dirs() {

@@ -6,7 +6,7 @@ import { ROUTING_ACTION_IDS, ROUTING_SERVICE_IDS } from './routing.js';
 
 /**
  * Единый источник истины по управляемым UCI-параметрам.
- * Тот же allowlist продублирован в агенте JanusNew (agent/files/usr/lib/janusnew/allowlist.uc).
+ * Тот же allowlist продублирован в агенте RoutX (agent/files/usr/lib/routx-agent/allowlist.uc).
  * Секретные пути запрещены на уровне сервера ДО любых операций.
  */
 
@@ -173,7 +173,7 @@ export const HARD_EXCLUDED_SETTINGS_PREFIXES = ['direct_proxy_', 'torrserver_'];
 
 const NAME_RE = /^[A-Za-z0-9_.-]{1,64}$/;
 const DOMAIN_RE = /^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/;
-const LOCAL_LIST_DIR = '/etc/janusnew/lists';
+const LOCAL_LIST_DIR = '/etc/routx-agent/lists';
 const MAX_MANUAL_ENTRIES = 5000;
 
 export interface RouterListExtrasEntry {

@@ -1,11 +1,11 @@
-// JanusNew: общие примитивы (строки, JSON, хэши, файлы, время).
+// RoutX: общие примитивы (строки, JSON, хэши, файлы, время).
 // Модуль не обращается к сети и не меняет конфигурацию продукта.
 
 const fs = require("fs");
 const digest = require("digest");
 
-const RUN_DIR = "/var/run/janusnew";
-const STATE_DIR = "/etc/janusnew";
+const RUN_DIR = "/var/run/routx-agent";
+const STATE_DIR = "/etc/routx-agent";
 const SNAPSHOT_DIR = STATE_DIR + "/snapshots";
 
 function as_string(value) {

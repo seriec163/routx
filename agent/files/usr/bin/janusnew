@@ -1,2 +1,0 @@
-#!/bin/sh
-exec /usr/bin/ucode -L /usr/lib/janusnew /usr/lib/janusnew/jn_cli.uc "$@"
