@@ -422,6 +422,19 @@ export function HomeScreen() {
               Загрузит свежую версию и перезапустит приложение. Вход, настройки и привязка
               сохранятся — QR сканировать заново не нужно.
             </p>
+            <span className="m-build">
+              Сборка{' '}
+              {new Date(__BUILD_TIME__).toLocaleString('ru-RU', {
+                day: '2-digit',
+                month: '2-digit',
+                hour: '2-digit',
+                minute: '2-digit',
+              })}
+              {' · '}
+              {standalone ? 'PWA' : 'браузер'}
+              {' · '}
+              {window.innerHeight} px
+            </span>
           </div>
           <button
             type="button"

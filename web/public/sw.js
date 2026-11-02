@@ -1,7 +1,7 @@
 // RoutX: service worker для установки PWA и Web Push.
 // API и запросы агента не кэшируются; навигация — network-first, чтобы
 // после обновления панели не залипала старая оболочка.
-const CACHE = 'routx-shell-v4';
+const CACHE = 'routx-shell-v5';
 const SHELL = [
   '/',
   '/index.html',
@@ -28,7 +28,19 @@ self.addEventListener('activate', (event) => {
       .then((keys) =>
         Promise.all(keys.filter((key) => key !== CACHE).map((key) => caches.delete(key))),
       )
-      .then(() => self.clients.claim()),
+      .then(() => self.clients.claim())
+      .then(async () => {
+        // После обновления service worker перезагружаем открытые окна PWA,
+        // чтобы они сразу получили новый index.html и новые ассеты.
+        const clients = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
+        for (const client of clients) {
+          try {
+            await client.navigate(client.url);
+          } catch {
+            // Safari может запретить navigate — тогда обновится при следующем запуске.
+          }
+        }
+      }),
   );
 });
 

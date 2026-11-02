@@ -1259,6 +1259,12 @@ body.routx-app-body #root {
   margin: 0;
 }
 
+.m-build {
+  font-size: 0.67rem;
+  color: var(--m-muted);
+  opacity: 0.8;
+}
+
 @media (max-width: 380px) {
   .m-clock {
     font-size: 3.2rem;
