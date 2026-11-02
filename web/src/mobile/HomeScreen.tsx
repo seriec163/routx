@@ -9,6 +9,7 @@ import { MobileHeader, useMobile } from './MobileApp';
 import { SiteStatusCard } from './SiteStatusCard';
 import { InstallGuide } from './InstallGuide';
 import { requestCamera } from './camera';
+import { updatePwa } from './pwaUpdate';
 
 const STATUS: Record<string, { label: string; tone: string }> = {
   online: { label: 'Подключено', tone: 'ok' },
@@ -38,6 +39,7 @@ export function HomeScreen() {
   const [guideOpen, setGuideOpen] = useState(false);
   const [installBannerHidden, setInstallBannerHidden] = useState(false);
   const [standalone, setStandalone] = useState(false);
+  const [pwaBusy, setPwaBusy] = useState(false);
 
   const rules = useApi<RulesResponse>(
     selected ? `/api/v1/routers/${selected.id}/rules` : null,
@@ -231,6 +233,17 @@ export function HomeScreen() {
     navigate('/app/routers?add=1');
   }
 
+  async function refreshPwa(): Promise<void> {
+    if (pwaBusy) return;
+    setPwaBusy(true);
+    try {
+      await updatePwa();
+    } catch (caught) {
+      toast.error(errorMessage(caught));
+      setPwaBusy(false);
+    }
+  }
+
   return (
     <div className="m-screen">
       <MobileHeader
@@ -400,6 +413,25 @@ export function HomeScreen() {
             online={selected.status === 'online'}
           />
         ) : null}
+
+        <section className="m-card m-update-card">
+          <div className="m-update-main">
+            <span className="m-label">Приложение RoutX</span>
+            <strong>Обновить без переустановки</strong>
+            <p className="m-note">
+              Загрузит свежую версию и перезапустит приложение. Вход, настройки и привязка
+              сохранятся — QR сканировать заново не нужно.
+            </p>
+          </div>
+          <button
+            type="button"
+            className="m-mini"
+            onClick={() => void refreshPwa()}
+            disabled={pwaBusy}
+          >
+            {pwaBusy ? 'Обновляем…' : 'Обновить'}
+          </button>
+        </section>
 
         <button
           type="button"

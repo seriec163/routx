@@ -1224,6 +1224,30 @@ body.routx-app-body #root {
   font-weight: 600;
 }
 
+/* Обновление PWA ----------------------------------------------------------- */
+
+.m-update-card {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.m-update-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.m-update-main strong {
+  font-size: 0.92rem;
+}
+
+.m-update-main .m-note {
+  margin: 0;
+}
+
 @media (max-width: 380px) {
   .m-clock {
     font-size: 3.2rem;
