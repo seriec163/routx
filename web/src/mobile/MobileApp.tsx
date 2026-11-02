@@ -34,6 +34,19 @@ export function useMobile(): MobileState {
 export function MobileApp() {
   const route = useRoute();
   useNotificationToasts();
+
+  // Приложение занимает ровно экран, прокручивается только его содержимое.
+  // Так страница не «уезжает» как обычный сайт и не тянется за границы.
+  useEffect(() => {
+    const html = document.documentElement;
+    const body = document.body;
+    html.classList.add('routx-app-root');
+    body.classList.add('routx-app-body');
+    return () => {
+      html.classList.remove('routx-app-root');
+      body.classList.remove('routx-app-body');
+    };
+  }, []);
   const overview = useApi<MonitoringOverview>('/api/v1/monitoring/overview');
   const [selectedId, setSelectedId] = useState<string | null>(() =>
     window.localStorage.getItem(SELECTED_KEY),

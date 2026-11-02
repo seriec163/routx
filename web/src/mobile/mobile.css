@@ -2,6 +2,24 @@
 /* Мобильное приложение RoutX                                        */
 /* -------------------------------------------------------------------------- */
 
+html.routx-app-root,
+body.routx-app-body {
+  height: 100%;
+  overflow: hidden;
+  overscroll-behavior: none;
+}
+
+body.routx-app-body {
+  /* Фиксируем body, чтобы iOS не прокручивал и не «оттягивал» приложение. */
+  position: fixed;
+  inset: 0;
+  width: 100%;
+}
+
+body.routx-app-body #root {
+  height: 100%;
+}
+
 .m-app {
   --m-accent: #d81b60;
   --m-accent-soft: #fde7ef;
@@ -11,21 +29,39 @@
   --m-card: #ffffff;
   --m-shadow: 0 14px 34px rgba(96, 48, 84, 0.1);
 
-  min-height: 100dvh;
+  height: 100vh;
+  height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  overscroll-behavior: none;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
   color: var(--m-ink);
   background:
     radial-gradient(120% 60% at 0% 0%, #fdeeea 0%, rgba(253, 238, 234, 0) 60%),
     radial-gradient(120% 60% at 100% 20%, #f7e6f6 0%, rgba(247, 230, 246, 0) 55%),
     linear-gradient(165deg, #fdf2ef 0%, #fbeaf0 45%, #f2e9fb 100%);
-  background-attachment: fixed;
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
   -webkit-font-smoothing: antialiased;
 }
 
 .m-screen {
+  flex: 1 1 auto;
+  width: 100%;
   max-width: 520px;
+  min-height: 0;
   margin: 0 auto;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior-y: contain;
+  -webkit-overflow-scrolling: touch;
   padding-bottom: calc(104px + env(safe-area-inset-bottom));
+  scrollbar-width: none;
+}
+
+.m-screen::-webkit-scrollbar {
+  display: none;
 }
 
 /* Шапка ------------------------------------------------------------------- */
@@ -34,7 +70,7 @@
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 14px 16px 6px;
+  padding: calc(14px + env(safe-area-inset-top)) 16px 6px;
   max-width: 520px;
   margin: 0 auto;
 }
@@ -428,8 +464,9 @@
   border-radius: 15px;
   background: #fcfafd;
   color: var(--m-ink);
-  font: inherit;
-  font-size: 0.95rem;
+  font-family: inherit;
+  /* 16px обязателен: иначе iOS Safari зумит страницу при фокусе поля. */
+  font-size: 16px;
 }
 
 .m-input:focus {
@@ -442,7 +479,7 @@
   resize: vertical;
   min-height: 96px;
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 0.82rem;
+  font-size: 16px;
 }
 
 .m-list {
