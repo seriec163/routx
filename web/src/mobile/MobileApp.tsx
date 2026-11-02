@@ -43,7 +43,12 @@ export function MobileApp() {
     const body = document.body;
     html.classList.add('routx-app-root');
     body.classList.add('routx-app-body');
+    const standalone =
+      window.matchMedia('(display-mode: standalone)').matches ||
+      (navigator as unknown as { standalone?: boolean }).standalone === true;
+    html.classList.toggle('routx-standalone', standalone);
     return () => {
+      html.classList.remove('routx-standalone');
       html.classList.remove('routx-app-root');
       body.classList.remove('routx-app-body');
     };

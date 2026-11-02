@@ -33,12 +33,11 @@ body.routx-app-body #root {
 
   height: 100vh;
   height: 100dvh;
-  /* В standalone-режиме iOS высота окна может меняться. Фиксируем само
-     приложение по краям экрана, а навигацию оставляем в потоке внизу. */
-  position: fixed;
-  inset: 0;
-  height: auto;
-  min-height: 0;
+  /* iOS PWA: 100dvh на холодном старте может не учитывать нижний
+     safe-area и оставлять полосу под приложением. Для standalone
+     принудительно используем 100vh (см. html.routx-standalone ниже). */
+  height: 100%;
+  min-height: 100%;
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -52,6 +51,13 @@ body.routx-app-body #root {
     linear-gradient(165deg, #fdf2ef 0%, #fbeaf0 45%, #f2e9fb 100%);
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
   -webkit-font-smoothing: antialiased;
+}
+
+/* iOS standalone: 100vh включает нижнюю safe-area, 100dvh — нет. */
+html.routx-standalone body.routx-app-body,
+html.routx-standalone .m-app {
+  height: 100vh;
+  min-height: 100vh;
 }
 
 .m-screen {
