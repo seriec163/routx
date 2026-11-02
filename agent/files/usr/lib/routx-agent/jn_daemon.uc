@@ -174,7 +174,7 @@ function handle_command(cmd) {
 			return { status: "success", result: d };
 		}
 		if (op == "monitor_probe") {
-			let result = monitor.probe(product);
+			let result = monitor.probe(product, util.is_true(args.force));
 			let sb = platform.sing_box_info(product);
 			result.sing_box_version = sb.version;
 			result.agent_version = client.VERSION;

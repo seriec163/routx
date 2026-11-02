@@ -327,7 +327,7 @@ export function HomeScreen() {
 
         <section className="m-card m-latency">
           <div>
-            <div className="m-label">Задержка</div>
+            <div className="m-label">Задержка · активный сервер</div>
             <div className="m-latency-value">
               {latency != null ? Math.round(latency) : '—'} <small>мс</small>
             </div>
@@ -340,6 +340,20 @@ export function HomeScreen() {
           >
             {action === 'ping' ? 'Проверяем…' : 'Тест пинга'}
           </button>
+        </section>
+
+        <section className="m-card m-ipcard">
+          <div className="m-iprow">
+            <span className="m-label">IP без VPN</span>
+            <code className="m-ip">{selected?.direct_ip ?? '—'}</code>
+          </div>
+          <div className="m-iprow">
+            <span className="m-label">IP через VPN</span>
+            <code className="m-ip">{selected?.vpn_ip ?? '—'}</code>
+          </div>
+          <p className="m-footnote">
+            Без VPN — прямой выход роутера, через VPN — выход активного сервера.
+          </p>
         </section>
 
         <button

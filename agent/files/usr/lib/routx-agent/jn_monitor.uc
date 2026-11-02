@@ -1,6 +1,7 @@
 // RoutX: мониторинг прокси через штатный Clash API Prokop/Forkop.
 // Секреты Clash API не читаются и не передаются: CLI продукта сам делает
 // запросы, а наружу уходят только задержки и количество живых тегов.
+const fs = require("fs");
 const uci = require("uci");
 const util = require("jn_util");
 const run = require("jn_run");
@@ -15,8 +16,11 @@ const OUTBOUND_ACTIONS = {
 const ACTIVE_TEST_TTL = 180; // секунд между активными замерами одной группы
 const MAX_ACTIVE_TAGS = 30;
 const ACTIVE_TEST_TIMEOUT_MS = "2500";
+const IP_CHECK_TTL = 300; // публичные IP меняются редко; не дёргаем сеть каждый опрос
+const IPCHECK_DIR = "/var/run/routx-agent/ipcheck";
 
 let active_cache = {};
+let ip_cache = { at: 0, direct: "", vpn: "" };
 
 function cli(product, args, timeout) {
 	let res = run.run_product(product, args, timeout);
@@ -108,10 +112,10 @@ function last_history_delay(proxy) {
 
 // Активный замер группы: не чаще раза в ACTIVE_TEST_TTL секунд.
 // Если группа большая или замер не удался, используем историю sing-box.
-function active_delays(product, group, members) {
+function active_delays(product, group, members, force) {
 	let now = util.now_epoch();
 	let cached = active_cache[group];
-	if (cached != null && now - cached.at < ACTIVE_TEST_TTL)
+	if (!force && cached != null && now - cached.at < ACTIVE_TEST_TTL)
 		return { ok: true, delays: cached.delays };
 
 	if (length(members) > MAX_ACTIVE_TAGS)
@@ -156,7 +160,7 @@ function group_display(product, group) {
 	return group;
 }
 
-function probe_proxy(product) {
+function probe_proxy(product, force) {
 	let result = {
 		proxy_health: "unknown",
 		latency_ms: null,
@@ -186,7 +190,7 @@ function probe_proxy(product) {
 		return result;
 	}
 
-	let active = active_delays(product, group, members);
+	let active = active_delays(product, group, members, force);
 	if (!active.ok && active.error == "latency_failed") {
 		result.proxy_health = "dead";
 		result.total_tags = length(members);
@@ -217,7 +221,10 @@ function probe_proxy(product) {
 
 	result.total_tags = length(members);
 	result.failed_tags = failed;
-	result.latency_ms = median(latencies);
+	// Показываем задержку активного сервера, а не медиану всех тегов.
+	let active_tag = type(info) == "object" ? util.as_string(info.now) : "";
+	let active_delay = active_tag != "" ? delays[active_tag] : null;
+	result.latency_ms = measured(active_delay) ? active_delay : median(latencies);
 	result.detail = "группа " + display_group + ": " + alive + "/" + length(members) + " живых";
 	if (failed > 0 && length(failed_names) <= 3)
 		result.detail = result.detail + " (" + join(", ", failed_names) + ")";
@@ -230,6 +237,124 @@ function probe_proxy(product) {
 		result.proxy_health = "healthy";
 
 	return result;
+}
+
+function valid_ip(value) {
+	if (match(value, /^(\d{1,3}\.){3}\d{1,3}$/) != null) {
+		for (let part in split(value, ".")) {
+			if (int(part) > 255)
+				return false;
+		}
+		return true;
+	}
+	return index(value, ":") > 0 && match(value, /^[0-9a-f:]+$/i) != null;
+}
+
+function load_sing_box_config() {
+	let paths = [
+		"/etc/sing-box/config.json",
+		"/etc/forkop/sing-box/config.json",
+		"/etc/prokop/sing-box/config.json"
+	];
+	for (let path in paths) {
+		if (!util.file_exists(path))
+			continue;
+		try {
+			let cfg = json(fs.readfile(path));
+			if (type(cfg) == "object")
+				return cfg;
+		}
+		catch (e) {
+		}
+	}
+	return null;
+}
+
+function has_outbound(cfg, tag) {
+	for (let out in (type(cfg.outbounds) == "array" ? cfg.outbounds : [])) {
+		if (util.as_string(out.tag) == tag)
+			return true;
+	}
+	return false;
+}
+
+function vpn_outbound(cfg) {
+	let tag = "";
+	for (let rule in (cfg.route && type(cfg.route.rules) == "array" ? cfg.route.rules : [])) {
+		if (type(rule.domain) != "array")
+			continue;
+		for (let domain in rule.domain) {
+			if (domain == "ip.podkop.fyi" && rule.outbound)
+				tag = rule.outbound;
+		}
+	}
+	if (tag != "")
+		return tag;
+	for (let out in (type(cfg.outbounds) == "array" ? cfg.outbounds : [])) {
+		let name = util.as_string(out.tag);
+		if (length(name) > 4 && substr(name, length(name) - 4) == "-out")
+			tag = name;
+	}
+	return tag;
+}
+
+function write_ipcheck_config(cfg) {
+	cfg.inbounds = [];
+	cfg.services = [];
+	if (type(cfg.experimental) == "object") {
+		delete cfg.experimental.clash_api;
+		if (type(cfg.experimental.cache_file) == "object")
+			cfg.experimental.cache_file.path = IPCHECK_DIR + "/cache.db";
+	}
+	util.mkdir_p(IPCHECK_DIR, 0700);
+	let fh = fs.open(IPCHECK_DIR + "/config.json", "w", 0600);
+	if (fh == null)
+		return false;
+	fh.write(sprintf("%J\n", cfg));
+	fh.close();
+	return true;
+}
+
+function fetch_ip(tag) {
+	let res = run.run([
+		"/usr/bin/sing-box", "tools", "fetch", "api.ipify.org",
+		"-c", IPCHECK_DIR + "/config.json", "-D", IPCHECK_DIR,
+		"-o", tag, "--disable-color"
+	], 20);
+	if (!res.ok)
+		return "";
+	let value = trim(util.as_string(res.stdout));
+	return valid_ip(value) ? value : "";
+}
+
+// Публичный IP напрямую и через VPN. Конфиг sing-box копируется во временный
+// каталог 0700, потому что в нём есть секреты; после проверки он удаляется.
+function current_ips(force) {
+	let now = util.now_epoch();
+	if (!force && ip_cache.at > 0 && now - ip_cache.at < IP_CHECK_TTL)
+		return ip_cache;
+
+	let cfg = load_sing_box_config();
+	if (cfg == null) {
+		ip_cache = { at: now, direct: "", vpn: "" };
+		return ip_cache;
+	}
+	let direct_tag = has_outbound(cfg, "direct-out") ? "direct-out"
+		: (has_outbound(cfg, "bypass-out") ? "bypass-out" : "");
+	let vpn_tag = vpn_outbound(cfg);
+	let direct = "";
+	let vpn = "";
+
+	if (write_ipcheck_config(cfg)) {
+		if (direct_tag != "")
+			direct = fetch_ip(direct_tag);
+		if (vpn_tag != "")
+			vpn = fetch_ip(vpn_tag);
+		run.run([ "rm", "-rf", IPCHECK_DIR ], 5);
+	}
+
+	ip_cache = { at: now, direct: direct, vpn: vpn };
+	return ip_cache;
 }
 
 function access_check(product, target) {
@@ -275,7 +400,8 @@ function access_check(product, target) {
 	};
 }
 
-function probe(product) {	let result = {
+function probe(product, force) {
+	let result = {
 		reachable: true,
 		service_state: "",
 		health: "",
@@ -283,6 +409,8 @@ function probe(product) {	let result = {
 		latency_ms: null,
 		failed_tags: null,
 		total_tags: null,
+		direct_ip: "",
+		vpn_ip: "",
 		detail: ""
 	};
 
@@ -314,12 +442,16 @@ function probe(product) {	let result = {
 		result.health = "unknown";
 	}
 
-	let proxy = probe_proxy(product);
+	let proxy = probe_proxy(product, force);
 	result.proxy_health = proxy.proxy_health;
 	result.latency_ms = proxy.latency_ms;
 	result.failed_tags = proxy.failed_tags;
 	result.total_tags = proxy.total_tags;
 	result.detail = proxy.detail;
+
+	let ips = current_ips(force);
+	result.direct_ip = ips.direct;
+	result.vpn_ip = ips.vpn;
 
 	return result;
 }

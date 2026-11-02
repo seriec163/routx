@@ -421,6 +421,8 @@ export interface MonitoringItem {
   total_tags: number | null;
   ts: string | null;
   detail: string | null;
+  direct_ip: string | null;
+  vpn_ip: string | null;
 }
 
 export interface MonitoringOverview {

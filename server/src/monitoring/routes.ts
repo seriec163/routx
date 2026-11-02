@@ -26,11 +26,12 @@ export async function registerMonitoringRoutes(
               r.sing_box_version, r.last_seen_at, r.last_error, r.monitoring_enabled,
               a.offline_since, a.online_since,
               s.health, s.proxy_health, s.latency_ms, s.failed_tags, s.total_tags, s.ts,
-              s.detail, s.service_state
+              s.detail, s.service_state, s.direct_ip, s.vpn_ip
          from routers r
          left join router_availability a on a.router_id = r.id
          left join lateral (
-           select health, proxy_health, latency_ms, failed_tags, total_tags, ts, detail, service_state
+           select health, proxy_health, latency_ms, failed_tags, total_tags, ts, detail, service_state,
+                  direct_ip, vpn_ip
              from monitoring_samples ms where ms.router_id = r.id
             order by ts desc limit 1
          ) s on true
@@ -77,7 +78,8 @@ export async function registerMonitoringRoutes(
         timeoutSeconds: 60,
         maxAttempts: 1,
         idempotencyKey: `manual_monitor:${router.id}:${Date.now()}`,
-        payload: {},
+        // Ручной тест должен мерить заново, а не отдавать кэш агента.
+        payload: { force: true },
       });
 
       await audit(pool, {
@@ -113,7 +115,7 @@ export async function registerMonitoringRoutes(
     if (query.granularity === 'raw') {
       const result = await pool.query(
         `select ts, reachable, service_state, health, proxy_health, latency_ms,
-                failed_tags, total_tags, sing_box_version
+                failed_tags, total_tags, sing_box_version, direct_ip, vpn_ip
            from monitoring_samples
           where router_id = $1 and ts > now() - ($2 || ' hours')::interval
           order by ts asc

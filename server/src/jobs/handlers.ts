@@ -690,7 +690,13 @@ function proxyHealthOf(sample: Json, settings: PlatformSettings): 'healthy' | 'd
 
 export async function monitorProbe(ctx: HandlerContext, job: JobRow): Promise<Json> {
   const routerId = requireRouter(job);
-  const raw = await runCommand(ctx, job, 'monitor_probe', {}, 45_000);
+  const raw = await runCommand(
+    ctx,
+    job,
+    'monitor_probe',
+    { force: job.payload.force === true },
+    45_000,
+  );
 
   const reachable = raw.reachable !== false;
   const proxyHealth = proxyHealthOf(raw, ctx.settings);
@@ -698,6 +704,8 @@ export async function monitorProbe(ctx: HandlerContext, job: JobRow): Promise<Js
   const latency = asNumber(raw.latency_ms);
   const failed = asNumber(raw.failed_tags);
   const total = asNumber(raw.total_tags);
+  const directIp = asString(raw.direct_ip) || null;
+  const vpnIp = asString(raw.vpn_ip) || null;
 
   const previousSample = await ctx.pool.query<{ proxy_health: string | null }>(
     `select proxy_health from monitoring_samples
@@ -709,8 +717,8 @@ export async function monitorProbe(ctx: HandlerContext, job: JobRow): Promise<Js
   await ctx.pool.query(
     `insert into monitoring_samples
        (router_id, ts, reachable, service_state, health, proxy_health, latency_ms,
-        failed_tags, total_tags, sing_box_version, agent_version, detail)
-     values ($1, now(), $2,$3,$4,$5,$6,$7,$8,$9,$10,$11::jsonb)
+        failed_tags, total_tags, sing_box_version, agent_version, detail, direct_ip, vpn_ip)
+     values ($1, now(), $2,$3,$4,$5,$6,$7,$8,$9,$10,$11::jsonb,$12,$13)
      on conflict (router_id, ts) do nothing`,
     [
       routerId,
@@ -724,6 +732,8 @@ export async function monitorProbe(ctx: HandlerContext, job: JobRow): Promise<Js
       asString(raw.sing_box_version),
       asString(raw.agent_version),
       JSON.stringify(asString(raw.detail ?? null) ? { detail: raw.detail } : {}),
+      directIp,
+      vpnIp,
     ],
   );
 
@@ -831,6 +841,8 @@ export async function monitorProbe(ctx: HandlerContext, job: JobRow): Promise<Js
     latency_ms: latency,
     failed_tags: failed,
     total_tags: total,
+    direct_ip: directIp,
+    vpn_ip: vpnIp,
   };
 }
 

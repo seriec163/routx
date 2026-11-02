@@ -299,6 +299,28 @@ body.routx-app-body #root {
   color: var(--m-muted);
 }
 
+.m-ipcard {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.m-iprow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+}
+
+.m-ip {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.86rem;
+  font-weight: 700;
+  color: var(--m-ink);
+  overflow-wrap: anywhere;
+  text-align: right;
+}
+
 /* Кнопки ------------------------------------------------------------------ */
 
 .m-action {
