@@ -1,7 +1,7 @@
 // RoutX: service worker для установки PWA и Web Push.
 // API и запросы агента не кэшируются; навигация — network-first, чтобы
 // после обновления панели не залипала старая оболочка.
-const CACHE = 'routx-shell-v3';
+const CACHE = 'routx-shell-v4';
 const SHELL = [
   '/',
   '/index.html',
@@ -85,12 +85,14 @@ self.addEventListener('push', (event) => {
     self.registration.showNotification(title, {
       body,
       tag,
-      renotify: critical,
+      // Каждое уведомление должно привлекать внимание: звук и вибрация.
+      renotify: true,
+      silent: false,
       requireInteraction: critical,
       icon: '/icons/icon-192.png',
       badge: '/icons/icon-192.png',
       data: { url, tag },
-      vibrate: critical ? [180, 80, 180] : [90],
+      vibrate: critical ? [240, 120, 240, 120, 240] : [120, 60, 120],
     }),
   );
 });

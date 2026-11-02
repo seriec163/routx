@@ -20,7 +20,7 @@ Thumbs.db
 .idea/
 
 # Клоны upstream только для аудита, в поставку не входят
-audit/
+/audit/
 
 # Локальные данные Docker Compose (если используются bind-mounts)
 pgdata/

@@ -31,6 +31,11 @@ export function UsersPage() {
   const invites = useApi<{ items: InviteRow[] }>('/api/v1/invites');
 
   const [inviteOpen, setInviteOpen] = useState(false);
+  const [messageOpen, setMessageOpen] = useState(false);
+  const [messageText, setMessageText] = useState('');
+  const [messageTarget, setMessageTarget] = useState('all');
+  const [messageSeverity, setMessageSeverity] = useState<'info' | 'warning' | 'critical'>('info');
+  const [messageBusy, setMessageBusy] = useState(false);
   const [role, setRole] = useState<Role>('user');
   const [email, setEmail] = useState('');
   const [busy, setBusy] = useState(false);
@@ -115,6 +120,34 @@ export function UsersPage() {
       setError(errorMessage(caught));
     } finally {
       setBusy(false);
+    }
+  }
+
+  async function sendMessage(): Promise<void> {
+    const message = messageText.trim();
+    if (message === '') {
+      toast.error('Введите текст сообщения');
+      return;
+    }
+    setMessageBusy(true);
+    try {
+      const result = await api<{ sent: number }>('/api/v1/notifications/send', {
+        method: 'POST',
+        body: {
+          message,
+          severity: messageSeverity,
+          ...(messageTarget === 'all' ? { all: true } : { user_ids: [messageTarget] }),
+        },
+      });
+      toast.success(`Сообщение отправлено: ${result.sent}`);
+      setMessageOpen(false);
+      setMessageText('');
+      setMessageTarget('all');
+      setMessageSeverity('info');
+    } catch (caught) {
+      toast.error(errorMessage(caught));
+    } finally {
+      setMessageBusy(false);
     }
   }
 
@@ -218,7 +251,14 @@ export function UsersPage() {
       <PageHeader
         title="Пользователи"
         subtitle="Регистрация только по приглашению. Ссылка одноразовая и действует 7 дней."
-        actions={<Button onClick={() => setInviteOpen(true)}>Пригласить</Button>}
+        actions={
+          <div className="toolbar">
+            <Button variant="ghost" onClick={() => setMessageOpen(true)}>
+              Сообщение
+            </Button>
+            <Button onClick={() => setInviteOpen(true)}>Пригласить</Button>
+          </div>
+        }
       />
 
       {users.error ? <ErrorBanner message={users.error} onRetry={() => void users.reload()} /> : null}
@@ -423,6 +463,60 @@ export function UsersPage() {
           </div>
         )}
       </Panel>
+
+      {messageOpen ? (
+        <Modal
+          title="Сообщение пользователям"
+          onClose={() => setMessageOpen(false)}
+          footer={
+            <>
+              <Button variant="ghost" onClick={() => setMessageOpen(false)} disabled={messageBusy}>
+                Отмена
+              </Button>
+              <Button onClick={() => void sendMessage()} busy={messageBusy} disabled={!messageText.trim()}>
+                Отправить
+              </Button>
+            </>
+          }
+        >
+          <p className="page-sub">
+            Текст сохранится в истории уведомлений и придёт push-сообщением. Получатели без
+            push-подписки увидят его в приложении.
+          </p>
+          <Field label="Получатель">
+            <Select value={messageTarget} onChange={setMessageTarget}>
+              <option value="all">Все активные пользователи</option>
+              {(users.data?.items ?? [])
+                .filter((user) => !user.archived_at && user.status === 'active')
+                .map((user) => (
+                  <option key={user.id} value={user.id}>
+                    {user.email}
+                  </option>
+                ))}
+            </Select>
+          </Field>
+          <Field label="Текст сообщения" hint="До 500 символов">
+            <textarea
+              className="input"
+              rows={5}
+              maxLength={500}
+              value={messageText}
+              onChange={(event) => setMessageText(event.target.value)}
+              placeholder="Например: сегодня с 20:00 возможны перебои VPN."
+            />
+          </Field>
+          <Field label="Важность">
+            <Select
+              value={messageSeverity}
+              onChange={(value) => setMessageSeverity(value as 'info' | 'warning' | 'critical')}
+            >
+              <option value="info">Обычное</option>
+              <option value="warning">Важное</option>
+              <option value="critical">Критическое</option>
+            </Select>
+          </Field>
+        </Modal>
+      ) : null}
 
       {inviteOpen ? (
         <Modal
