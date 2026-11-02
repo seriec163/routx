@@ -102,15 +102,6 @@ export function RoutersScreen() {
           5 минут.
         </p>
 
-        {selectedId ? (
-          <button
-            type="button"
-            className="m-link m-link-center"
-            onClick={() => navigate(`/routers/${selectedId}`)}
-          >
-            Открыть полную панель роутера
-          </button>
-        ) : null}
       </div>
 
       {addOpen ? (

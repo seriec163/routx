@@ -3,6 +3,7 @@ import { BrandMark } from './Auth';
 import { Button, ErrorBanner, InfoBanner, Spinner } from '../components/ui';
 import { api, errorMessage } from '../lib/api';
 import { navigate } from '../lib/router';
+import { useSession } from '../session';
 
 interface BeforeInstallPromptEvent extends Event {
   prompt: () => Promise<void>;
@@ -36,6 +37,7 @@ export function InstallPage({
   const [standalone, setStandalone] = useState(false);
   const [installed, setInstalled] = useState(false);
   const [secureContext, setSecureContext] = useState(true);
+  const { me } = useSession();
   const onLoggedInRef = useRef(onLoggedIn);
   const exchangeStarted = useRef(false);
 
@@ -192,9 +194,9 @@ export function InstallPage({
 
               <div className="row" style={{ marginTop: 12 }}>
                 <Button onClick={() => navigate(openTarget)}>
-                  {targetRouter ? 'Открыть роутер' : 'Открыть панель'}
+                  {targetRouter ? 'Открыть роутер' : 'Открыть приложение'}
                 </Button>
-                {status === 'idle' || status === 'error' ? (
+                {(status === 'idle' || status === 'error') && !me ? (
                   <Button variant="ghost" onClick={() => navigate('/login')}>
                     Войти
                   </Button>
