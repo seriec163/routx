@@ -699,6 +699,13 @@ export async function monitorProbe(ctx: HandlerContext, job: JobRow): Promise<Js
   const failed = asNumber(raw.failed_tags);
   const total = asNumber(raw.total_tags);
 
+  const previousSample = await ctx.pool.query<{ proxy_health: string | null }>(
+    `select proxy_health from monitoring_samples
+      where router_id = $1 order by ts desc limit 1`,
+    [routerId],
+  );
+  const previousProxy = previousSample.rows[0]?.proxy_health ?? null;
+
   await ctx.pool.query(
     `insert into monitoring_samples
        (router_id, ts, reachable, service_state, health, proxy_health, latency_ms,
@@ -726,6 +733,51 @@ export async function monitorProbe(ctx: HandlerContext, job: JobRow): Promise<Js
     [routerId, asString(raw.sing_box_version)],
   );
 
+  // Переходы состояния прокси: попап «VPN не работает» и «VPN снова работает».
+  // Не показываем «VPN не работает» во время планового перезапуска VPN
+  // и сразу после перезагрузки роутера: это ожидаемо, а не авария.
+  const recentRestart = await ctx.pool.query(
+    `select 1 from jobs
+      where router_id = $1 and type = 'service_action' and status = 'success'
+        and finished_at > now() - interval '90 seconds'
+      limit 1`,
+    [routerId],
+  );
+  const rebootPending = await ctx.pool.query(
+    `select 1 from routers
+      where id = $1 and reboot_requested_at is not null
+        and reboot_requested_at > now() - interval '10 minutes'`,
+    [routerId],
+  );
+  const suppressProxy =
+    (recentRestart.rowCount ?? 0) > 0 || (rebootPending.rowCount ?? 0) > 0;
+
+  if (!suppressProxy && reachable && proxyHealth && proxyHealth !== previousProxy) {
+    const bucket = new Date().toISOString().slice(0, 13);
+    if (proxyHealth === 'dead') {
+      await notifyRouterOwner(ctx.pool, routerId, {
+        kind: 'proxy.offline',
+        severity: 'critical',
+        message: 'VPN не работает: прокси не отвечает',
+        dedupeKey: `proxy-dead:${routerId}:${bucket}`,
+      });
+    } else if (proxyHealth === 'degraded') {
+      await notifyRouterOwner(ctx.pool, routerId, {
+        kind: 'proxy.degraded',
+        severity: 'warning',
+        message: 'VPN работает с перебоями: часть прокси не отвечает',
+        dedupeKey: `proxy-degraded:${routerId}:${bucket}`,
+      });
+    } else if (proxyHealth === 'healthy' && previousProxy && previousProxy !== 'healthy') {
+      await notifyRouterOwner(ctx.pool, routerId, {
+        kind: 'proxy.online',
+        severity: 'info',
+        message: 'VPN снова работает',
+        dedupeKey: `proxy-online:${routerId}:${bucket}`,
+      });
+    }
+  }
+
   if (!reachable) {
     const availability = await ctx.pool.query<{ misses: number; offline_since: Date | null }>(
       `insert into router_availability (router_id, misses, last_transition)
@@ -746,7 +798,7 @@ export async function monitorProbe(ctx: HandlerContext, job: JobRow): Promise<Js
       await ctx.pool.query(`update routers set status = 'offline', updated_at = now() where id = $1`, [
         routerId,
       ]);
-      if ((changed.rowCount ?? 0) > 0) {
+      if ((changed.rowCount ?? 0) > 0 && (rebootPending.rowCount ?? 0) === 0) {
         await notifyRouterOwner(ctx.pool, routerId, {
           kind: 'router.offline',
           severity: 'critical',
@@ -1149,8 +1201,11 @@ export async function serviceAction(ctx: HandlerContext, job: JobRow): Promise<J
 }
 
 export async function rebootRouter(ctx: HandlerContext, job: JobRow): Promise<Json> {
-  requireRouter(job);
+  const routerId = requireRouter(job);
   const raw = await runCommand(ctx, job, 'reboot', {}, 30_000);
+  // Метка нужна, чтобы отличить «роутер вернулся после ребута» от обычного
+  // восстановления связи и показать соответствующий попап.
+  await ctx.pool.query('update routers set reboot_requested_at = now() where id = $1', [routerId]);
   return { scheduled: true, result: raw };
 }
 

@@ -26,6 +26,7 @@ import { TemplateEditorPage } from './pages/TemplateEditor';
 import { TemplatesPage } from './pages/Templates';
 import { UsersPage } from './pages/Users';
 import { SessionProvider, displayName, useSession } from './session';
+import { useNotificationToasts } from './lib/notifications';
 
 interface NavItem {
   to: string;
@@ -212,6 +213,7 @@ function Root() {
 function Shell() {
   const { me, logout } = useSession();
   const route = useRoute();
+  useNotificationToasts();
   const isAdmin = me?.permissions.is_superadmin === true;
   const [navOpen, setNavOpen] = useState(false);
 

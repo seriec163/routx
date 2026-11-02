@@ -197,14 +197,19 @@ export class JobWorker {
     const staleAfter = interval * this.settings.monitoring.offlineAfterMisses;
 
     // 1. Пропущенные пульсы: агент не выходит на связь.
-    const stale = await this.pool.query<{ id: string; owner_id: string; status: string }>(
+    const stale = await this.pool.query<{
+      id: string;
+      owner_id: string;
+      status: string;
+      reboot_requested_at: Date | null;
+    }>(
       `update routers r
           set status = 'offline', updated_at = now()
         where r.status = 'online'
           and r.archived_at is null
           and r.last_seen_at is not null
           and r.last_seen_at < now() - ($1 || ' seconds')::interval
-        returning r.id, r.owner_id, r.status`,
+        returning r.id, r.owner_id, r.status, r.reboot_requested_at`,
       [staleAfter],
     );
 
@@ -217,6 +222,12 @@ export class JobWorker {
                online_since = null, last_transition = now()`,
         [router.id],
       );
+      // Перезагрузка по нашей команде — ожидаемое отключение, без тревоги.
+      const rebooting =
+        router.reboot_requested_at != null &&
+        router.reboot_requested_at.getTime() > Date.now() - 10 * 60 * 1000;
+      if (rebooting) continue;
+
       const { notify } = await import('../notifications.js');
       await notify(this.pool, {
         userId: router.owner_id,

@@ -18,6 +18,7 @@ import {
 } from './service.js';
 import { sanitizeAgentState } from '../domain/uci.js';
 import { createMobileLink } from '../mobile/service.js';
+import { notifyRouterOwner } from '../notifications.js';
 
 export interface AgentRouteContext {
   pool: Pool;
@@ -508,13 +509,24 @@ export async function registerAgentRoutes(
 
     const settings = await loadSettings(pool);
     void settings;
-    await pool.query(
-      `update routers set last_poll_at = now(), last_seen_at = now(),
+    const seen = await pool.query<{ previous_status: string | null; requested_at: Date | null }>(
+      `with prev as (
+         select status, reboot_requested_at from routers where id = $1
+       )
+       update routers r
+          set last_poll_at = now(), last_seen_at = now(),
               status = case
-                when status = 'pending' then 'online'
-                when status = 'offline' then 'online'
-                else status end
-        where id = $1`,
+                when r.status in ('pending','offline') then 'online'
+                else r.status end,
+              reboot_requested_at = case
+                when prev.reboot_requested_at is not null
+                 and prev.reboot_requested_at < now() - interval '30 seconds'
+                then null
+                else r.reboot_requested_at end
+         from prev
+        where r.id = $1
+       returning prev.status as previous_status,
+                 prev.reboot_requested_at as requested_at`,
       [auth.routerId],
     );
     await pool.query(
@@ -528,6 +540,26 @@ export async function registerAgentRoutes(
                                     then now() else router_availability.last_transition end`,
       [auth.routerId],
     );
+
+    const previous = seen.rows[0];
+    const requestedAt = previous?.requested_at ? previous.requested_at.getTime() : null;
+    const bucket = new Date().toISOString().slice(0, 13);
+
+    if (requestedAt != null && Date.now() - requestedAt > 30_000) {
+      await notifyRouterOwner(pool, auth.routerId, {
+        kind: 'router.rebooted',
+        severity: 'info',
+        message: 'Роутер перезагрузился и снова в сети',
+        dedupeKey: `rebooted:${auth.routerId}:${bucket}`,
+      });
+    } else if (previous?.previous_status === 'offline') {
+      await notifyRouterOwner(pool, auth.routerId, {
+        kind: 'router.online',
+        severity: 'info',
+        message: 'Связь с роутером восстановлена',
+        dedupeKey: `online:${auth.routerId}:${bucket}`,
+      });
+    }
   };
 
   app.post(

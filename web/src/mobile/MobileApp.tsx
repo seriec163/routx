@@ -9,6 +9,7 @@ import './mobile.css';
 import { HomeScreen } from './HomeScreen';
 import { BypassScreen } from './BypassScreen';
 import { RoutersScreen } from './RoutersScreen';
+import { useNotificationToasts } from '../lib/notifications';
 
 const SELECTED_KEY = 'rc.mobile.router';
 
@@ -32,6 +33,7 @@ export function useMobile(): MobileState {
 
 export function MobileApp() {
   const route = useRoute();
+  useNotificationToasts();
   const overview = useApi<MonitoringOverview>('/api/v1/monitoring/overview');
   const [selectedId, setSelectedId] = useState<string | null>(() =>
     window.localStorage.getItem(SELECTED_KEY),
