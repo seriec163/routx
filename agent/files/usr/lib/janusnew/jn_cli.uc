@@ -14,6 +14,8 @@ function usage() {
 	print("  probe       Send probe\n");
 	print("  rotate      Rotate the agent secret\n");
 	print("  mobile-qr   Print a one-time mobile login QR (JSON)\n");
+	print("  mobile-devices  List authorized phones (JSON)\n");
+	print("  mobile-revoke <id>  Revoke an authorized phone\n");
 	print("  run         Run daemon in foreground\n");
 	print("  version     Show version\n");
 }
@@ -78,6 +80,36 @@ function cmd_mobile_qr() {
 	return 0;
 }
 
+function cmd_mobile_devices() {
+	let res = client.mobile_devices();
+	if (!res.ok) {
+		warn(res.error + "\n");
+		print(util.json_string({ ok: false, error: res.error }) + "\n");
+		return 1;
+	}
+	print(util.json_string({ ok: true, items: res.items }) + "\n");
+	return 0;
+}
+
+function cmd_mobile_revoke(id) {
+	if (id == null || id == "") {
+		warn("укажите идентификатор устройства\n");
+		return 1;
+	}
+	if (!match(id, /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/)) {
+		warn("некорректный идентификатор устройства\n");
+		return 1;
+	}
+	let res = client.mobile_revoke(id);
+	if (!res.ok) {
+		warn(res.error + "\n");
+		print(util.json_string({ ok: false, error: res.error }) + "\n");
+		return 1;
+	}
+	print(util.json_string({ ok: true }) + "\n");
+	return 0;
+}
+
 function main() {
 	let cmd = ARGV[0] || "status";
 	if (cmd == "status") return cmd_status();
@@ -85,6 +117,8 @@ function main() {
 	if (cmd == "probe") return cmd_probe();
 	if (cmd == "rotate") return cmd_rotate();
 	if (cmd == "mobile-qr") return cmd_mobile_qr();
+	if (cmd == "mobile-devices") return cmd_mobile_devices();
+	if (cmd == "mobile-revoke") return cmd_mobile_revoke(ARGV[1]);
 	if (cmd == "run") return daemon.run();
 	if (cmd == "start") { system("/etc/init.d/janusnew start"); return 0; }
 	if (cmd == "stop") { system("/etc/init.d/janusnew stop"); return 0; }

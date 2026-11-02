@@ -216,6 +216,36 @@ const STYLE = `
 
 .jn-qr-result { margin-top: 14px; }
 
+.jn-devices { margin-top: 6px; }
+
+.jn-device {
+	display: flex;
+	align-items: center;
+	gap: 12px;
+	padding: 11px 0;
+	border-top: 1px solid var(--border-color-low, rgba(128, 128, 128, .18));
+}
+
+.jn-device-main { flex: 1; min-width: 0; }
+
+.jn-device-name {
+	font-size: .9rem;
+	font-weight: 600;
+	overflow-wrap: anywhere;
+}
+
+.jn-device-meta {
+	margin-top: 2px;
+	font-size: .74rem;
+	opacity: .6;
+}
+
+.jn-device-empty {
+	margin-top: 10px;
+	font-size: .82rem;
+	opacity: .6;
+}
+
 .jn-mobile-actions {
 	display: flex;
 	align-items: center;
@@ -635,6 +665,119 @@ return view.extend({
 		r.qrResult.appendChild(E('div', { 'class': 'jn-qr-wrap' }, [ image, meta ]));
 	},
 
+	/* Авторизованные телефоны: список читается у сервера через агента.
+	   Удаление меняет только это устройство, остальные телефоны остаются. */
+	reloadDevices: function(root) {
+		const r = root.jnRefs;
+		r.devicesStatus.textContent = 'Читаем список…';
+		r.devicesList.innerHTML = '';
+		r.devicesNote.textContent = '';
+
+		const finish = () => {
+			r.devicesStatus.textContent = '';
+		};
+
+		return fs.exec('/usr/bin/janusnew', [ 'mobile-devices' ])
+			.then((res) => {
+				const lines = String(res.stdout || '').split('\n').filter((line) => line.trim() !== '');
+				let data = null;
+				try {
+					data = JSON.parse(lines.length ? lines[lines.length - 1] : '');
+				}
+				catch (e) {
+					data = null;
+				}
+
+				if (res.code !== 0 || !data || data.ok !== true)
+					throw new Error((data && data.error) || String(res.stderr || '').trim() || 'агент не вернул список');
+
+				const items = Array.isArray(data.items) ? data.items : [];
+				if (items.length === 0) {
+					r.devicesNote.textContent = 'Пока нет авторизованных телефонов.';
+					return;
+				}
+
+				for (const item of items)
+					r.devicesList.appendChild(this.deviceRow(root, item));
+			})
+			.catch((e) => {
+				r.devicesNote.textContent = 'Не удалось прочитать список: ' + e.message;
+			})
+			.then(finish, finish);
+	},
+
+	deviceRow: function(root, item) {
+		const created = item.created_at ? new Date(item.created_at) : null;
+		const seen = item.last_seen_at ? new Date(item.last_seen_at) : null;
+
+		const meta = [];
+		if (created && !isNaN(created.getTime()))
+			meta.push('добавлено ' + created.toLocaleDateString() + ' ' + created.toLocaleTimeString().slice(0, 5));
+		if (seen && !isNaN(seen.getTime()))
+			meta.push('активность: ' + this.humanSeen(seen));
+
+		return E('div', { 'class': 'jn-device' }, [
+			E('div', { 'class': 'jn-device-main' }, [
+				E('div', { 'class': 'jn-device-name' }, item.name || 'Устройство'),
+				E('div', { 'class': 'jn-device-meta' }, meta.join(' · '))
+			]),
+			E('button', {
+				'class': 'btn cbi-button cbi-button-negative',
+				'click': ui.createHandlerFn(this, function() {
+					return this.handleRevokeDevice(root, item);
+				})
+			}, 'Удалить')
+		]);
+	},
+
+	humanSeen: function(date) {
+		const seconds = Math.max(0, Math.round((Date.now() - date.getTime()) / 1000));
+		if (seconds < 60) return 'только что';
+		if (seconds < 3600) return Math.round(seconds / 60) + ' мин назад';
+		if (seconds < 86400) return Math.round(seconds / 3600) + ' ч назад';
+		return Math.round(seconds / 86400) + ' дн назад';
+	},
+
+	handleRevokeDevice: function(root, device) {
+		ui.showModal('Удалить устройство?', [
+			E('p', {}, 'Телефон «' + (device.name || 'Устройство') + '» выйдет из панели Router Control. Чтобы вернуть доступ, отсканируйте новый QR на этой странице.'),
+			E('div', { 'class': 'right' }, [
+				E('button', {
+					'class': 'btn',
+					'click': ui.hideModal
+				}, 'Отмена'),
+				' ',
+				E('button', {
+					'class': 'btn cbi-button cbi-button-negative',
+					'click': ui.createHandlerFn(this, function() {
+						return fs.exec('/usr/bin/janusnew', [ 'mobile-revoke', device.id ])
+							.then((res) => {
+								const lines = String(res.stdout || '').split('\n').filter((line) => line.trim() !== '');
+								let data = null;
+								try {
+									data = JSON.parse(lines.length ? lines[lines.length - 1] : '');
+								}
+								catch (e) {
+									data = null;
+								}
+
+								if (res.code !== 0 || !data || data.ok !== true)
+									throw new Error((data && data.error) || String(res.stderr || '').trim() || 'агент не подтвердил удаление');
+
+								ui.hideModal();
+								ui.addNotification(null, E('p', {}, 'Устройство удалено'), 'info');
+								return this.reloadDevices(root);
+							})
+							.catch((e) => {
+								ui.hideModal();
+								ui.addNotification(null, E('p', {}, 'Не удалось удалить: ' + e.message), 'error');
+							});
+					})
+				}, 'Удалить')
+			])
+		]);
+	},
+
 	render: function(status) {
 		const refs = {};
 
@@ -687,12 +830,34 @@ return view.extend({
 					E('div', { 'class': 'jn-mobile-title' }, 'Мобильный доступ'),
 					E('div', { 'class': 'jn-mobile-text' },
 						'QR открывает панель Router Control на телефоне и сразу входит владельцем роутера. ' +
-						'Ссылку выпускает сам роутер: она одноразовая и действует 5 минут.')
+						'Ссылка одноразовая и действует 5 минут. Новый QR добавляет ещё один телефон и не отключает предыдущие.')
 				]),
 				E('div', { 'class': 'jn-mobile-actions' }, [ qrButton, qrStatus ])
 			]),
 			qrResult,
 			qrError
+		]);
+
+		const devicesList = E('div', { 'class': 'jn-devices' });
+		const devicesNote = E('div', { 'class': 'jn-device-empty' }, '');
+		const devicesStatus = E('span', { 'class': 'jn-qr-status' }, '');
+		const devicesRefresh = E('button', {
+			'class': 'btn cbi-button',
+			'click': ui.createHandlerFn(this, function() { return this.reloadDevices(root); })
+		}, 'Обновить список');
+
+		const devices = E('div', { 'class': 'jn-mobile' }, [
+			E('div', { 'class': 'jn-mobile-head' }, [
+				E('div', {}, [
+					E('div', { 'class': 'jn-mobile-title' }, 'Авторизованные устройства'),
+					E('div', { 'class': 'jn-mobile-text' },
+						'Телефоны, которые вошли по QR. Удалить устройство может только владелец роутера — здесь. ' +
+						'После удаления телефон выйдет из панели, остальные останутся.')
+				]),
+				E('div', { 'class': 'jn-mobile-actions' }, [ devicesRefresh, devicesStatus ])
+			]),
+			devicesList,
+			devicesNote
 		]);
 
 		const root = E('div', { 'class': 'jn-wrap' }, [
@@ -701,6 +866,7 @@ return view.extend({
 			grid,
 			note,
 			mobile,
+			devices,
 			E('div', { 'class': 'jn-actions' }, [
 				E('button', {
 					'class': 'btn cbi-button cbi-button-action',
@@ -727,9 +893,13 @@ return view.extend({
 		refs.qrStatus = qrStatus;
 		refs.qrResult = qrResult;
 		refs.qrError = qrError;
+		refs.devicesList = devicesList;
+		refs.devicesNote = devicesNote;
+		refs.devicesStatus = devicesStatus;
 		root.jnRefs = refs;
 
 		this.paint(root, status);
+		void this.reloadDevices(root);
 
 		poll.add(() => this.reload(root), 10);
 

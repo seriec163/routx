@@ -29,13 +29,6 @@ export async function createMobileLink(
   const expiresAt = new Date(Date.now() + MOBILE_TOKEN_TTL_SECONDS * 1000);
 
   await pool.query(
-    `update mobile_tokens
-        set used_at = now()
-      where router_id = $1 and used_at is null and expires_at > now()`,
-    [input.routerId],
-  );
-
-  await pool.query(
     `insert into mobile_tokens (id, token_hash, user_id, router_id, expires_at)
      values ($1,$2,$3,$4,$5)`,
     [id, sha256(token), input.userId, input.routerId, expiresAt],

@@ -104,8 +104,9 @@ export async function resolveSession(
     email: string;
     role: 'superadmin' | 'user';
     totp_enabled: boolean;
+    mobile_device_id: string | null;
   }>(
-    `select s.id as session_id, s.csrf_hash, s.mfa_passed,
+    `select s.id as session_id, s.csrf_hash, s.mfa_passed, s.mobile_device_id,
             u.id as user_id, u.email, u.role, u.totp_enabled
        from sessions s
        join users u on u.id = s.user_id
@@ -126,6 +127,16 @@ export async function resolveSession(
       [row.session_id],
     )
     .catch(() => undefined);
+
+  if (row.mobile_device_id) {
+    void pool
+      .query(
+        `update mobile_devices set last_seen_at = now()
+          where id = $1 and last_seen_at < now() - interval '60 seconds'`,
+        [row.mobile_device_id],
+      )
+      .catch(() => undefined);
+  }
 
   return {
     id: row.user_id,

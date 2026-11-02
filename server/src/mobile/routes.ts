@@ -5,8 +5,10 @@ import { audit } from '../audit.js';
 import { createSession, setSessionCookies } from '../auth/service.js';
 import { userJson } from '../auth/routes.js';
 import { sha256 } from '../lib/crypto.js';
-import { unauthorized } from '../lib/errors.js';
+import { badRequest, unauthorized } from '../lib/errors.js';
+import { uuidv7 } from '../lib/ids.js';
 import { loadSettings } from '../settings.js';
+import { deviceLabel } from './device.js';
 
 interface RouteContext {
   pool: Pool;
@@ -87,14 +89,42 @@ export async function registerMobileRoutes(
       }
 
       const settings = await loadSettings(pool);
+
+      // Один роутер — ограниченное число авторизованных телефонов.
+      // Удалять их можно только на самом роутере (LuCI → JanusNew).
+      const active = await pool.query<{ count: string }>(
+        `select count(*)::text as count from mobile_devices
+          where router_id = $1 and revoked_at is null`,
+        [row.router_id],
+      );
+      if (Number(active.rows[0]?.count ?? 0) >= 50) {
+        throw badRequest(
+          'too_many_devices',
+          'Слишком много авторизованных телефонов. Удалите лишние на роутере: LuCI → Служба → JanusNew.',
+        );
+      }
+
+      const userAgent = request.headers['user-agent'] ?? null;
+      const label = deviceLabel(userAgent);
+      const deviceId = uuidv7();
+      await pool.query(
+        `insert into mobile_devices (id, router_id, user_id, name, platform, user_agent, ip)
+         values ($1,$2,$3,$4,$5,$6,$7)`,
+        [deviceId, row.router_id, user.id, label.name, label.platform, userAgent?.slice(0, 300) ?? null, request.ip],
+      );
+
       const session = await createSession(pool, {
         userId: user.id,
         // Токен выдан привязанным агентом роутера, то есть с самого устройства.
         mfaPassed: true,
         ip: request.ip,
-        userAgent: request.headers['user-agent'] ?? null,
+        userAgent,
         days: settings.sessionDays,
       });
+      await pool.query('update sessions set mobile_device_id = $1 where id = $2', [
+        deviceId,
+        session.id,
+      ]);
       const requestOrigin = request.headers.origin;
       const secureCookie =
         ctx.secureCookie ||
@@ -118,7 +148,7 @@ export async function registerMobileRoutes(
         result: 'ok',
         ip: request.ip,
         userAgent: request.headers['user-agent'],
-        metadata: { token_id: row.id, session: session.id },
+        metadata: { token_id: row.id, session: session.id, device_id: deviceId },
       });
 
       return {
@@ -127,6 +157,7 @@ export async function registerMobileRoutes(
           totp_enabled: user.totp_enabled,
         }),
         router_id: row.router_id,
+        device: { id: deviceId, name: label.name },
         csrf_token: session.csrf,
         mfa_policy: settings.mfaPolicy,
       };

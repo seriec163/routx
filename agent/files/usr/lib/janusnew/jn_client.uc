@@ -6,7 +6,7 @@ const store = require("jn_store");
 const platform = require("jn_platform");
 const uci_state = require("jn_uci_state");
 
-const VERSION = "1.1.13";
+const VERSION = "1.1.14";
 
 function build_probe(product) {
 	let pver = platform.product_version(product);
@@ -140,6 +140,31 @@ function mobile_link() {
 	};
 }
 
+// Авторизованные телефоны роутера. Удаление выполняет только LuCI на самом
+// роутере: панель таких маршрутов не имеет.
+function mobile_devices() {
+	let cfg = config.load();
+	if (!cfg.bound)
+		return { ok: false, error: "агент ещё не привязан" };
+	let st = store.load();
+	let res = http.request(cfg, "GET", "/agent/v1/mobile-devices", null, { timeout: 30, time_offset: st.time_offset });
+	if (!res.ok || type(res.json) != "object")
+		return { ok: false, error: res.stderr != "" ? res.stderr : ("HTTP " + res.status) };
+	let items = type(res.json.items) == "array" ? res.json.items : [];
+	return { ok: true, items: items };
+}
+
+function mobile_revoke(id) {
+	let cfg = config.load();
+	if (!cfg.bound)
+		return { ok: false, error: "агент ещё не привязан" };
+	let st = store.load();
+	let res = http.request(cfg, "POST", "/agent/v1/mobile-devices/" + id + "/revoke", {}, { timeout: 30, time_offset: st.time_offset });
+	if (!res.ok)
+		return { ok: false, error: res.stderr != "" ? res.stderr : ("HTTP " + res.status) };
+	return { ok: true };
+}
+
 function result(command_id, status, res_data, error) {	let cfg = config.load();
 	if (!cfg.bound)
 		return { ok: false };
@@ -166,4 +191,4 @@ function report(kind, product, report_obj, text) {
 	return { ok: res.ok, json: res.json };
 }
 
-return { VERSION, build_probe, bind, probe, poll, result, report, rotate, mobile_link, set_server_time };
+return { VERSION, build_probe, bind, probe, poll, result, report, rotate, mobile_link, mobile_devices, mobile_revoke, set_server_time };

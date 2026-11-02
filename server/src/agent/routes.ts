@@ -768,6 +768,82 @@ export async function registerAgentRoutes(
     },
   );
 
+  // Авторизованные телефоны. Список и удаление доступны только с самого
+  // роутера (LuCI → Служба → JanusNew), панель их не трогает.
+  app.get(
+    '/agent/v1/mobile-devices',
+    { config: { public: true, skipAuth: true, rateLimit: { max: 30, timeWindow: '1 minute' } } },
+    async (request) => {
+      await agentGuard(request);
+      const agent = agentContext(request);
+
+      const result = await pool.query<{
+        id: string;
+        name: string;
+        platform: string | null;
+        created_at: Date;
+        last_seen_at: Date;
+      }>(
+        `select id, name, platform, created_at, last_seen_at
+           from mobile_devices
+          where router_id = $1 and revoked_at is null
+          order by created_at desc`,
+        [agent.routerId],
+      );
+
+      return {
+        items: result.rows.map((row) => ({
+          id: row.id,
+          name: row.name,
+          platform: row.platform,
+          created_at: row.created_at.toISOString(),
+          last_seen_at: row.last_seen_at.toISOString(),
+        })),
+        server_time: new Date().toISOString(),
+      };
+    },
+  );
+
+  app.post(
+    '/agent/v1/mobile-devices/:id/revoke',
+    { config: { public: true, skipAuth: true, rateLimit: { max: 30, timeWindow: '1 minute' } } },
+    async (request) => {
+      await agentGuard(request);
+      const agent = agentContext(request);
+      const params = z.object({ id: z.string().uuid() }).parse(request.params);
+
+      const updated = await pool.query<{ id: string; name: string }>(
+        `update mobile_devices
+            set revoked_at = now(), revoked_by = 'router'
+          where id = $1 and router_id = $2 and revoked_at is null
+          returning id, name`,
+        [params.id, agent.routerId],
+      );
+      const device = updated.rows[0];
+      if (!device) throw notFound('Устройство не найдено или уже удалено');
+
+      await pool.query(
+        `update sessions set revoked_at = now()
+          where mobile_device_id = $1 and revoked_at is null`,
+        [device.id],
+      );
+
+      await audit(pool, {
+        actorRole: 'agent',
+        action: 'router.mobile_device_revoke',
+        targetType: 'router',
+        targetId: agent.routerId,
+        routerId: agent.routerId,
+        result: 'ok',
+        ip: request.ip,
+        userAgent: request.headers['user-agent'],
+        metadata: { device_id: device.id, device_name: device.name, source: 'router-luci' },
+      });
+
+      return { ok: true, id: device.id };
+    },
+  );
+
   // Периодическая очистка просроченных команд выполняется воркером.
   void expireCommands;
 }
