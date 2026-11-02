@@ -297,6 +297,7 @@ function run() {
 
 	write_status(cfg, product);
 
+	let bind_error = "";
 	if (cfg.bind_pending && !cfg.bound) {
 		let br = client.bind(product);
 		if (br.ok) {
@@ -304,6 +305,8 @@ function run() {
 			// Сразу фиксируем успешную привязку: иначе установщик и LuCI
 			// видят старый status.json до конца первого длинного опроса.
 			write_status(cfg, product);
+		} else {
+			bind_error = util.as_string(br.error);
 		}
 	}
 
@@ -321,11 +324,15 @@ function run() {
 				let br = client.bind(product);
 				if (br.ok) {
 					cfg = config.load();
+					bind_error = "";
 					write_status(cfg, product);
 					continue;
 				}
+				bind_error = util.as_string(br.error);
 			}
-			write_status(cfg, product, { error: "ожидает привязки" });
+			write_status(cfg, product, {
+				error: bind_error != "" ? ("привязка: " + bind_error) : "ожидает привязки"
+			});
 			sleep(backoff * 1000);
 			backoff = backoff < 60 ? backoff * 2 : 60;
 			continue;

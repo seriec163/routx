@@ -67,7 +67,7 @@ function update_script(kind, version) {
 		"    rc=$?",
 		"  fi",
 		"else",
-		"  opkg install --force-reinstall " + util.shell_quote(UPDATE_DIR + "/package." + kind),
+		"  opkg install --force-reinstall --force-depends " + util.shell_quote(UPDATE_DIR + "/package." + kind),
 		"  rc=$?",
 		"fi",
 		"if [ \"$rc\" = \"0\" ]; then",

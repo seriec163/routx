@@ -58,7 +58,11 @@ try {
 
   execSync(`tar -C "${stage}" -cf "${join(ipkdir, 'data.tar.gz')}" --gzip .`, { stdio: 'inherit' });
 
-  const control = `Package: routx-agent\nVersion: ${version}-1\nDepends: ucode, ucode-mod-fs, ucode-mod-uci, ucode-mod-digest, coreutils-timeout, curl\nSection: net\nArchitecture: all\nMaintainer: RoutX\nDescription: RoutX agent for OpenWrt\n`;
+  // Жёсткие зависимости только на команды, без которых пакет не имеет смысла.
+  // Модули ucode и timeout установщик проверяет и доустанавливает сам:
+  // в минимальных прошивках часть пакетов отсутствует, и opkg тогда
+  // отказывается ставить routx-agent целиком.
+  const control = `Package: routx-agent\nVersion: ${version}-1\nDepends: ucode, curl\nSection: net\nArchitecture: all\nMaintainer: RoutX\nDescription: RoutX agent for OpenWrt\n`;
   await writeFile(join(ipkdir, 'CONTROL', 'control'), control);
   await writeFile(join(ipkdir, 'CONTROL', 'conffiles'), '/etc/config/routx\n');
   await writeFile(
@@ -147,7 +151,7 @@ try {
       '--info license:GPL-2.0',
       '--info origin:routx-agent',
       '--info maintainer:routx',
-      '--info "depends:ucode ucode-mod-fs ucode-mod-uci ucode-mod-digest coreutils-timeout curl"',
+      '--info "depends:ucode curl"',
       `--script post-install:${JSON.stringify(postInstall)}`,
       `--script post-upgrade:${JSON.stringify(postInstall)}`,
       `--script pre-deinstall:${JSON.stringify(preDeinstall)}`,

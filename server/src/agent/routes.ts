@@ -194,12 +194,29 @@ trap 'rm -rf "$TMP"' EXIT
 cd "$TMP"
 
 # Зависимости, которых может не быть в минимальной прошивке.
-if command -v opkg >/dev/null 2>&1; then
-  command -v timeout >/dev/null 2>&1 || opkg install coreutils-timeout >/dev/null 2>&1 || true
-  opkg list-installed 2>/dev/null | grep -q '^ucode-mod-digest ' || opkg install ucode-mod-digest >/dev/null 2>&1 || true
-elif command -v apk >/dev/null 2>&1; then
-  command -v timeout >/dev/null 2>&1 || apk add coreutils-timeout >/dev/null 2>&1 || true
-  apk info -e ucode-mod-digest >/dev/null 2>&1 || apk add ucode-mod-digest >/dev/null 2>&1 || true
+# Проверяем реальную загрузку модулей ucode, а не только имена пакетов:
+# так установщик не поставит пакет, который потом не запустится.
+if command -v ucode >/dev/null 2>&1; then
+  MISSING=""
+  ucode -e 'require("digest")' >/dev/null 2>&1 || MISSING="$MISSING ucode-mod-digest"
+  ucode -e 'require("fs")' >/dev/null 2>&1 || MISSING="$MISSING ucode-mod-fs"
+  ucode -e 'require("uci")' >/dev/null 2>&1 || MISSING="$MISSING ucode-mod-uci"
+  if [ -n "$MISSING" ]; then
+    echo "Не хватает модулей ucode:$MISSING — устанавливаю..." >&2
+    if command -v opkg >/dev/null 2>&1; then
+      opkg update >/dev/null 2>&1 || echo "opkg update не удался; проверьте feed-и" >&2
+      opkg install $MISSING || true
+    elif command -v apk >/dev/null 2>&1; then
+      apk update >/dev/null 2>&1 || true
+      apk add $MISSING || true
+    fi
+  fi
+  if ! ucode -e 'require("digest")' >/dev/null 2>&1; then
+    echo "Ошибка: ucode-mod-digest не установлен." >&2
+    echo "Выполните: opkg update && opkg install ucode-mod-digest" >&2
+    echo "Без модуля digest агент не сможет подписывать запросы и привязаться." >&2
+    exit 1
+  fi
 fi
 
 # Переход с прежнего имени JanusNew: сохраняем конфиг и снимаем старый пакет.
@@ -242,7 +259,9 @@ install_tar() {
 }
 
 if command -v opkg >/dev/null 2>&1 && [ -f routx-agent.ipk ]; then
-  opkg install --force-reinstall ./routx-agent.ipk || {
+  # Зависимости уже проверены выше; --force-depends не даёт opkg отказаться
+  # от пакета из-за отсутствующего в feed-ах имени (например, coreutils-timeout).
+  opkg install --force-reinstall --force-depends ./routx-agent.ipk || {
     echo "ipk install failed, falling back to tar.gz" >&2
     install_tar || true
   }
@@ -316,6 +335,13 @@ if grep -q '"bound": true' /var/run/routx-agent/status.json 2>/dev/null; then
   echo "RoutX установлен и привязан. Продукт: $PRODUCT. Сервер: $SERVER."
 else
   echo "RoutX установлен. Продукт: $PRODUCT. Привязка к $SERVER ещё выполняется; проверьте статус на странице Службы → RoutX." >&2
+  echo "--- диагностика агента ---" >&2
+  [ -x /usr/bin/routx-agent ] && /usr/bin/routx-agent status >&2 2>&1 || true
+  if [ -f /var/run/routx-agent/status.json ]; then
+    cat /var/run/routx-agent/status.json >&2
+  else
+    echo "status.json не создан: проверьте /etc/init.d/routx-agent status и logread -e routx-agent" >&2
+  fi
 fi
 echo "LuCI: Службы → RoutX. Если пункта меню не видно — закройте вкладку LuCI и откройте её заново (меню кэшируется браузером)."
 `;

@@ -19,10 +19,15 @@ wget -qO- https://routx.example/agent/install.sh | sh -s -- \
 Установщик:
 
 1. Проверяет `opkg` или `apk`.
-2. Доустанавливает `coreutils-timeout` и `ucode-mod-digest` доступным менеджером.
-3. Скачивает `.ipk`, `.apk` и `.tar.gz`.
-4. На `opkg` ставит `routx-agent.ipk`.
-5. На `apk` ставит `routx-agent.apk`:
+2. Проверяет реальную загрузку модулей ucode: `digest`, `fs`, `uci`.
+   Недостающие пакеты доустанавливает через `opkg update`/`apk update`.
+   Если `ucode-mod-digest` поставить не удалось, установка останавливается
+   с понятной ошибкой: без него агент не подпишет запросы и не привяжется.
+3. `timeout` больше не обязателен: если `coreutils-timeout` нет,
+   `/usr/libexec/routx-agent-exec` использует shell-сторожевой таймер.
+4. Скачивает `.ipk`, `.apk` и `.tar.gz`.
+5. На `opkg` ставит `routx-agent.ipk`.
+6. На `apk` ставит `routx-agent.apk`:
 
 ```sh
 apk add --upgrade --allow-untrusted --force-overwrite ./routx-agent.apk
@@ -146,4 +151,36 @@ routx-agent status
 - **1.2.5+** — исправлен self-update (сборка update-скрипта), проверено
   обновление клиентского роутера из панели;
 - **1.2.6+** — очищены сообщения клиента после миграции; обновление
-  1.2.5 → 1.2.6 проверено через панель.
+  1.2.5 → 1.2.6 проверено через панель;
+- **1.2.7+** — установка на минимальные прошивки: пакет больше не требует
+  `coreutils-timeout`, `timeout` имеет shell-фолбэк, установщик проверяет и
+  доустанавливает модули ucode, а ошибка привязки видна в `status.json`.
+
+## Частые ошибки установки
+
+`pkg_hash_check_unresolved: cannot find dependency ucode-mod-digest`:
+
+```sh
+opkg update
+opkg install ucode-mod-digest
+ucode -e 'require("digest"); print("ok\n")'
+```
+
+`cannot find dependency coreutils-timeout` в версиях до 1.2.7:
+
+```sh
+opkg update
+opkg install coreutils-timeout
+```
+
+Если после установки агент не привязался, смотрите:
+
+```sh
+/etc/init.d/routx-agent restart
+routx-agent status
+cat /var/run/routx-agent/status.json
+logread -e routx-agent | tail -20
+```
+
+Токен привязки одноразовый и живёт 5 минут: после истечения выпустите новый
+в панели и повторите команду установки.
