@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import type { PointerEvent as ReactPointerEvent } from 'react';
 import { api, errorMessage } from '../lib/api';
 import { waitForJob } from '../lib/jobs';
 import type { Job } from '../lib/types';
@@ -96,6 +97,8 @@ export function SiteStatusCard({
   const [newUrl, setNewUrl] = useState('');
   const [checking, setChecking] = useState(false);
   const [job, setJob] = useState<Job | null>(null);
+  const [dragIndex, setDragIndex] = useState<number | null>(null);
+  const [dragOver, setDragOver] = useState<number | null>(null);
   const checkedOnce = useRef(false);
 
   useEffect(() => {
@@ -185,14 +188,42 @@ export function SiteStatusCard({
     void checkSites(next);
   }
 
-  function moveSite(index: number, delta: number): void {
-    const target = index + delta;
-    if (target < 0 || target >= sites.length) return;
+  function moveSiteTo(from: number, to: number): void {
+    if (from === to || to < 0 || to >= sites.length) return;
     const next = [...sites];
-    const [item] = next.splice(index, 1);
+    const [item] = next.splice(from, 1);
     if (!item) return;
-    next.splice(target, 0, item);
+    next.splice(to, 0, item);
     setSites(next);
+  }
+
+  function beginDrag(event: ReactPointerEvent<HTMLButtonElement>, index: number): void {
+    event.preventDefault();
+    event.stopPropagation();
+    setDragIndex(index);
+    setDragOver(index);
+    event.currentTarget.setPointerCapture(event.pointerId);
+  }
+
+  function moveDrag(event: ReactPointerEvent<HTMLButtonElement>): void {
+    if (dragIndex == null) return;
+    const target = document
+      .elementFromPoint(event.clientX, event.clientY)
+      ?.closest<HTMLElement>('[data-site-index]');
+    if (!target) return;
+    const over = Number(target.dataset.siteIndex);
+    if (Number.isInteger(over)) setDragOver(over);
+  }
+
+  function endDrag(event: ReactPointerEvent<HTMLButtonElement>): void {
+    if (dragIndex != null && dragOver != null) moveSiteTo(dragIndex, dragOver);
+    setDragIndex(null);
+    setDragOver(null);
+    try {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    } catch {
+      // pointer уже отпущен
+    }
   }
 
   return (
@@ -224,7 +255,13 @@ export function SiteStatusCard({
         const result = results[site.url];
         const tone = result ? (result.ok ? 'ok' : 'bad') : '';
         return (
-          <div className="m-sitelrow" key={site.id}>
+          <div
+            className={`m-sitelrow ${dragIndex === index ? 'm-dragging' : ''} ${
+              dragOver === index && dragIndex !== index ? 'm-drag-over' : ''
+            }`}
+            key={site.id}
+            data-site-index={index}
+          >
             <span className={`m-dot ${tone ? `m-dot-${tone}` : ''}`} aria-hidden="true" />
             <span className="m-site-main">
               <span className="m-site-label">{site.label}</span>
@@ -234,21 +271,32 @@ export function SiteStatusCard({
               <span className="m-site-actions">
                 <button
                   type="button"
-                  className="m-mini"
-                  onClick={() => moveSite(index, -1)}
-                  disabled={index === 0}
-                  aria-label={`Поднять ${site.label}`}
+                  className="m-drag"
+                  aria-label={`Перетащить ${site.label}`}
+                  title="Перетащите, чтобы изменить порядок"
+                  onPointerDown={(event) => beginDrag(event, index)}
+                  onPointerMove={moveDrag}
+                  onPointerUp={endDrag}
+                  onPointerCancel={() => {
+                    setDragIndex(null);
+                    setDragOver(null);
+                  }}
+                  onKeyDown={(event) => {
+                    if (event.key === 'ArrowUp') {
+                      event.preventDefault();
+                      moveSiteTo(index, index - 1);
+                    } else if (event.key === 'ArrowDown') {
+                      event.preventDefault();
+                      moveSiteTo(index, index + 1);
+                    }
+                  }}
                 >
-                  ↑
-                </button>
-                <button
-                  type="button"
-                  className="m-mini"
-                  onClick={() => moveSite(index, 1)}
-                  disabled={index === sites.length - 1}
-                  aria-label={`Опустить ${site.label}`}
-                >
-                  ↓
+                  <svg viewBox="0 0 24 24" aria-hidden="true">
+                    <circle cx="9" cy="9" r="1.4" />
+                    <circle cx="15" cy="9" r="1.4" />
+                    <circle cx="9" cy="15" r="1.4" />
+                    <circle cx="15" cy="15" r="1.4" />
+                  </svg>
                 </button>
                 <button
                   type="button"
@@ -295,7 +343,7 @@ export function SiteStatusCard({
             Добавить
           </button>
           <p className="m-note">
-            До {MAX_SITES} адресов. ↑ и ↓ меняют порядок, × убирает сайт.
+            До {MAX_SITES} адресов. Перетаскивайте за ⠿, чтобы менять порядок. × убирает сайт.
           </p>
         </div>
       ) : null}

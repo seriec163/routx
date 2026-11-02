@@ -84,7 +84,9 @@ export function InstallPage({
         if (response.router_id) {
           window.localStorage.setItem('rc.mobile.router', response.router_id);
         }
-        setStatus('ready');
+        // Сразу в приложение: инструкция по установке живёт в верхней плашке
+        // на главном экране, а не отдельной страницей после QR.
+        navigate('/app', { replace: true });
       } catch (caught) {
         if (!active) return;
         setError(errorMessage(caught));

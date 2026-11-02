@@ -13,6 +13,7 @@ export type JobType =
   | 'monitor'
   | 'access_check'
   | 'site_check'
+  | 'agent_update'
   | 'diagnostics'
   | 'snapshot'
   | 'restore'

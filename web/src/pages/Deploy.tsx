@@ -13,6 +13,7 @@ import {
 import { apiDownload, apiUploadBinary, errorMessage } from '../lib/api';
 import { formatDate } from '../lib/format';
 import { useApi } from '../lib/useApi';
+import { AgentUpdates } from './AgentUpdates';
 
 interface DeployStatus {
   app_version: string;
@@ -245,6 +246,8 @@ export function DeployPage() {
           </Button>
         }
       />
+
+      <AgentUpdates />
 
       {busy ? (
         <Panel title="Идёт перенос">

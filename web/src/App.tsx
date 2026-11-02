@@ -207,6 +207,15 @@ function Root() {
     return <MobileApp />;
   }
 
+  // На телефоне корень — сразу мобильное приложение, а не десктопная панель.
+  // Полная панель остаётся доступна по прямым адресам (/routers и т.д.).
+  const mobileFirst =
+    window.matchMedia('(display-mode: standalone)').matches ||
+    /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+  if (mobileFirst && route.segments.length === 0) {
+    return <MobileApp />;
+  }
+
   return <Shell />;
 }
 

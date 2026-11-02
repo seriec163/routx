@@ -47,6 +47,7 @@ export interface HandlerContext {
   log: FastifyBaseLogger;
   workerId: string;
   masterKey: string;
+  publicUrl: string;
 }
 
 type Json = Record<string, unknown>;
@@ -889,6 +890,24 @@ export async function siteCheck(ctx: HandlerContext, job: JobRow): Promise<Json>
   return { router_id: routerId, results };
 }
 
+export async function agentUpdate(ctx: HandlerContext, job: JobRow): Promise<Json> {
+  const routerId = requireRouter(job);
+  const base = ctx.publicUrl.replace(/\/+$/, '');
+  const raw = await runCommand(ctx, job, 'self_update', { base_url: base }, 120_000);
+  if (raw.ok === false) {
+    throw new JobFailure(
+      asString(raw.error) || 'agent_update_failed',
+      asString(raw.message) || 'Агент не принял обновление',
+    );
+  }
+  return {
+    router_id: routerId,
+    scheduled: true,
+    kind: asString(raw.kind),
+    version: asString(raw.version) || null,
+  };
+}
+
 export async function diagnostics(ctx: HandlerContext, job: JobRow): Promise<Json> {
   const routerId = requireRouter(job);
   const kind = job.payload.kind === 'full' ? 'full' : 'quick';
@@ -1713,6 +1732,7 @@ export const HANDLERS: Record<string, JobHandler> = {
   monitor: monitorProbe,
   access_check: accessCheck,
   site_check: siteCheck,
+  agent_update: agentUpdate,
   diagnostics,
   snapshot,
   restore: restoreSnapshot,

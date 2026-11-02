@@ -23,6 +23,7 @@ export interface WorkerOptions {
   pollIntervalMs?: number;
   leaseSeconds?: number;
   masterKey: string;
+  publicUrl: string;
 }
 
 const RETRYABLE = new Set(['agent_timeout', 'agent_unavailable', 'internal_error', 'db_error']);
@@ -36,6 +37,7 @@ export class JobWorker {
   private readonly pollIntervalMs: number;
   private readonly leaseSeconds: number;
   private readonly masterKey: string;
+  private readonly publicUrl: string;
   private stopped = false;
   private loopPromise: Promise<void> | null = null;
   private schedulerTimer: NodeJS.Timeout | null = null;
@@ -49,6 +51,7 @@ export class JobWorker {
     this.pollIntervalMs = options.pollIntervalMs ?? 1000;
     this.leaseSeconds = options.leaseSeconds ?? 600;
     this.masterKey = options.masterKey;
+    this.publicUrl = options.publicUrl;
   }
 
   updateSettings(settings: PlatformSettings): void {
@@ -136,6 +139,7 @@ export class JobWorker {
       log: this.log,
       workerId: this.workerId,
       masterKey: this.masterKey,
+      publicUrl: this.publicUrl,
     };
 
     const renew = setInterval(() => {

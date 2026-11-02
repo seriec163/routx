@@ -1,6 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
-import { LogoMark } from '../components/Logo';
+import { MobileMark } from '../components/Logo';
 import { Link } from '../components/link';
 import { navigate, useRoute } from '../lib/router';
 import { useApi } from '../lib/useApi';
@@ -179,7 +179,7 @@ export function MobileHeader(props: {
           </svg>
         </button>
       ) : (
-        <LogoMark className="m-branddot" size={32} />
+        <MobileMark className="m-branddot" size={32} />
       )}
       <span className="m-header-title">{props.title ?? 'RoutX'}</span>
       <span className="m-header-right">{props.right}</span>

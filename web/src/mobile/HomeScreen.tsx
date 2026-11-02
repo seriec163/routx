@@ -7,6 +7,7 @@ import { JobProgress, useToast } from '../components/ui';
 import { navigate } from '../lib/router';
 import { MobileHeader, useMobile } from './MobileApp';
 import { SiteStatusCard } from './SiteStatusCard';
+import { InstallGuide } from './InstallGuide';
 import { requestCamera } from './camera';
 
 const STATUS: Record<string, { label: string; tone: string }> = {
@@ -34,6 +35,9 @@ export function HomeScreen() {
   const [replaceBusy, setReplaceBusy] = useState(false);
   const [replaceError, setReplaceError] = useState<string | null>(null);
   const [replaceJob, setReplaceJob] = useState<Job | null>(null);
+  const [guideOpen, setGuideOpen] = useState(false);
+  const [installBannerHidden, setInstallBannerHidden] = useState(false);
+  const [standalone, setStandalone] = useState(false);
 
   const rules = useApi<RulesResponse>(
     selected ? `/api/v1/routers/${selected.id}/rules` : null,
@@ -42,6 +46,13 @@ export function HomeScreen() {
   useEffect(() => {
     const timer = window.setInterval(() => setNow(new Date()), 1000);
     return () => window.clearInterval(timer);
+  }, []);
+
+  useEffect(() => {
+    setStandalone(
+      window.matchMedia('(display-mode: standalone)').matches ||
+        (navigator as unknown as { standalone?: boolean }).standalone === true,
+    );
   }, []);
 
   const protocolChips = useMemo(() => {
@@ -239,6 +250,26 @@ export function HomeScreen() {
       />
 
       <div className="m-body">
+        {!standalone && !installBannerHidden ? (
+          <div className="m-installbar">
+            <div className="m-installbar-text">
+              <strong>Установить RoutX</strong>
+              <span>Иконка на домашнем экране, без адресной строки</span>
+            </div>
+            <button type="button" className="m-mini" onClick={() => setGuideOpen(true)}>
+              Инструкция
+            </button>
+            <button
+              type="button"
+              className="m-installbar-close"
+              aria-label="Скрыть"
+              onClick={() => setInstallBannerHidden(true)}
+            >
+              ×
+            </button>
+          </div>
+        ) : null}
+
         <button
           type="button"
           className="m-routerchip"
@@ -420,6 +451,8 @@ export function HomeScreen() {
           </div>
         ) : null}
       </div>
+
+      <InstallGuide open={guideOpen} onClose={() => setGuideOpen(false)} />
 
       {replaceTarget ? (
         <div

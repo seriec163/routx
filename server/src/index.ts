@@ -73,7 +73,13 @@ const app = await buildApp({
 });
 
 const settings = await loadSettings(db.pool);
-const worker = new JobWorker({ pool: db.pool, settings, log: app.log, masterKey });
+const worker = new JobWorker({
+  pool: db.pool,
+  settings,
+  log: app.log,
+  masterKey,
+  publicUrl: config.RC_PUBLIC_URL,
+});
 worker.start();
 
 let closing = false;

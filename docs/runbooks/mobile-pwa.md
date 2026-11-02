@@ -111,8 +111,9 @@ iPhone. При отказе в доступе показывается подс�
 
 * Manifest: `/manifest.webmanifest`.
 * Иконки: `/icons/icon-192.png`, `/icons/icon-512.png`,
-  `/icons/icon-maskable-512.png`, `apple-touch-icon.png` — в светлой
-  розово-фиолетовой палитре мобильного приложения.
+  `/icons/icon-maskable-512.png`, `apple-touch-icon.png` — отдельный знак
+  «роутер + Wi-Fi» в светлой розово-фиолетовой палитре мобильного
+  приложения, а не «R» панели.
 * Service worker: `/sw.js`, кэширует только оболочку; `/api/` и `/agent/`
   не кэшируются, `sw.js` и manifest отдаются с `Cache-Control: no-cache`.
 * iOS сохраняет иконку при установке PWA. После смены логотипа нужно

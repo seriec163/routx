@@ -328,6 +328,67 @@ body.routx-app-body #root {
   flex-wrap: wrap;
 }
 
+.m-installbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 11px 12px 11px 14px;
+  border: 1px solid rgba(216, 27, 96, 0.16);
+  border-radius: 16px;
+  background: linear-gradient(135deg, #fff7fb, #fde7ef 60%, #f3e9ff);
+  box-shadow: 0 8px 20px rgba(96, 48, 84, 0.07);
+}
+
+.m-installbar-text {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.m-installbar-text strong {
+  font-size: 0.86rem;
+}
+
+.m-installbar-text span {
+  font-size: 0.72rem;
+  color: var(--m-muted);
+}
+
+.m-installbar-close {
+  flex: 0 0 auto;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--m-muted);
+  font-size: 1.1rem;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.m-guide {
+  margin: 0;
+  padding-left: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  font-size: 0.9rem;
+  line-height: 1.45;
+}
+
+.m-guide li::marker {
+  color: var(--m-accent);
+  font-weight: 700;
+}
+
+.m-sheet-actions {
+  margin-top: 14px;
+}
+
 .m-sites .m-sitelrow {
   display: flex;
   align-items: center;
@@ -382,6 +443,40 @@ body.routx-app-body #root {
 .m-site-actions .m-mini {
   padding: 4px 8px;
   font-size: 0.8rem;
+}
+
+.m-drag {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 28px;
+  padding: 0;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--m-muted);
+  cursor: grab;
+  touch-action: none;
+}
+
+.m-drag:active {
+  cursor: grabbing;
+  background: var(--m-accent-soft);
+}
+
+.m-drag svg {
+  width: 20px;
+  height: 20px;
+  fill: currentColor;
+}
+
+.m-sitelrow.m-dragging {
+  opacity: 0.55;
+}
+
+.m-sitelrow.m-drag-over {
+  border-radius: 12px;
+  background: var(--m-accent-soft);
 }
 
 .m-mini-danger {

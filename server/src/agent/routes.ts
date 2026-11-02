@@ -377,6 +377,20 @@ export async function registerAgentRoutes(
     return { error: { code: 'not_bundled', message: 'Архив не собран в этом образе' } };
   });
 
+  app.get('/agent/routx-agent.version', async (_request, reply) => {
+    if (agentDist) {
+      const { existsSync, readFileSync } = await import('node:fs');
+      const { join } = await import('node:path');
+      const p = join(agentDist, 'routx-agent.version');
+      if (existsSync(p)) {
+        reply.type('text/plain; charset=utf-8');
+        return readFileSync(p);
+      }
+    }
+    reply.code(404);
+    return { error: { code: 'not_bundled', message: 'Версия агента не собрана в этом образе' } };
+  });
+
   app.get('/agent/routx-agent.sha256', async (_request, reply) => {
     if (agentDist) {
       const { existsSync, readFileSync } = await import('node:fs');

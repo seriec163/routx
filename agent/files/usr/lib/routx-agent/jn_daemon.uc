@@ -10,6 +10,7 @@ const snaps = require("jn_snapshots");
 const diag = require("jn_diagnostics");
 const uci_state = require("jn_uci_state");
 const monitor = require("jn_monitor");
+const self_update = require("jn_self_update");
 const dns_benchmark = require("jn_dns_benchmark");
 const runner = require("jn_run");
 
@@ -178,6 +179,15 @@ function handle_command(cmd) {
 			let sb = platform.sing_box_info(product);
 			result.sing_box_version = sb.version;
 			result.agent_version = client.VERSION;
+			return { status: "success", result: result };
+		}
+		if (op == "self_update") {
+			let result = self_update.handle(product, args);
+			if (!result.ok)
+				return { status: "failed", error: {
+					code: util.as_string(result.error) || "self_update_failed",
+					message: util.as_string(result.message) || "Не удалось обновить агента"
+				} };
 			return { status: "success", result: result };
 		}
 		if (op == "site_probe") {

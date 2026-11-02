@@ -159,6 +159,8 @@ try {
   console.log('apk build skipped:', error.message);
 }
 
+await writeFile(join(dist, 'routx-agent.version'), `${version}\n`);
+
 const sums = [];
 const ipkData = await readFile(join(dist, 'routx-agent.ipk')).catch(() => null);
 if (ipkData) {

@@ -11,11 +11,21 @@
     </linearGradient>
   </defs>
   <rect width="512" height="512" fill="url(#bg)"/>
-  <circle cx="418" cy="94" r="92" fill="#d81b60" opacity="0.09"/>
-  <circle cx="88" cy="430" r="126" fill="#7c3aed" opacity="0.08"/>
-  <g transform="translate(112 112) scale(6)" fill="none" stroke="url(#rx)" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round">
-    <path d="M16 36V12h10.2a7.4 7.4 0 0 1 0 14.8H16"/>
-    <path d="M25.2 26.2 33.4 34.8"/>
-    <circle cx="34" cy="35.4" r="2.1" fill="url(#rx)" stroke="none"/>
+  <circle cx="424" cy="88" r="88" fill="#d81b60" opacity="0.09"/>
+  <circle cx="84" cy="434" r="118" fill="#7c3aed" opacity="0.08"/>
+  <g transform="translate(46 46) scale(0.82)">
+    <g fill="none" stroke="url(#rx)" stroke-width="26" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M120 210c70-70 202-70 272 0"/>
+      <path d="M166 258c46-46 134-46 180 0"/>
+      <path d="M212 306c20-20 68-20 88 0"/>
+      <circle cx="256" cy="348" r="20" fill="url(#rx)" stroke="none"/>
+      <rect x="140" y="402" width="232" height="68" rx="34"/>
+      <path d="M184 402v-20M328 402v-20"/>
+    </g>
+    <g fill="url(#rx)">
+      <circle cx="220" cy="436" r="8"/>
+      <circle cx="256" cy="436" r="8"/>
+      <circle cx="292" cy="436" r="8"/>
+    </g>
   </g>
 </svg>

@@ -8,6 +8,7 @@ import { z } from 'zod';
 import { audit } from '../audit.js';
 import { requireSuperadmin } from '../auth/service.js';
 import { badRequest } from '../lib/errors.js';
+import { enqueueJob } from '../jobs/queue.js';
 import { createBundle, fingerprint, readBundle, type DeployManifest } from './bundle.js';
 import { databaseInfo, dumpDatabase, restoreDatabase, tableCounts } from './pg.js';
 import { setMaintenance } from './state.js';
@@ -320,6 +321,55 @@ export async function registerDeployRoutes(
     requireSuperadmin(request);
     return domainInfo(ctx.publicUrl);
   });
+
+  // Обновление агента на клиентских роутерах из панели.
+  app.post(
+    '/api/v1/deploy/agent-update',
+    { config: { rateLimit: { max: 10, timeWindow: '1 minute' } } },
+    async (request, reply) => {
+      const auth = requireSuperadmin(request);
+      const body = z
+        .object({ router_ids: z.array(z.string().uuid()).min(1).max(100) })
+        .strict()
+        .parse(request.body);
+      const ids = [...new Set(body.router_ids)];
+
+      const routers = await pool.query<{ id: string }>(
+        'select id from routers where id = any($1::uuid[]) and archived_at is null',
+        [ids],
+      );
+      if (routers.rowCount !== ids.length) {
+        throw badRequest('router_not_found', 'Один или несколько роутеров не найдены');
+      }
+
+      const jobs: Array<{ router_id: string; job_id: string }> = [];
+      for (const router of routers.rows) {
+        const job = await enqueueJob(pool, {
+          type: 'agent_update',
+          routerId: router.id,
+          requestedBy: auth.userId,
+          timeoutSeconds: 180,
+          maxAttempts: 1,
+          payload: {},
+        });
+        jobs.push({ router_id: router.id, job_id: job.id });
+      }
+
+      await audit(pool, {
+        actorId: auth.userId,
+        actorRole: auth.role,
+        action: 'deploy.agent_update',
+        targetType: 'instance',
+        result: 'ok',
+        ip: request.ip,
+        userAgent: request.headers['user-agent'],
+        metadata: { routers: ids, jobs: jobs.map((item) => item.job_id) },
+      });
+
+      reply.code(202);
+      return { jobs };
+    },
+  );
 }
 
 async function runImport(args: {
