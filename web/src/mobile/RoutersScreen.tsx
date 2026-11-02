@@ -2,10 +2,11 @@ import { useEffect, useRef, useState } from 'react';
 import jsQR from 'jsqr';
 import { api, errorMessage } from '../lib/api';
 import { useToast } from '../components/ui';
-import { navigate } from '../lib/router';
+import { navigate, useRoute } from '../lib/router';
 import { useSession } from '../session';
 import { MobileHeader, useMobile } from './MobileApp';
 import { StatusDot } from './HomeScreen';
+import { hasPendingCamera, releaseCamera, takeCamera } from './camera';
 
 interface BarcodeDetectorLike {
   detect(source: CanvasImageSource): Promise<Array<{ rawValue: string }>>;
@@ -33,7 +34,9 @@ function parseLink(text: string): { token: string; routerId: string | null } | n
 
 export function RoutersScreen() {
   const { routers, selectedId, select, reload, loading } = useMobile();
-  const [addOpen, setAddOpen] = useState(false);
+  const route = useRoute();
+  // Переход с главной по кнопке QR сразу открывает добавление роутера.
+  const [addOpen, setAddOpen] = useState(() => route.query.get('add') === '1');
 
   return (
     <div className="m-screen">
@@ -237,6 +240,9 @@ function QrScanner(props: { onResult: (value: string) => void; disabled: boolean
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
+    // Поток мог быть открыт ещё на главном экране, в жесте нажатия QR.
+    // Тогда камера стартует сразу, без кнопки «Включить камеру».
+    if (hasPendingCamera()) void start();
     return () => stop();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -294,11 +300,15 @@ function QrScanner(props: { onResult: (value: string) => void; disabled: boolean
 
     setState('starting');
     try {
-      // Сначала запрашиваем камеру: браузер покажет разрешение пользователю.
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: { ideal: 'environment' } },
-        audio: false,
-      });
+      // Если поток уже открыт кнопкой QR на главной — используем его.
+      let stream = takeCamera();
+      if (!stream || stream.getVideoTracks().every((track) => track.readyState !== 'live')) {
+        releaseCamera(stream);
+        stream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: { ideal: 'environment' } },
+          audio: false,
+        });
+      }
       streamRef.current = stream;
       const video = videoRef.current;
       if (!video) throw new Error('Видео недоступно');

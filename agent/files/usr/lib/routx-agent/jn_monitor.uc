@@ -357,6 +357,53 @@ function current_ips(force) {
 	return ip_cache;
 }
 
+// Проверка доступности нескольких сайтов через активный VPN-сервер.
+// Возвращает результат по каждому адресу; один недоступный сайт не ломает
+// проверку остальных.
+function site_probe(product, targets) {
+	let urls = [];
+	let seen = {};
+	for (let raw in (type(targets) == "array" ? targets : [])) {
+		let target = trim(util.as_string(raw));
+		if (target == "" || match(target, /^https?:\/\/[^ \t\r\n]+$/) == null)
+			continue;
+		if (seen[target] === true || length(urls) >= 8)
+			continue;
+		seen[target] = true;
+		push(urls, target);
+	}
+	if (length(urls) == 0)
+		return { ok: false, error: "no_targets", message: "Нет адресов для проверки" };
+
+	let results = [];
+	let proxies = cli(product, [ "clash_api", "get_proxies" ], 20);
+	let tag = "";
+	if (proxies.ok && type(proxies.value.proxies) == "object") {
+		let group = pick_group(proxies.value.proxies, enabled_sections(product));
+		let info = group != "" ? proxies.value.proxies[group] : null;
+		tag = type(info) == "object" ? util.as_string(info.now) : "";
+	}
+
+	for (let target in urls) {
+		if (tag == "") {
+			push(results, { target: target, ok: false, latency_ms: null, error: "vpn_unavailable" });
+			continue;
+		}
+		let res = cli(product, [ "clash_api", "get_proxy_latency", tag, "5000", target ], 20);
+		if (res.ok && res.value.success !== false && measured(res.value.delay))
+			push(results, { target: target, ok: true, latency_ms: res.value.delay });
+		else
+			push(results, {
+				target: target,
+				ok: false,
+				latency_ms: null,
+				error: res.ok ? util.as_string(res.value.error) : res.error
+			});
+	}
+
+	return { ok: true, results: results };
+}
+
 function access_check(product, target) {
 	target = trim(util.as_string(target));
 	if (target == "")
@@ -456,4 +503,4 @@ function probe(product, force) {
 	return result;
 }
 
-return { probe, access_check };
+return { probe, access_check, site_probe };

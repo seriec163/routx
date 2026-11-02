@@ -321,6 +321,83 @@ body.routx-app-body #root {
   text-align: right;
 }
 
+.m-head-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.m-sites .m-sitelrow {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 11px 0;
+  border-bottom: 1px solid var(--m-line);
+}
+
+.m-sites .m-sitelrow:last-of-type {
+  border-bottom: none;
+}
+
+.m-site-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.m-site-label {
+  font-size: 0.92rem;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.m-site-url {
+  font-size: 0.7rem;
+  color: var(--m-muted);
+  overflow-wrap: anywhere;
+}
+
+.m-site-latency {
+  flex: 0 0 auto;
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: var(--m-muted);
+  text-align: right;
+}
+
+.m-site-down {
+  color: #c4453a;
+}
+
+.m-site-actions {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.m-site-actions .m-mini {
+  padding: 4px 8px;
+  font-size: 0.8rem;
+}
+
+.m-mini-danger {
+  color: #bf3a2b;
+  background: #fdeceb;
+}
+
+.m-sites-add {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-top: 12px;
+  margin-top: 4px;
+  border-top: 1px solid var(--m-line);
+}
+
 /* Кнопки ------------------------------------------------------------------ */
 
 .m-action {

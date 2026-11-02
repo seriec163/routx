@@ -110,9 +110,14 @@ iPhone. При отказе в доступе показывается подс�
 ## PWA
 
 * Manifest: `/manifest.webmanifest`.
-* Иконки: `/icons/icon-192.png`, `/icons/icon-512.png`, maskable-вариант.
+* Иконки: `/icons/icon-192.png`, `/icons/icon-512.png`,
+  `/icons/icon-maskable-512.png`, `apple-touch-icon.png` — в светлой
+  розово-фиолетовой палитре мобильного приложения.
 * Service worker: `/sw.js`, кэширует только оболочку; `/api/` и `/agent/`
   не кэшируются, `sw.js` и manifest отдаются с `Cache-Control: no-cache`.
+* iOS сохраняет иконку при установке PWA. После смены логотипа нужно
+  удалить приложение с домашнего экрана и добавить заново; Android обычно
+  обновляет иконку после перезапуска/переустановки.
 
 ## Ограничения
 

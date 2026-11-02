@@ -868,6 +868,27 @@ export async function accessCheck(ctx: HandlerContext, job: JobRow): Promise<Jso
   };
 }
 
+export async function siteCheck(ctx: HandlerContext, job: JobRow): Promise<Json> {
+  const routerId = requireRouter(job);
+  const targets = Array.isArray(job.payload.targets)
+    ? job.payload.targets.map((value) => asString(value)).filter(Boolean)
+    : [];
+  if (targets.length === 0) {
+    throw new JobFailure('no_targets', 'Нет адресов для проверки');
+  }
+
+  const raw = await runCommand(ctx, job, 'site_probe', { targets }, 90_000);
+  if (raw.ok === false) {
+    throw new JobFailure(
+      asString(raw.error) || 'site_check_failed',
+      asString(raw.message) || 'Не удалось проверить сайты',
+    );
+  }
+
+  const results = Array.isArray(raw.results) ? raw.results : [];
+  return { router_id: routerId, results };
+}
+
 export async function diagnostics(ctx: HandlerContext, job: JobRow): Promise<Json> {
   const routerId = requireRouter(job);
   const kind = job.payload.kind === 'full' ? 'full' : 'quick';
@@ -1691,6 +1712,7 @@ export const HANDLERS: Record<string, JobHandler> = {
   read_rules: readRules,
   monitor: monitorProbe,
   access_check: accessCheck,
+  site_check: siteCheck,
   diagnostics,
   snapshot,
   restore: restoreSnapshot,

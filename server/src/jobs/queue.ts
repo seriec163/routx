@@ -12,6 +12,7 @@ export type JobType =
   | 'read_rules'
   | 'monitor'
   | 'access_check'
+  | 'site_check'
   | 'diagnostics'
   | 'snapshot'
   | 'restore'

@@ -6,6 +6,8 @@ import { useApi } from '../lib/useApi';
 import { JobProgress, useToast } from '../components/ui';
 import { navigate } from '../lib/router';
 import { MobileHeader, useMobile } from './MobileApp';
+import { SiteStatusCard } from './SiteStatusCard';
+import { requestCamera } from './camera';
 
 const STATUS: Record<string, { label: string; tone: string }> = {
   online: { label: 'Подключено', tone: 'ok' },
@@ -212,6 +214,12 @@ export function HomeScreen() {
     }
   }
 
+  async function openQrScanner(): Promise<void> {
+    // Запрашиваем камеру прямо из жеста, чтобы не требовалось второе нажатие.
+    await requestCamera();
+    navigate('/app/routers?add=1');
+  }
+
   return (
     <div className="m-screen">
       <MobileHeader
@@ -219,14 +227,12 @@ export function HomeScreen() {
           <button
             type="button"
             className="m-iconbtn"
-            aria-label="Добавить роутер"
-            onClick={() => navigate('/app/routers')}
+            aria-label="Сканировать QR"
+            onClick={() => void openQrScanner()}
           >
             <svg viewBox="0 0 24 24" aria-hidden="true">
-              <rect x="4" y="4" width="6" height="6" rx="1.5" />
-              <rect x="14" y="4" width="6" height="6" rx="1.5" />
-              <rect x="4" y="14" width="6" height="6" rx="1.5" />
-              <path d="M14 17h6M17 14v6" />
+              <path d="M4 8V5a1 1 0 0 1 1-1h3M20 8V5a1 1 0 0 0-1-1h-3M4 16v3a1 1 0 0 0 1 1h3M20 16v3a1 1 0 0 1-1 1h-3" />
+              <path d="M4 12h16" />
             </svg>
           </button>
         }
@@ -355,6 +361,14 @@ export function HomeScreen() {
             Без VPN — прямой выход роутера, через VPN — выход активного сервера.
           </p>
         </section>
+
+        {selected ? (
+          <SiteStatusCard
+            key={selected.id}
+            routerId={selected.id}
+            online={selected.status === 'online'}
+          />
+        ) : null}
 
         <button
           type="button"

@@ -180,6 +180,15 @@ function handle_command(cmd) {
 			result.agent_version = client.VERSION;
 			return { status: "success", result: result };
 		}
+		if (op == "site_probe") {
+			let result = monitor.site_probe(product, args.targets);
+			if (!result.ok)
+				return { status: "failed", error: {
+					code: util.as_string(result.error) || "site_probe_failed",
+					message: util.as_string(result.message) || "Не удалось проверить сайты"
+				} };
+			return { status: "success", result: result };
+		}
 		if (op == "access_check") {
 			let result = monitor.access_check(product, util.as_string(args.target));
 			if (result.ok !== true)

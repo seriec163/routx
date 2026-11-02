@@ -100,6 +100,50 @@ export async function registerMonitoringRoutes(
     },
   );
 
+  app.post(
+    '/api/v1/routers/:id/sites/check',
+    { config: { rateLimit: { max: 20, timeWindow: '1 minute' } } },
+    async (request, reply) => {
+      const auth = requireUser(request);
+      const params = z.object({ id: z.string().uuid() }).parse(request.params);
+      const body = z
+        .object({
+          targets: z.array(z.string().trim().url().max(512)).min(1).max(8),
+        })
+        .strict()
+        .parse(request.body);
+
+      const router = await getRouter(pool, auth, params.id);
+      assertOnline(router);
+      const targets = [...new Set(body.targets)];
+
+      const job = await enqueueJob(pool, {
+        type: 'site_check',
+        routerId: router.id,
+        requestedBy: auth.userId,
+        timeoutSeconds: 120,
+        maxAttempts: 1,
+        payload: { targets },
+      });
+
+      await audit(pool, {
+        actorId: auth.userId,
+        actorRole: auth.role,
+        action: 'router.sites_check',
+        targetType: 'router',
+        targetId: router.id,
+        routerId: router.id,
+        result: 'ok',
+        ip: request.ip,
+        userAgent: request.headers['user-agent'],
+        metadata: { targets: targets.length, job_id: job.id },
+      });
+
+      reply.code(202);
+      return { job: jobJson(job) };
+    },
+  );
+
   app.get('/api/v1/routers/:id/metrics', async (request) => {
     const auth = requireUser(request);
     const params = z.object({ id: z.string().uuid() }).parse(request.params);
