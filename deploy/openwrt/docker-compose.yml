@@ -45,6 +45,9 @@ services:
       RC_MASTER_KEY_FILE: /app/data/master.key
       RC_PUBLIC_URL: ${RC_PUBLIC_URL}
       RC_COOKIE_SECURE: ${RC_COOKIE_SECURE:-false}
+      RC_VAPID_PUBLIC_KEY: ${RC_VAPID_PUBLIC_KEY:-}
+      RC_VAPID_PRIVATE_KEY: ${RC_VAPID_PRIVATE_KEY:-}
+      RC_VAPID_SUBJECT: ${RC_VAPID_SUBJECT:-mailto:admin@example.com}
       MIGRATE_ON_START: "false"
       TRUST_PROXY: ${TRUST_PROXY:-false}
     ports:

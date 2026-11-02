@@ -1,7 +1,7 @@
-// RoutX: РјРёРЅРёРјР°Р»СЊРЅС‹Р№ service worker РґР»СЏ СѓСЃС‚Р°РЅРѕРІРєРё PWA.
-// API Рё Р°РіРµРЅС‚СЃРєРёРµ Р·Р°РїСЂРѕСЃС‹ РЅРµ РєСЌС€РёСЂСѓСЋС‚СЃСЏ; РЅР°РІРёРіР°С†РёСЏ вЂ” network-first,
-// С‡С‚РѕР±С‹ РїРѕСЃР»Рµ РѕР±РЅРѕРІР»РµРЅРёСЏ РїР°РЅРµР»Рё РЅРµ Р·Р°Р»РёРїР°Р»Р° СЃС‚Р°СЂР°СЏ РѕР±РѕР»РѕС‡РєР°.
-const CACHE = 'routx-shell-v2';
+// RoutX: service worker для установки PWA и Web Push.
+// API и запросы агента не кэшируются; навигация — network-first, чтобы
+// после обновления панели не залипала старая оболочка.
+const CACHE = 'routx-shell-v3';
 const SHELL = [
   '/',
   '/index.html',
@@ -65,4 +65,56 @@ self.addEventListener('fetch', (event) => {
       ),
     );
   }
+});
+
+self.addEventListener('push', (event) => {
+  let data = {};
+  try {
+    data = event.data ? event.data.json() : {};
+  } catch {
+    data = { body: event.data ? event.data.text() : '' };
+  }
+
+  const title = typeof data.title === 'string' && data.title ? data.title : 'RoutX';
+  const body = typeof data.body === 'string' ? data.body : '';
+  const url = typeof data.url === 'string' && data.url ? data.url : '/#/app';
+  const tag = typeof data.tag === 'string' && data.tag ? data.tag : 'routx';
+  const critical = data.severity === 'critical';
+
+  event.waitUntil(
+    self.registration.showNotification(title, {
+      body,
+      tag,
+      renotify: critical,
+      requireInteraction: critical,
+      icon: '/icons/icon-192.png',
+      badge: '/icons/icon-192.png',
+      data: { url, tag },
+      vibrate: critical ? [180, 80, 180] : [90],
+    }),
+  );
+});
+
+self.addEventListener('notificationclick', (event) => {
+  event.notification.close();
+  const target = new URL(event.notification.data && event.notification.data.url
+    ? event.notification.data.url
+    : '/#/app', self.location.origin).href;
+
+  event.waitUntil(
+    self.clients
+      .matchAll({ type: 'window', includeUncontrolled: true })
+      .then((clients) => {
+        for (const client of clients) {
+          if ('focus' in client) {
+            if ('navigate' in client) {
+              client.navigate(target).catch(() => undefined);
+            }
+            return client.focus();
+          }
+        }
+        return self.clients.openWindow(target);
+      })
+      .catch(() => self.clients.openWindow(target)),
+  );
 });

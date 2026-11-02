@@ -65,6 +65,27 @@ export async function migrate(pool: Pool, options: MigrateOptions = {}): Promise
     }
 
     if (appliedNow.length === 0) info('новых миграций нет');
+
+    // settings.schema_version historically обновлялся вручную в отдельных
+    // миграциях и отставал. Держим его равным последнему номеру миграции,
+    // чтобы /api/v1/meta и экран развёртывания показывали реальную схему.
+    const latest = files.reduce((max, file) => {
+      const number = Number(/^\d+/.exec(file)?.[0] ?? 0);
+      return Number.isFinite(number) && number > max ? number : max;
+    }, 0);
+    if (latest > 0) {
+      const settings = await pool.query<{ table: string | null }>(
+        "select to_regclass('public.settings')::text as table",
+      );
+      if (settings.rows[0]?.table) {
+        await pool.query(
+          `update settings
+              set value = jsonb_set(value, '{version}', to_jsonb($1::integer), true)
+            where key = 'schema_version'`,
+          [latest],
+        );
+      }
+    }
   } finally {
     await lock.query('select pg_advisory_unlock(hashtext($1)::bigint)', [
       'router-control:migrations',

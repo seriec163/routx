@@ -1,4 +1,5 @@
 import type { Pool } from 'pg';
+import { sendPushToUser } from './push.js';
 
 export interface NotificationInput {
   userId: string;
@@ -9,15 +10,31 @@ export interface NotificationInput {
   dedupeKey?: string | null;
 }
 
+interface InsertedNotification {
+  id: string;
+  user_id: string;
+  router_id: string | null;
+  kind: string;
+  severity: 'info' | 'warning' | 'critical';
+  message: string;
+  router_name: string | null;
+}
+
 /**
- * In-app уведомления. Внешние каналы отключены решением D-09:
- * пользователь видит события только в панели.
+ * In-app уведомление + Web Push в установленные PWA и браузеры пользователя.
+ * Push не является обязательным: если сервер не настроен, событие всё равно
+ * сохраняется в истории уведомлений.
  */
 export async function notify(pool: Pool, input: NotificationInput): Promise<void> {
-  await pool.query(
-    `insert into notifications (user_id, router_id, kind, severity, message, dedupe_key)
-     values ($1,$2,$3,$4,$5,$6)
-     on conflict do nothing`,
+  const result = await pool.query<InsertedNotification>(
+    `with inserted as (
+       insert into notifications (user_id, router_id, kind, severity, message, dedupe_key)
+       values ($1,$2,$3,$4,$5,$6)
+       on conflict do nothing
+       returning id, user_id, router_id, kind, severity, message
+     )
+     select i.id, i.user_id, i.router_id, i.kind, i.severity, i.message, r.name as router_name
+       from inserted i left join routers r on r.id = i.router_id`,
     [
       input.userId,
       input.routerId ?? null,
@@ -27,6 +44,19 @@ export async function notify(pool: Pool, input: NotificationInput): Promise<void
       input.dedupeKey ?? null,
     ],
   );
+
+  const row = result.rows[0];
+  if (!row) return;
+
+  // Историю сохранили; push отправляем в фоне, чтобы не задерживать
+  // ответ агенту или выполнение задачи из-за медленного push-сервиса.
+  void sendPushToUser(row.user_id, {
+    title: row.router_name ?? 'RoutX',
+    body: row.message,
+    url: '/#/app',
+    tag: `routx-${row.kind}`,
+    severity: row.severity,
+  }).catch(() => undefined);
 }
 
 export async function notifyRouterOwner(

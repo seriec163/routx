@@ -69,6 +69,9 @@ const app = await buildApp({
       fileURLToPath(new URL('../migrations', import.meta.url)),
     databaseUrl: config.DATABASE_URL,
     cookieSecureRaw: config.RC_COOKIE_SECURE,
+    vapidPublicKey: config.RC_VAPID_PUBLIC_KEY,
+    vapidPrivateKey: config.RC_VAPID_PRIVATE_KEY,
+    vapidSubject: config.RC_VAPID_SUBJECT,
   },
 });
 

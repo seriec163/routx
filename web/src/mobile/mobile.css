@@ -1108,6 +1108,122 @@ body.routx-app-body #root {
   color: #c4453a;
 }
 
+/* Уведомления -------------------------------------------------------------- */
+
+.m-bell {
+  position: relative;
+}
+
+.m-bell-badge {
+  position: absolute;
+  top: -4px;
+  right: -4px;
+  display: grid;
+  place-items: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: var(--m-accent);
+  color: #fff;
+  font-size: 0.64rem;
+  font-weight: 700;
+  line-height: 1;
+  box-shadow: 0 3px 8px rgba(216, 27, 96, 0.35);
+}
+
+.m-pushbox {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 12px;
+  padding: 12px 14px;
+  border: 1px solid rgba(216, 27, 96, 0.13);
+  border-radius: 16px;
+  background: linear-gradient(135deg, #fff7fb, #fde7ef 55%, #f3e9ff);
+}
+
+.m-pushbox-text {
+  flex: 1 1 180px;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.m-pushbox-text strong {
+  font-size: 0.86rem;
+}
+
+.m-pushbox-text span {
+  font-size: 0.73rem;
+  line-height: 1.4;
+  color: var(--m-muted);
+}
+
+.m-pushbox-text .m-pushbox-hint {
+  color: #9a5b00;
+}
+
+.m-notiflist {
+  display: flex;
+  flex-direction: column;
+  margin-bottom: 8px;
+}
+
+.m-notifrow {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  padding: 11px 0;
+  border-bottom: 1px solid var(--m-line);
+}
+
+.m-notifrow:last-child {
+  border-bottom: none;
+}
+
+.m-notifrow .m-dot {
+  margin-top: 6px;
+}
+
+.m-notif-unread {
+  padding-right: 6px;
+  padding-left: 8px;
+  border-radius: 12px;
+  background: rgba(253, 231, 239, 0.6);
+}
+
+.m-notif-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: var(--m-ink);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.m-notif-message {
+  font-size: 0.9rem;
+  line-height: 1.4;
+}
+
+.m-notif-meta {
+  font-size: 0.72rem;
+  color: var(--m-muted);
+}
+
+.m-notif-unread .m-notif-message {
+  font-weight: 600;
+}
+
 @media (max-width: 380px) {
   .m-clock {
     font-size: 3.2rem;

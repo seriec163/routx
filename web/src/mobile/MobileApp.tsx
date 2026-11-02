@@ -9,6 +9,7 @@ import './mobile.css';
 import { HomeScreen } from './HomeScreen';
 import { BypassScreen } from './BypassScreen';
 import { RoutersScreen } from './RoutersScreen';
+import { NotificationsHub } from './NotificationsSheet';
 import { useNotificationToasts } from '../lib/notifications';
 
 const SELECTED_KEY = 'rc.mobile.router';
@@ -182,7 +183,10 @@ export function MobileHeader(props: {
         <MobileMark className="m-branddot" size={32} />
       )}
       <span className="m-header-title">{props.title ?? 'RoutX'}</span>
-      <span className="m-header-right">{props.right}</span>
+      <span className="m-header-right">
+        <NotificationsHub />
+        {props.right}
+      </span>
     </header>
   );
 }

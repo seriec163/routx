@@ -34,6 +34,8 @@ import { registerAuditRoutes } from './audit/routes.js';
 import { registerAgentRoutes } from './agent/routes.js';
 import { registerDeployRoutes } from './deploy/routes.js';
 import { getMaintenance } from './deploy/state.js';
+import { initPushService } from './push.js';
+import { registerPushRoutes } from './push/routes.js';
 
 export interface AppRuntimeConfig {
   masterKey: string;
@@ -47,6 +49,9 @@ export interface AppRuntimeConfig {
   migrationsDir?: string;
   databaseUrl?: string;
   cookieSecureRaw?: string;
+  vapidPublicKey?: string;
+  vapidPrivateKey?: string;
+  vapidSubject?: string;
 }
 
 export interface AppDeps {
@@ -269,6 +274,16 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
       secureCookie: config.secureCookie,
       inviteTtlSeconds: 7 * 24 * 60 * 60,
     });
+    const push = initPushService({
+      pool,
+      dataDir: config.dataDir ?? '/app/data',
+      publicKey: config.vapidPublicKey,
+      privateKey: config.vapidPrivateKey,
+      subject: config.vapidSubject,
+      log: app.log,
+    });
+    await registerPushRoutes(app, { pool, push });
+
     await registerRouterRoutes(app, { pool, publicUrl: config.publicUrl });
     await registerRouterExtrasRoutes(app, { pool });
     await registerRouterConnectionRoutes(app, { pool, masterKey: config.masterKey });

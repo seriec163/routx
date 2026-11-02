@@ -45,6 +45,9 @@ const schema = z.object({
   RC_BOOTSTRAP_EMAIL: z.string().email().optional(),
   RC_BOOTSTRAP_PASSWORD: z.string().min(12).optional(),
   RC_AGENT_DIST: z.string().optional(),
+  RC_VAPID_PUBLIC_KEY: z.string().optional(),
+  RC_VAPID_PRIVATE_KEY: z.string().optional(),
+  RC_VAPID_SUBJECT: z.string().optional(),
 });
 
 export type Config = z.infer<typeof schema> & {
