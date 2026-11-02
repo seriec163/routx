@@ -124,6 +124,9 @@ export function AccountPage() {
   const [firstName, setFirstName] = useState(me?.user.first_name ?? '');
   const [middleName, setMiddleName] = useState(me?.user.middle_name ?? '');
   const [lastName, setLastName] = useState(me?.user.last_name ?? '');
+  const [email, setEmail] = useState(me?.user.email ?? '');
+  const [emailPassword, setEmailPassword] = useState('');
+  const [emailBusy, setEmailBusy] = useState(false);
   const [profileBusy, setProfileBusy] = useState(false);
   const [currentPassword, setCurrentPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
@@ -149,6 +152,34 @@ export function AccountPage() {
       setError(errorMessage(caught));
     } finally {
       setProfileBusy(false);
+    }
+  }
+
+  async function saveEmail(): Promise<void> {
+    const value = email.trim().toLowerCase();
+    if (value === '') {
+      setError('Укажите e-mail');
+      return;
+    }
+    if (value === me?.user.email.toLowerCase()) {
+      toast.info('E-mail не изменился');
+      return;
+    }
+    setEmailBusy(true);
+    setError(null);
+    try {
+      const response = await api<{ user: { email: string } }>('/api/v1/auth/me', {
+        method: 'PATCH',
+        body: { email: value, current_password: emailPassword },
+      });
+      setEmail(response.user.email);
+      setEmailPassword('');
+      await reload();
+      toast.success('E-mail для входа изменён');
+    } catch (caught) {
+      setError(errorMessage(caught));
+    } finally {
+      setEmailBusy(false);
     }
   }
 
@@ -217,6 +248,36 @@ export function AccountPage() {
                   : 'свои роутеры, шаблоны и подключения'}
               </strong>
             </div>
+          </Panel>
+
+          <Panel
+            title="E-mail для входа"
+            subtitle="Логин меняется сразу. Для подтверждения нужен текущий пароль."
+          >
+            {error ? <ErrorBanner message={error} /> : null}
+            <Field label="Новый e-mail">
+              <TextInput
+                type="email"
+                value={email}
+                onChange={setEmail}
+                autoComplete="email"
+                placeholder="user@example.com"
+              />
+            </Field>
+            <Field
+              label="Текущий пароль"
+              hint="Нужен только для смены e-mail. Пароль не сохраняется."
+            >
+              <TextInput
+                type="password"
+                value={emailPassword}
+                onChange={setEmailPassword}
+                autoComplete="current-password"
+              />
+            </Field>
+            <Button onClick={() => void saveEmail()} busy={emailBusy}>
+              Сохранить e-mail
+            </Button>
           </Panel>
 
           <Panel

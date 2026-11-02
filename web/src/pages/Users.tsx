@@ -24,7 +24,7 @@ import { useSession } from '../session';
 
 export function UsersPage() {
   const toast = useToast();
-  const { me } = useSession();
+  const { me, reload: reloadSession } = useSession();
   const users = useApi<{ items: UserRow[] }>(
     '/api/v1/users?include_suspended=true&include_archived=true',
   );
@@ -54,11 +54,17 @@ export function UsersPage() {
     action: 'suspend' | 'activate' | 'revoke' | 'archive' | 'restore' | 'delete';
   } | null>(null);
   const [editingName, setEditingName] = useState<UserRow | null>(null);
-  const [nameFields, setNameFields] = useState({ first_name: '', middle_name: '', last_name: '' });
+  const [nameFields, setNameFields] = useState({
+    email: '',
+    first_name: '',
+    middle_name: '',
+    last_name: '',
+  });
 
   function openNameEditor(user: UserRow): void {
     setEditingName(user);
     setNameFields({
+      email: user.email,
       first_name: user.first_name ?? '',
       middle_name: user.middle_name ?? '',
       last_name: user.last_name ?? '',
@@ -67,19 +73,25 @@ export function UsersPage() {
 
   async function saveName(): Promise<void> {
     if (!editingName) return;
+    if (nameFields.email.trim() === '') {
+      toast.error('Укажите e-mail');
+      return;
+    }
     setBusy(true);
     try {
       await api(`/api/v1/users/${editingName.id}`, {
         method: 'PATCH',
         body: {
+          email: nameFields.email.trim().toLowerCase(),
           first_name: nameFields.first_name.trim() || null,
           middle_name: nameFields.middle_name.trim() || null,
           last_name: nameFields.last_name.trim() || null,
         },
       });
-      toast.success('Имя пользователя сохранено');
+      toast.success('Пользователь сохранён');
       setEditingName(null);
       await users.reload();
+      if (editingName.id === me?.user.id) await reloadSession();
     } catch (caught) {
       toast.error(errorMessage(caught));
     } finally {
@@ -242,7 +254,9 @@ export function UsersPage() {
                 {users.data!.items.map((user) => (
                   <tr key={user.id}>
                     <td>
-                      {user.email}
+                      <button type="button" className="link" onClick={() => openNameEditor(user)}>
+                        {user.email}
+                      </button>
                       {user.id === me?.user.id ? <span className="muted-text small"> · это вы</span> : null}
                     </td>
                     <td>
@@ -658,7 +672,7 @@ export function UsersPage() {
       ) : null}
       {editingName ? (
         <Modal
-          title="Имя и отчество"
+          title="Пользователь"
           onClose={() => setEditingName(null)}
           footer={
             <>
@@ -671,7 +685,15 @@ export function UsersPage() {
             </>
           }
         >
-          <p className="page-sub">{editingName.email}</p>
+          <p className="page-sub">E-mail используется как логин для входа.</p>
+          <Field label="E-mail для входа">
+            <TextInput
+              type="email"
+              value={nameFields.email}
+              onChange={(value) => setNameFields((current) => ({ ...current, email: value }))}
+              placeholder="user@example.com"
+            />
+          </Field>
           <Field label="Имя">
             <TextInput
               value={nameFields.first_name}

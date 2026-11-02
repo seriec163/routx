@@ -41,7 +41,7 @@
 | Каталог списков | `GET /settings/routing-catalog` (27 ресурсов Prokop/Forkop) |
 | Свои списки роутера | `GET/PUT /routers/{id}/list-extras` |
 | Подключения | `GET/POST /routers/{id}/connections`, `PATCH/DELETE /routers/{id}/connections/{connection_id}` (job `connections_apply`) |
-| Профиль | `PATCH /auth/me` (имя, отчество, фамилия) |
+| Профиль | `PATCH /auth/me` (имя, отчество, фамилия, e-mail + текущий пароль) |
 | Назначения | `GET/PUT/DELETE /routers/{id}/templates/{template_id}` |
 | Diff/apply | `POST /routers/{id}/diff`, `GET /apply-runs/{id}`, `POST /apply-runs/{id}/confirm`, `POST /apply-runs/{id}/cancel` |
 | Задания | `GET /jobs`, `GET /jobs/{id}`, `POST /jobs/{id}/cancel` |

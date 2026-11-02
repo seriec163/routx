@@ -15,6 +15,7 @@ interface RouteContext {
 }
 
 const INVITE_TTL_HOURS = 7 * 24;
+const emailSchema = z.string().trim().toLowerCase().email().max(254);
 
 export async function registerUserRoutes(app: FastifyInstance, ctx: RouteContext): Promise<void> {
   const { pool } = ctx;
@@ -60,6 +61,7 @@ export async function registerUserRoutes(app: FastifyInstance, ctx: RouteContext
     const params = z.object({ id: z.string().uuid() }).parse(request.params);
     const body = z
       .object({
+        email: emailSchema.optional(),
         role: z.enum(['superadmin', 'user']).optional(),
         status: z.enum(['active', 'suspended']).optional(),
         first_name: z.string().trim().max(100).nullable().optional(),
@@ -105,6 +107,17 @@ export async function registerUserRoutes(app: FastifyInstance, ctx: RouteContext
 
     const sets: string[] = [];
     const values: unknown[] = [];
+    let emailChanged = false;
+    if (body.email !== undefined && body.email !== user.email) {
+      const taken = await pool.query('select 1 from users where email = $1 and id <> $2', [
+        body.email,
+        params.id,
+      ]);
+      if (taken.rows[0]) throw conflict('email_taken', 'Пользователь с таким e-mail уже существует');
+      values.push(body.email);
+      sets.push(`email = $${values.length}`);
+      emailChanged = true;
+    }
     if (body.role !== undefined) {
       values.push(body.role);
       sets.push(`role = $${values.length}`);
@@ -126,13 +139,20 @@ export async function registerUserRoutes(app: FastifyInstance, ctx: RouteContext
     sets.push('updated_at = now()');
     values.push(params.id);
 
-    const updated = await pool.query(
-      `update users set ${sets.join(', ')}
+    const updated = await pool
+      .query(
+        `update users set ${sets.join(', ')}
         where id = $${values.length}
         returning id, email, role, status, totp_enabled,
                   first_name, middle_name, last_name, created_at, last_login_at, archived_at`,
-      values,
-    );
+        values,
+      )
+      .catch((error: unknown) => {
+        if ((error as { code?: string }).code === '23505') {
+          throw conflict('email_taken', 'Пользователь с таким e-mail уже существует');
+        }
+        throw error;
+      });
 
     if (body.status === 'suspended') {
       await pool.query('update sessions set revoked_at = now() where user_id = $1 and revoked_at is null', [
@@ -149,7 +169,10 @@ export async function registerUserRoutes(app: FastifyInstance, ctx: RouteContext
       result: 'ok',
       ip: request.ip,
       userAgent: request.headers['user-agent'],
-      metadata: { before: { role: user.role, status: user.status }, after: body },
+      metadata: {
+        before: { email: user.email, role: user.role, status: user.status },
+        after: { ...body, email_changed: emailChanged },
+      },
     });
 
     return { user: userJson(updated.rows[0]) };

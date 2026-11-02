@@ -4,7 +4,7 @@ import type { Pool } from 'pg';
 import { z } from 'zod';
 import { audit } from '../audit.js';
 import { decryptSecret, encryptSecret, randomToken, sha256Hex } from '../lib/crypto.js';
-import { HttpError, badRequest, forbidden, unauthorized } from '../lib/errors.js';
+import { HttpError, badRequest, conflict, forbidden, unauthorized } from '../lib/errors.js';
 import { uuidv7 } from '../lib/ids.js';
 import { checkPasswordPolicy, hashPassword, verifyPassword } from '../lib/password.js';
 import { generateTotpSecret, provisioningUri, totpStep, verifyTotp } from '../lib/totp.js';
@@ -52,6 +52,8 @@ const resetPasswordSchema = z
   .strict();
 const profileSchema = z
   .object({
+    email: emailSchema.optional(),
+    current_password: passwordSchema.optional(),
     first_name: z.string().trim().max(100).nullable().optional(),
     middle_name: z.string().trim().max(100).nullable().optional(),
     last_name: z.string().trim().max(100).nullable().optional(),
@@ -725,6 +727,40 @@ export async function registerAuthRoutes(app: FastifyInstance, ctx: RouteContext
     const body = profileSchema.parse(request.body);
     const sets: string[] = [];
     const values: unknown[] = [];
+
+    let emailBefore: string | null = null;
+    let emailAfter: string | null = null;
+    if (body.email !== undefined) {
+      const current = await pool.query<{ email: string; password_hash: string }>(
+        'select email, password_hash from users where id = $1',
+        [auth.userId],
+      );
+      const row = current.rows[0];
+      if (!row) throw unauthorized();
+
+      if (body.email !== row.email) {
+        if (!body.current_password) {
+          throw badRequest(
+            'current_password_required',
+            'Для смены e-mail укажите текущий пароль',
+          );
+        }
+        if (!(await verifyPassword(row.password_hash, body.current_password))) {
+          throw badRequest('invalid_password', 'Неверный текущий пароль');
+        }
+        const taken = await pool.query('select 1 from users where email = $1 and id <> $2', [
+          body.email,
+          auth.userId,
+        ]);
+        if (taken.rows[0]) throw conflict('email_taken', 'Пользователь с таким e-mail уже существует');
+
+        emailBefore = row.email;
+        emailAfter = body.email;
+        values.push(body.email);
+        sets.push(`email = $${values.length}`);
+      }
+    }
+
     for (const [field, value] of [
       ['first_name', body.first_name],
       ['middle_name', body.middle_name],
@@ -739,21 +775,30 @@ export async function registerAuthRoutes(app: FastifyInstance, ctx: RouteContext
     sets.push('updated_at = now()');
     values.push(auth.userId);
 
-    const result = await pool.query(
-      `update users set ${sets.join(', ')} where id = $${values.length} returning
-         id, email, role, status, totp_enabled, first_name, middle_name, last_name,
-         created_at, last_login_at`,
-      values,
-    );
+    const result = await pool
+      .query(
+        `update users set ${sets.join(', ')} where id = $${values.length} returning
+           id, email, role, status, totp_enabled, first_name, middle_name, last_name,
+           created_at, last_login_at`,
+        values,
+      )
+      .catch((error: unknown) => {
+        if ((error as { code?: string }).code === '23505') {
+          throw conflict('email_taken', 'Пользователь с таким e-mail уже существует');
+        }
+        throw error;
+      });
 
     await audit(pool, {
       actorId: auth.userId,
       actorRole: auth.role,
-      action: 'auth.profile_update',
+      action: emailAfter ? 'auth.email_change' : 'auth.profile_update',
       result: 'ok',
       ip: request.ip,
       userAgent: request.headers['user-agent'],
-      metadata: { fields: Object.keys(body) },
+      metadata: emailAfter
+        ? { before: { email: emailBefore }, after: { email: emailAfter } }
+        : { fields: Object.keys(body) },
     });
 
     return { user: userJson(result.rows[0]) };
