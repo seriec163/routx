@@ -1,0 +1,31 @@
+{
+	# Порт 80 не занимаем: на роутере он часто занят другим сервисом.
+	auto_https disable_redirects
+}
+
+https://{$RC_DOMAIN} {
+	tls {
+		issuer acme {
+			# Сертификат получаем через TLS-ALPN на 443, HTTP-01 не нужен.
+			disable_http_challenge
+		}
+	}
+
+	encode zstd gzip
+
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		-Server
+	}
+
+	reverse_proxy app:3000 {
+		health_uri /healthz
+		health_interval 5s
+		health_timeout 3s
+	}
+
+	log {
+		output stdout
+		format console
+	}
+}
