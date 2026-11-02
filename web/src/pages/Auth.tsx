@@ -28,6 +28,12 @@ export function LoginPage() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [showRecovery, setShowRecovery] = useState(false);
+  const [recoveryCode, setRecoveryCode] = useState('');
+  const [recoveryPassword, setRecoveryPassword] = useState('');
+  const [recoveryRepeat, setRecoveryRepeat] = useState('');
+  const [recoveryBusy, setRecoveryBusy] = useState(false);
+  const [recoveryError, setRecoveryError] = useState<string | null>(null);
+  const [recoveryDone, setRecoveryDone] = useState(false);
 
   useEffect(() => {
     if (step !== 'mfa' || secondsLeft <= 0) return;
@@ -76,6 +82,38 @@ export function LoginPage() {
       setCode('');
     } finally {
       setBusy(false);
+    }
+  }
+
+  async function submitRecovery(): Promise<void> {
+    setRecoveryError(null);
+    if (recoveryPassword.length < 12) {
+      setRecoveryError('Пароль должен быть не короче 12 символов');
+      return;
+    }
+    if (recoveryPassword !== recoveryRepeat) {
+      setRecoveryError('Пароли не совпадают');
+      return;
+    }
+    setRecoveryBusy(true);
+    try {
+      await api('/api/v1/auth/password-reset/totp', {
+        method: 'POST',
+        body: {
+          email: email.trim(),
+          code: recoveryCode.trim(),
+          password: recoveryPassword,
+        },
+      });
+      setRecoveryDone(true);
+      setRecoveryPassword('');
+      setRecoveryRepeat('');
+      setRecoveryCode('');
+      setPassword('');
+    } catch (caught) {
+      setRecoveryError(errorMessage(caught));
+    } finally {
+      setRecoveryBusy(false);
     }
   }
 
@@ -146,11 +184,80 @@ export function LoginPage() {
               Забыли пароль?
             </button>
             {showRecovery ? (
-              <InfoBanner>
-                Самостоятельный сброс по e-mail не настроен. Попросите суперадминистратора создать
-                одноразовую ссылку: «Пользователи» → «Сбросить пароль». Ссылка действует 1 час и
-                завершает все активные сессии после смены пароля.
-              </InfoBanner>
+              recoveryDone ? (
+                <InfoBanner>
+                  Пароль изменён. Войдите с новым паролем и кодом из приложения-аутентификатора.
+                </InfoBanner>
+              ) : (
+                <div className="stack" style={{ marginTop: 12 }}>
+                  <p className="page-sub" style={{ margin: 0 }}>
+                    Сброс по коду из приложения-аутентификатора. Почта не нужна, но 2FA должен
+                    быть уже включён.
+                  </p>
+                  {recoveryError ? <ErrorBanner message={recoveryError} /> : null}
+                  <Field label="E-mail" htmlFor="recovery-email">
+                    <TextInput
+                      id="recovery-email"
+                      type="email"
+                      value={email}
+                      onChange={setEmail}
+                      autoComplete="username"
+                      required
+                    />
+                  </Field>
+                  <Field label="Код из приложения" htmlFor="recovery-code">
+                    <TextInput
+                      id="recovery-code"
+                      value={recoveryCode}
+                      onChange={setRecoveryCode}
+                      placeholder="123456"
+                      autoComplete="one-time-code"
+                      required
+                    />
+                  </Field>
+                  <Field
+                    label="Новый пароль"
+                    htmlFor="recovery-password"
+                    hint="Не короче 12 символов и хотя бы 3 класса символов"
+                  >
+                    <TextInput
+                      id="recovery-password"
+                      type="password"
+                      value={recoveryPassword}
+                      onChange={setRecoveryPassword}
+                      autoComplete="new-password"
+                      required
+                    />
+                  </Field>
+                  <Field label="Повторите пароль" htmlFor="recovery-repeat">
+                    <TextInput
+                      id="recovery-repeat"
+                      type="password"
+                      value={recoveryRepeat}
+                      onChange={setRecoveryRepeat}
+                      autoComplete="new-password"
+                      required
+                    />
+                  </Field>
+                  <Button
+                    type="button"
+                    onClick={() => void submitRecovery()}
+                    busy={recoveryBusy}
+                    disabled={
+                      !email ||
+                      recoveryCode.trim().length < 6 ||
+                      recoveryPassword.length < 12 ||
+                      recoveryPassword !== recoveryRepeat
+                    }
+                  >
+                    Сбросить пароль
+                  </Button>
+                  <p className="muted-text small">
+                    Нет доступа к телефону? Попросите суперадминистратора создать одноразовую
+                    ссылку: «Пользователи» → «Сбросить пароль». Ссылка действует 1 час.
+                  </p>
+                </div>
+              )
             ) : null}
             <p className="auth-fineprint">
               Регистрация только по приглашению. Нет доступа — обратитесь к суперадминистратору.

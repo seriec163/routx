@@ -539,6 +539,127 @@ export async function registerAuthRoutes(app: FastifyInstance, ctx: RouteContext
     },
   );
 
+  // Самостоятельный сброс пароля по коду 2FA: почта не нужна.
+  // Подходит, если телефон с аутентификатором под рукой; иначе — ссылка от админа.
+  app.post(
+    '/api/v1/auth/password-reset/totp',
+    {
+      config: {
+        public: true,
+        csrfExempt: true,
+        rateLimit: { max: 5, timeWindow: '15 minutes' },
+      },
+    },
+    async (request) => {
+      const body = z
+        .object({
+          email: emailSchema,
+          code: z.string().trim().min(6).max(10),
+          password: passwordSchema,
+        })
+        .strict()
+        .parse(request.body);
+
+      const policy = checkPasswordPolicy(body.password);
+      if (!policy.ok) throw badRequest('weak_password', policy.message ?? 'Слабый пароль');
+
+      const generic = () => badRequest('invalid_recovery', 'Неверный e-mail или код подтверждения');
+
+      const result = await pool.query<{
+        id: string;
+        email: string;
+        role: 'superadmin' | 'user';
+        status: string;
+        archived_at: Date | null;
+        totp_enabled: boolean;
+        totp_secret_enc: string | null;
+        totp_last_step: string | null;
+      }>(
+        `select id, email, role, status, archived_at, totp_enabled,
+                totp_secret_enc, totp_last_step
+           from users where email = $1`,
+        [body.email],
+      );
+      const user = result.rows[0];
+
+      if (
+        !user ||
+        user.status !== 'active' ||
+        user.archived_at ||
+        !user.totp_enabled ||
+        !user.totp_secret_enc
+      ) {
+        await audit(pool, {
+          actorId: user?.id ?? null,
+          actorRole: user?.role ?? null,
+          action: 'auth.password_reset_totp',
+          targetType: 'user',
+          targetId: user?.id ?? null,
+          result: 'denied',
+          code: 'recovery_unavailable',
+          ip: request.ip,
+          userAgent: request.headers['user-agent'],
+        });
+        throw generic();
+      }
+
+      const secret = decryptSecret(user.totp_secret_enc, ctx.masterKey);
+      const verification = verifyTotp(secret, body.code);
+      const lastStep = user.totp_last_step ? Number(user.totp_last_step) : 0;
+      if (!verification.ok || verification.step === undefined || verification.step <= lastStep) {
+        await audit(pool, {
+          actorId: user.id,
+          actorRole: user.role,
+          action: 'auth.password_reset_totp',
+          targetType: 'user',
+          targetId: user.id,
+          result: 'denied',
+          code: 'invalid_totp',
+          ip: request.ip,
+          userAgent: request.headers['user-agent'],
+        });
+        throw generic();
+      }
+
+      const passwordHash = await hashPassword(body.password);
+      const client = await pool.connect();
+      try {
+        await client.query('begin');
+        await client.query(
+          `update users
+              set password_hash = $2, totp_last_step = $3,
+                  failed_logins = 0, locked_until = null, updated_at = now()
+            where id = $1`,
+          [user.id, passwordHash, verification.step],
+        );
+        await client.query(
+          'update sessions set revoked_at = now() where user_id = $1 and revoked_at is null',
+          [user.id],
+        );
+        await client.query('commit');
+      } catch (error) {
+        await client.query('rollback');
+        throw error;
+      } finally {
+        client.release();
+      }
+
+      await audit(pool, {
+        actorId: user.id,
+        actorRole: user.role,
+        action: 'auth.password_reset_totp',
+        targetType: 'user',
+        targetId: user.id,
+        result: 'ok',
+        ip: request.ip,
+        userAgent: request.headers['user-agent'],
+        metadata: { email: user.email },
+      });
+
+      return { ok: true };
+    },
+  );
+
   app.get(
     '/api/v1/auth/me',
     { config: { allowPendingMfa: true } },
