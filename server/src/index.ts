@@ -61,6 +61,14 @@ const app = await buildApp({
     secureCookie,
     agentRequireSignature: config.RC_AGENT_REQUIRE_SIGNATURE,
     agentPollHoldSeconds: config.RC_AGENT_POLL_HOLD_SECONDS,
+    masterKeySource: config.masterKeySource,
+    masterKeyFile: config.masterKeyFile,
+    dataDir: path.dirname(config.masterKeyFile),
+    migrationsDir:
+      config.MIGRATIONS_DIR ??
+      fileURLToPath(new URL('../migrations', import.meta.url)),
+    databaseUrl: config.DATABASE_URL,
+    cookieSecureRaw: config.RC_COOKIE_SECURE,
   },
 });
 

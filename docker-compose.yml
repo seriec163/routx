@@ -37,12 +37,16 @@ services:
       LOG_LEVEL: ${LOG_LEVEL:-info}
       DATABASE_URL: postgres://${POSTGRES_USER:-router_control}:${POSTGRES_PASSWORD:?Задайте POSTGRES_PASSWORD в .env}@db:5432/${POSTGRES_DB:-router_control}
       RC_MASTER_KEY: ${RC_MASTER_KEY:?Задайте RC_MASTER_KEY в .env (минимум 32 символа)}
+      RC_MASTER_KEY_FILE: ${RC_MASTER_KEY_FILE:-/app/data/master.key}
       RC_PUBLIC_URL: ${RC_PUBLIC_URL:-http://localhost:3000}
       RC_COOKIE_SECURE: ${RC_COOKIE_SECURE:-auto}
       MIGRATE_ON_START: "false"
       TRUST_PROXY: ${TRUST_PROXY:-false}
     ports:
       - "${RC_BIND_ADDR:-127.0.0.1}:${RC_PORT:-3000}:3000"
+    volumes:
+      # Ключ шифрования и страховочные копии перед импортом.
+      - rc_data:/app/data
     read_only: true
     tmpfs:
       - /tmp
@@ -94,5 +98,6 @@ services:
 
 volumes:
   pgdata:
+  rc_data:
   caddy_data:
   caddy_config:

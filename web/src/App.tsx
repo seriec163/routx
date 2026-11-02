@@ -21,6 +21,7 @@ import { RoutersPage } from './pages/Routers';
 import { SubscriptionsPage } from './pages/Subscriptions';
 import { RolloutDetailPage, RolloutsPage } from './pages/Rollouts';
 import { SettingsPage } from './pages/Settings';
+import { DeployPage } from './pages/Deploy';
 import { TemplateEditorPage } from './pages/TemplateEditor';
 import { TemplatesPage } from './pages/Templates';
 import { UsersPage } from './pages/Users';
@@ -63,6 +64,7 @@ const NAV: Array<{ section: string; items: NavItem[] }> = [
     items: [
       { to: '/users', label: 'Пользователи', admin: true },
       { to: '/settings', label: 'Настройки', admin: true },
+      { to: '/deploy', label: 'Развёртывание', admin: true },
       { to: '/audit', label: 'Аудит', admin: true },
     ],
   },
@@ -355,6 +357,8 @@ function renderRoute(segments: string[], isAdmin: boolean) {
       return isAdmin ? <UsersPage /> : <AdminOnly />;
     case 'settings':
       return isAdmin ? <SettingsPage /> : <AdminOnly />;
+    case 'deploy':
+      return isAdmin ? <DeployPage /> : <AdminOnly />;
     case 'audit':
       return isAdmin ? <AuditPage /> : <AdminOnly />;
     default:

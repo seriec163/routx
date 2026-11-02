@@ -122,6 +122,121 @@ export async function api<T>(path: string, options: RequestOptions = {}): Promis
   }
 }
 
+/** Скачивание двоичного ответа с корректной ошибкой в формате API. */
+export async function apiDownload(
+  path: string,
+  options: RequestOptions & { filenameHint?: string } = {},
+): Promise<{ filename: string; size: number }> {
+  const method = options.method ?? 'GET';
+  const headers: Record<string, string> = {};
+  if (options.body !== undefined) headers['content-type'] = 'application/json';
+  if (method !== 'GET') {
+    const csrf = readCookie('rc_csrf');
+    if (csrf) headers['x-csrf-token'] = csrf;
+  }
+
+  activeRequests += 1;
+  notifyActivity();
+  try {
+    const response = await fetch(buildUrl(path, options.query), {
+      method,
+      headers,
+      body: options.body === undefined ? undefined : JSON.stringify(options.body),
+      credentials: 'same-origin',
+      cache: 'no-store',
+      signal: options.signal,
+    });
+
+    if (!response.ok) {
+      const text = await response.text();
+      let payload: unknown = null;
+      try {
+        payload = text.length > 0 ? JSON.parse(text) : null;
+      } catch {
+        payload = null;
+      }
+      const body = (payload ?? {}) as ApiErrorBody;
+      throw new ApiError(
+        response.status,
+        body.error?.code ?? `http_${response.status}`,
+        body.error?.message ?? `Запрос завершился с кодом ${response.status}`,
+        body.error?.details,
+        body.error?.request_id ?? response.headers.get('x-request-id') ?? undefined,
+      );
+    }
+
+    const blob = await response.blob();
+    const disposition = response.headers.get('content-disposition') ?? '';
+    const match = /filename="?([^";]+)"?/i.exec(disposition);
+    const filename = match?.[1] ?? options.filenameHint ?? 'router-control-backup.bin';
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = filename;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    window.setTimeout(() => URL.revokeObjectURL(url), 5000);
+    return { filename, size: blob.size };
+  } finally {
+    activeRequests = Math.max(0, activeRequests - 1);
+    notifyActivity();
+  }
+}
+
+/** Отправка двоичного тела (файл переноса) на сервер. */
+export async function apiUploadBinary<T>(
+  path: string,
+  body: Blob,
+  headers: Record<string, string> = {},
+): Promise<T> {
+  const csrf = readCookie('rc_csrf');
+  const requestHeaders: Record<string, string> = {
+    'content-type': 'application/octet-stream',
+    accept: 'application/json',
+    ...headers,
+  };
+  if (csrf) requestHeaders['x-csrf-token'] = csrf;
+
+  activeRequests += 1;
+  notifyActivity();
+  try {
+    const response = await fetch(path, {
+      method: 'POST',
+      headers: requestHeaders,
+      body,
+      credentials: 'same-origin',
+      cache: 'no-store',
+    });
+
+    const text = await response.text();
+    let payload: unknown = null;
+    if (text.length > 0) {
+      try {
+        payload = JSON.parse(text);
+      } catch {
+        payload = { error: { code: 'invalid_response', message: text.slice(0, 300) } };
+      }
+    }
+
+    if (!response.ok) {
+      const errorBody = (payload ?? {}) as ApiErrorBody;
+      throw new ApiError(
+        response.status,
+        errorBody.error?.code ?? `http_${response.status}`,
+        errorBody.error?.message ?? `Запрос завершился с кодом ${response.status}`,
+        errorBody.error?.details,
+        errorBody.error?.request_id ?? response.headers.get('x-request-id') ?? undefined,
+      );
+    }
+
+    return payload as T;
+  } finally {
+    activeRequests = Math.max(0, activeRequests - 1);
+    notifyActivity();
+  }
+}
+
 export async function apiText(path: string): Promise<string> {
   activeRequests += 1;
   notifyActivity();

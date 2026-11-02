@@ -23,7 +23,12 @@ FROM node:24-alpine AS runtime
 ENV NODE_ENV=production
 WORKDIR /app
 
-RUN addgroup -S rc && adduser -S rc -G rc
+# pg_dump/pg_restore нужны для экспорта и переноса базы из панели.
+RUN apk add --no-cache postgresql16-client
+
+RUN addgroup -S rc && adduser -S rc -G rc \
+    && mkdir -p /app/data \
+    && chown rc:rc /app/data
 
 COPY --from=build /app/package.json ./package.json
 COPY --from=build /app/package-lock.json ./package-lock.json

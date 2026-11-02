@@ -27,6 +27,12 @@ export function createDb(connectionString: string): DbHandle {
 
   const db = drizzle(pool, { schema });
 
+  // Idle-соединения могут быть завершены сервером (например, при импорте базы).
+  // Без обработчика pg выбрасывает необработанное событие и роняет процесс.
+  pool.on('error', (error) => {
+    console.error('Соединение с PostgreSQL оборвалось:', error.message);
+  });
+
   return {
     pool,
     db,

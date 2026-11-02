@@ -32,6 +32,8 @@ import { registerUserRoutes } from './users/routes.js';
 import { registerSettingsRoutes } from './settings/routes.js';
 import { registerAuditRoutes } from './audit/routes.js';
 import { registerAgentRoutes } from './agent/routes.js';
+import { registerDeployRoutes } from './deploy/routes.js';
+import { getMaintenance } from './deploy/state.js';
 
 export interface AppRuntimeConfig {
   masterKey: string;
@@ -39,6 +41,12 @@ export interface AppRuntimeConfig {
   secureCookie: boolean;
   agentRequireSignature: boolean;
   agentPollHoldSeconds: number;
+  masterKeySource?: 'file' | 'env';
+  masterKeyFile?: string;
+  dataDir?: string;
+  migrationsDir?: string;
+  databaseUrl?: string;
+  cookieSecureRaw?: string;
 }
 
 export interface AppDeps {
@@ -80,6 +88,22 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
     trustProxy: deps.trustProxy ?? false,
     bodyLimit: 1024 * 1024,
     logController: new LogController({ disableRequestLogging: true }),
+  });
+
+  app.addContentTypeParser(
+    'application/octet-stream',
+    { parseAs: 'buffer', bodyLimit: 512 * 1024 * 1024 },
+    (_request, body, done) => {
+      done(null, body);
+    },
+  );
+
+  // Пока идёт импорт базы, API закрыт: сервер перезапустится сам.
+  app.addHook('onRequest', async (request, reply) => {
+    const maintenance = getMaintenance();
+    if (!maintenance) return;
+    if (request.url.startsWith('/healthz') || request.url.startsWith('/readyz')) return;
+    reply.code(503).send(errorEnvelope('maintenance', maintenance.reason, request.id));
   });
 
   app.addHook('onSend', async (request, reply, payload) => {
@@ -167,6 +191,16 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
   }));
 
   app.get('/readyz', async (request, reply) => {
+    const maintenance = getMaintenance();
+    if (maintenance) {
+      reply.code(503);
+      return {
+        status: 'maintenance',
+        version: APP_VERSION,
+        since: maintenance.since,
+        reason: maintenance.reason,
+      };
+    }
     try {
       await deps.db.ping();
       const schemaVersion = await deps.db.getSchemaVersion();
@@ -254,6 +288,19 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
     await registerUserRoutes(app, { pool, publicUrl: config.publicUrl });
     await registerSettingsRoutes(app, { pool });
     await registerAuditRoutes(app, { pool });
+    await registerDeployRoutes(app, {
+      pool,
+      masterKey: config.masterKey,
+      masterKeySource: config.masterKeySource ?? 'env',
+      masterKeyFile: config.masterKeyFile ?? '/app/data/master.key',
+      dataDir: config.dataDir ?? '/app/data',
+      databaseUrl: config.databaseUrl ?? process.env.DATABASE_URL ?? '',
+      publicUrl: config.publicUrl,
+      cookieSecure: config.cookieSecureRaw ?? (config.secureCookie ? 'true' : 'false'),
+      appVersion: APP_VERSION,
+      migrationsDir: config.migrationsDir ?? path.resolve(process.cwd(), 'server', 'migrations'),
+      log: app.log,
+    });
     (global as any).__RC_AGENT_DIST = (deps as any).agentDist || process.env.RC_AGENT_DIST || null;
     await registerAgentRoutes(app, {
       pool,

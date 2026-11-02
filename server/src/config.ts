@@ -1,4 +1,4 @@
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { loadEnvFile } from 'node:process';
 import { fileURLToPath } from 'node:url';
@@ -30,6 +30,7 @@ const schema = z.object({
     .min(1)
     .default('postgres://router_control:router_control@127.0.0.1:5432/router_control'),
   RC_MASTER_KEY: z.string().optional(),
+  RC_MASTER_KEY_FILE: z.string().optional(),
   WEB_DIST: z.string().optional(),
   MIGRATIONS_DIR: z.string().optional(),
   MIGRATE_ON_START: booleanFromEnv.default(false),
@@ -46,7 +47,11 @@ const schema = z.object({
   RC_AGENT_DIST: z.string().optional(),
 });
 
-export type Config = z.infer<typeof schema> & { isProduction: boolean };
+export type Config = z.infer<typeof schema> & {
+  isProduction: boolean;
+  masterKeyFile: string;
+  masterKeySource: 'file' | 'env';
+};
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
   const parsed = schema.safeParse(env);
@@ -61,11 +66,32 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
   const config = parsed.data;
   const isProduction = config.NODE_ENV === 'production';
 
-  if (isProduction && (!config.RC_MASTER_KEY || config.RC_MASTER_KEY.length < 32)) {
+  // Ключ шифрования можно хранить в файле: так перенос на другой сервер
+  // переносит и его, не требуя правки .env. Файл приоритетнее переменной.
+  const masterKeyFile = config.RC_MASTER_KEY_FILE || '/app/data/master.key';
+  let fileMasterKey: string | null = null;
+  if (existsSync(masterKeyFile)) {
+    try {
+      const raw = readFileSync(masterKeyFile, 'utf8').trim();
+      if (raw.length >= 32) fileMasterKey = raw;
+    } catch {
+      // Нечитаемый файл не должен ронять старт: останется ключ из env.
+    }
+  }
+
+  const masterKey = fileMasterKey ?? config.RC_MASTER_KEY ?? null;
+
+  if (isProduction && (!masterKey || masterKey.length < 32)) {
     throw new Error(
       'RC_MASTER_KEY обязателен в production и должен содержать не менее 32 символов',
     );
   }
 
-  return { ...config, isProduction };
+  return {
+    ...config,
+    RC_MASTER_KEY: masterKey ?? undefined,
+    masterKeyFile,
+    masterKeySource: fileMasterKey ? ('file' as const) : ('env' as const),
+    isProduction,
+  };
 }
