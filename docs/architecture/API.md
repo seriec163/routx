@@ -1,4 +1,4 @@
-# Router Control — API и протокол агента
+# RoutX — API и протокол агента
 
 Две независимые поверхности:
 
@@ -118,7 +118,7 @@ POST /agent/v1/bind
   "policy": { "monitoring_seconds": 60, "allow_mutations": true } }
 ```
 
-Токен показывается один раз; агент пишет его в `/etc/router-control/agent.conf` (0600) атомарно (tmp + rename).
+Токен показывается один раз; агент пишет его в `/etc/routx/agent.conf` (0600) атомарно (tmp + rename).
 
 ### 2.3. Long-poll
 

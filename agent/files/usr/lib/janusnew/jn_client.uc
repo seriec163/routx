@@ -1,4 +1,4 @@
-// JanusNew: клиент протокола Router Control
+// JanusNew: клиент протокола RoutX
 const util = require("jn_util");
 const http = require("jn_http");
 const config = require("jn_config");

@@ -5,7 +5,7 @@ React 19 SPA, SQL-миграции, Docker Compose, CI и этот runbook.
 
 **Границы этапа:** только инфраструктура сервера. Этап не устанавливает, не переустанавливает
 и не настраивает Forkop/Prokop, не открывает входящих портов на роутерах и не содержит
-агента. Все команды ниже выполняются на сервере Router Control, а не на роутере.
+агента. Все команды ниже выполняются на сервере RoutX, а не на роутере.
 
 ---
 
@@ -110,16 +110,16 @@ Invoke-RestMethod http://127.0.0.1:3000/api/v1/meta
 Ожидаемые ответы:
 
 ```json
-{"status":"ok","service":"router-control","version":"0.1.0","uptime_s":1,"now":"..."}
+{"status":"ok","service":"routx","version":"0.1.0","uptime_s":1,"now":"..."}
 {"status":"ready","version":"0.1.0","schema_version":"1","checks":{"db":"ok","schema":"ok"},"now":"..."}
-{"name":"router-control","version":"0.1.0","api_version":"v1","schema_version":"1"}
+{"name":"routx","version":"0.1.0","api_version":"v1","schema_version":"1"}
 ```
 
 `/healthz` отвечает `200` даже при недоступной БД (это проверка живости процесса).
 `/readyz` отвечает `503`, пока БД недоступна или миграции не применены. `/api/v1/meta`
 также отвечает `503` без БД.
 
-Остановка: `Ctrl+C` в терминале `npm run dev`. База остаётся в томе `router-control_pgdata`;
+Остановка: `Ctrl+C` в терминале `npm run dev`. База остаётся в томе `routx_pgdata`;
 остановить её — `docker compose stop db`.
 
 ---

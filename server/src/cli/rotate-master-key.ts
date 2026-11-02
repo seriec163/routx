@@ -12,8 +12,8 @@ import {
  *
  * Запуск выполняется, пока приложение ещё работает со старым ключом:
  *
- *   RC_MASTER_KEY_NEW='новый ключ' npm run rotate-master-key -w @router-control/server -- --dry-run
- *   RC_MASTER_KEY_NEW='новый ключ' npm run rotate-master-key -w @router-control/server
+ *   RC_MASTER_KEY_NEW='новый ключ' npm run rotate-master-key -w @routx/server -- --dry-run
+ *   RC_MASTER_KEY_NEW='новый ключ' npm run rotate-master-key -w @routx/server
  *
  * После успешной ротации:
  *   1. заменить RC_MASTER_KEY в .env на новый;

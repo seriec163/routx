@@ -92,7 +92,7 @@ export function LoginPage() {
         <div className="brand">
           <BrandMark />
           <div>
-            <p className="brand-name">Router Control</p>
+            <p className="brand-name">RoutX</p>
             <p className="brand-sub">OpenWrt · Forkop / Prokop</p>
           </div>
         </div>
@@ -277,7 +277,7 @@ export function InvitePage({
             <div className="brand auth-brand-inline">
               <BrandMark />
               <div>
-                <p className="brand-name">Router Control</p>
+                <p className="brand-name">RoutX</p>
                 <p className="brand-sub">Активация приглашения</p>
               </div>
             </div>
@@ -328,7 +328,7 @@ export function InvitePage({
           <div className="brand auth-brand-inline">
             <BrandMark />
             <div>
-              <p className="brand-name">Router Control</p>
+              <p className="brand-name">RoutX</p>
               <p className="brand-sub">Активация приглашения</p>
             </div>
           </div>
@@ -462,7 +462,7 @@ export function ResetPasswordPage({ token }: { token: string }) {
           <div className="brand auth-brand-inline">
             <BrandMark />
             <div>
-              <p className="brand-name">Router Control</p>
+              <p className="brand-name">RoutX</p>
               <p className="brand-sub">Сброс пароля</p>
             </div>
           </div>

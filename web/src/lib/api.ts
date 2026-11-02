@@ -168,7 +168,7 @@ export async function apiDownload(
     const blob = await response.blob();
     const disposition = response.headers.get('content-disposition') ?? '';
     const match = /filename="?([^";]+)"?/i.exec(disposition);
-    const filename = match?.[1] ?? options.filenameHint ?? 'router-control-backup.bin';
+    const filename = match?.[1] ?? options.filenameHint ?? 'routx-backup.bin';
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;

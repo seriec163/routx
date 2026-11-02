@@ -180,7 +180,7 @@ function Root() {
           <div className="brand auth-brand-inline">
             <BrandMark />
             <div>
-              <p className="brand-name">Router Control</p>
+              <p className="brand-name">RoutX</p>
               <p className="brand-sub">Обязательная настройка 2FA</p>
             </div>
           </div>
@@ -226,7 +226,7 @@ function Shell() {
         if (isActive(route.path, item)) return item.label;
       }
     }
-    return 'Router Control';
+    return 'RoutX';
   }, [route.path]);
 
   return (
@@ -235,7 +235,7 @@ function Shell() {
         <div className="sidebar-brand">
           <BrandMark />
           <div>
-            <p className="brand-name">Router Control</p>
+            <p className="brand-name">RoutX</p>
             <p className="brand-sub">OpenWrt · Forkop / Prokop</p>
           </div>
         </div>

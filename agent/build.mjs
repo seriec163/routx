@@ -58,7 +58,7 @@ try {
 
   execSync(`tar -C "${stage}" -cf "${join(ipkdir, 'data.tar.gz')}" --gzip .`, { stdio: 'inherit' });
 
-  const control = `Package: janusnew\nVersion: ${version}-1\nDepends: ucode, ucode-mod-fs, ucode-mod-uci, ucode-mod-digest, coreutils-timeout, curl\nSection: net\nArchitecture: all\nMaintainer: Router Control\nDescription: JanusNew agent for Router Control\n`;
+  const control = `Package: janusnew\nVersion: ${version}-1\nDepends: ucode, ucode-mod-fs, ucode-mod-uci, ucode-mod-digest, coreutils-timeout, curl\nSection: net\nArchitecture: all\nMaintainer: RoutX\nDescription: JanusNew agent for RoutX\n`;
   await writeFile(join(ipkdir, 'CONTROL', 'control'), control);
   await writeFile(join(ipkdir, 'CONTROL', 'conffiles'), '/etc/config/janusnew\n');
   await writeFile(
@@ -142,11 +142,11 @@ try {
       `--files ${JSON.stringify(apkRoot)}`,
       '--info name:janusnew',
       `--info version:${version}-r0`,
-      '--info "description:JanusNew agent for Router Control"',
+      '--info "description:JanusNew agent for RoutX"',
       '--info arch:noarch',
       '--info license:GPL-2.0',
       '--info origin:janusnew',
-      '--info maintainer:Router-Control',
+      '--info maintainer:routx',
       '--info "depends:ucode ucode-mod-fs ucode-mod-uci ucode-mod-digest coreutils-timeout curl"',
       `--script post-install:${JSON.stringify(postInstall)}`,
       `--script post-upgrade:${JSON.stringify(postInstall)}`,

@@ -1,4 +1,4 @@
-# Router Control — архитектура (черновик v1)
+# RoutX — архитектура (черновик v1)
 
 Статус: **проект, ожидает согласования открытых решений** (`DECISIONS.md`).
 Основано на аудите: `docs/audit/INTEGRATION_MAP.md`.
@@ -56,7 +56,7 @@
            │  исходящий TLS (443), long-poll ≤ 25 c
            ▼
 ┌──────────────────────── Роутер OpenWrt ──────────────────────────────────────┐
-│  router-control-agent (ucode + procd + curl)                                 │
+│  routx-agent (ucode + procd + curl)                                 │
 │    ├─ identity / bind / credentials (0600)                                   │
 │    ├─ operation allowlist (фиксированные argv)                               │
 │    ├─ adapter: forkop | prokop                                               │
@@ -225,17 +225,17 @@
 
 ```text
 server/
-  cmd/router-control/         # main
+  cmd/routx/         # main
   internal/{api,auth,domain,jobs,agentgw,monitor,diagnostics,templates,audit,db}
   migrations/
   web/                        # SPA
 agent/
-  files/usr/bin/router-control-agent
-  files/usr/lib/router-control/{main,http,state,uci,adapters,snapshot,diag}.uc
-  files/usr/lib/router-control/adapters/{forkop,prokop}.uc
-  files/usr/share/router-control/manifest.json
-  files/etc/init.d/router-control-agent
-  files/etc/config/router-control
+  files/usr/bin/routx-agent
+  files/usr/lib/routx/{main,http,state,uci,adapters,snapshot,diag}.uc
+  files/usr/lib/routx/adapters/{forkop,prokop}.uc
+  files/usr/share/routx/manifest.json
+  files/etc/init.d/routx-agent
+  files/etc/config/routx
   Makefile
 docs/
   audit/INTEGRATION_MAP.md

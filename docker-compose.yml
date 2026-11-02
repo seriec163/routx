@@ -1,3 +1,5 @@
+# Продукт: RoutX. Имя проекта compose оставлено прежним, чтобы не потерять
+# существующие тома с базой и ключом шифрования при обновлении.
 name: router-control
 
 services:
@@ -23,6 +25,7 @@ services:
       - no-new-privileges:true
 
   app:
+    image: routx-app
     build:
       context: .
       dockerfile: Dockerfile
@@ -75,6 +78,7 @@ services:
       - no-new-privileges:true
 
   backup:
+    image: routx-backup
     build:
       context: .
       dockerfile: Dockerfile.backup

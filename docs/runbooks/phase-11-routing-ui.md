@@ -25,7 +25,7 @@ Payload шаблона дополнен полями:
     "router_control": {
       "action": "connection",
       "enabled": "1",
-      "label": "Router Control",
+      "label": "RoutX",
       "community_lists": ["youtube", "telegram"],
       "rule_set": ["https://example.com/list.srs"],
       "remote_domain_lists": ["https://example.com/domains.lst"],

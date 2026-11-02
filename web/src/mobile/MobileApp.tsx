@@ -170,7 +170,7 @@ export function MobileHeader(props: {
           </svg>
         </span>
       )}
-      <span className="m-header-title">{props.title ?? 'Router Control'}</span>
+      <span className="m-header-title">{props.title ?? 'RoutX'}</span>
       <span className="m-header-right">{props.right}</span>
     </header>
   );

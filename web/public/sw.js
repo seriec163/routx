@@ -1,7 +1,7 @@
-// Router Control: минимальный service worker для установки PWA.
+// RoutX: минимальный service worker для установки PWA.
 // API и агентские запросы не кэшируются; навигация — network-first,
 // чтобы после обновления панели не залипала старая оболочка.
-const CACHE = 'router-control-shell-v1';
+const CACHE = 'routx-shell-v1';
 const SHELL = [
   '/',
   '/index.html',

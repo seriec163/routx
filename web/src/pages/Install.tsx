@@ -112,7 +112,7 @@ export function InstallPage({
           <div className="brand auth-brand-inline">
             <BrandMark />
             <div>
-              <p className="brand-name">Router Control</p>
+              <p className="brand-name">RoutX</p>
               <p className="brand-sub">Мобильное приложение</p>
             </div>
           </div>
@@ -153,7 +153,7 @@ export function InstallPage({
 
           {status !== 'error' ? (
             <>
-              <h2>{standalone ? 'Приложение уже открыто' : 'Установить Router Control'}</h2>
+              <h2>{standalone ? 'Приложение уже открыто' : 'Установить RoutX'}</h2>
               <p className="page-sub">
                 {standalone || installed
                   ? 'Приложение установлено. Можно открыть роутер и менять правила, подключения, DNS или перезапускать службу.'

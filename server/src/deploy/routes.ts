@@ -199,7 +199,7 @@ export async function registerDeployRoutes(
         },
       });
 
-      const filename = `router-control-${stamp()}.rcbackup`;
+      const filename = `routx-${stamp()}.rcbackup`;
       reply
         .type('application/octet-stream')
         .header('Content-Disposition', `attachment; filename="${filename}"`);
@@ -251,7 +251,7 @@ export async function registerDeployRoutes(
       if (Number(manifest.schema_version ?? 0) > currentVersion) {
         throw badRequest(
           'bundle_newer',
-          'Файл создан на более новой версии Router Control. Сначала обновите панель на этом сервере.',
+          'Файл создан на более новой версии RoutX. Сначала обновите панель на этом сервере.',
         );
       }
 

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { createBundle, fingerprint, readBundle } from '../src/deploy/bundle.js';
 
-const PASSPHRASE = 'migrate-router-control-2026';
+const PASSPHRASE = 'migrate-routx-2026';
 
 function bundle(dump = Buffer.from('PGDMPtest-dump-payload', 'utf8')) {
   return createBundle({

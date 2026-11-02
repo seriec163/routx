@@ -36,7 +36,7 @@ function pgEnv(target: PgTarget): NodeJS.ProcessEnv {
     PGPASSWORD: target.password,
     PGDATABASE: target.database,
     PGCONNECT_TIMEOUT: '10',
-    PGAPPNAME: 'router-control-deploy',
+    PGAPPNAME: 'routx-deploy',
   };
 }
 

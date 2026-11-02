@@ -7,13 +7,13 @@
 
 Во всех случаях `/etc/config/janusnew` с привязкой сохраняется.
 
-## Установка через установщик Router Control
+## Установка через установщик RoutX
 
 Стандартная команда из панели сама определяет менеджер пакетов:
 
 ```sh
-wget -qO- https://router-control.example/agent/install.sh | sh -s -- \
-  --server https://router-control.example --token <token>
+wget -qO- https://routx.example/agent/install.sh | sh -s -- \
+  --server https://routx.example --token <token>
 ```
 
 Установщик:
@@ -36,7 +36,7 @@ apk add --upgrade --allow-untrusted --force-overwrite ./janusnew.apk
 OpenWrt 24.10 / opkg:
 
 ```sh
-wget -qO /tmp/janusnew.ipk https://router-control.example/agent/janusnew.ipk
+wget -qO /tmp/janusnew.ipk https://routx.example/agent/janusnew.ipk
 opkg install --force-reinstall /tmp/janusnew.ipk
 /etc/init.d/janusnew restart
 ```
@@ -44,7 +44,7 @@ opkg install --force-reinstall /tmp/janusnew.ipk
 OpenWrt 25+ / apk:
 
 ```sh
-wget -qO /tmp/janusnew.apk https://router-control.example/agent/janusnew.apk
+wget -qO /tmp/janusnew.apk https://routx.example/agent/janusnew.apk
 apk add --upgrade --allow-untrusted --force-overwrite /tmp/janusnew.apk
 /etc/init.d/janusnew restart
 ```

@@ -1,4 +1,4 @@
-# Router Control — модель данных
+# RoutX — модель данных
 
 СУБД: PostgreSQL 16. Все временные метки — `timestamptz` (UTC). Идентификаторы — UUIDv7 (`uuid`), кроме `audit_log` (bigserial) и метрик (партиции).
 Секреты: только хэши/шифротекст. Никаких plaintext-токенов, паролей, URL подписок.

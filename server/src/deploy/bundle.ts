@@ -112,7 +112,7 @@ export function readBundle(
   passphrase: string,
 ): { manifest: DeployManifest; secrets: DeploySecrets; dump: Buffer } {
   if (buffer.length < MAGIC.length + 4 + 16) {
-    throw badRequest('bundle_invalid', 'Файл переноса повреждён или это не файл Router Control');
+    throw badRequest('bundle_invalid', 'Файл переноса повреждён или это не файл RoutX');
   }
   if (buffer.subarray(0, MAGIC.length).toString('ascii') !== MAGIC) {
     throw badRequest('bundle_invalid', 'Неизвестный формат файла переноса');
@@ -134,7 +134,7 @@ export function readBundle(
   offset += headerLength;
 
   if (manifest.format !== 1) {
-    throw badRequest('bundle_version', 'Файл переноса создан другой версией Router Control');
+    throw badRequest('bundle_version', 'Файл переноса создан другой версией RoutX');
   }
   if (manifest.cipher !== 'aes-256-gcm' || manifest.kdf?.name !== 'scrypt') {
     throw badRequest('bundle_invalid', 'Неподдерживаемый способ шифрования файла переноса');

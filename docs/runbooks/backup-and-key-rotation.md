@@ -18,7 +18,7 @@
 BACKUP_PASSPHRASE=<длинный случайный пароль>
 BACKUP_RETENTION_DAYS=14
 # Необязательно. Команда получает путь в $BACKUP_FILE.
-# BACKUP_OFFSITE_CMD=rclone copy "$BACKUP_FILE" remote:router-control-backups/
+# BACKUP_OFFSITE_CMD=rclone copy "$BACKUP_FILE" remote:routx-backups/
 ```
 
 Пароль шифрования храните отдельно от бэкапов и от `.env` в Git. Без него
@@ -42,7 +42,7 @@ router_control-20261031T121500Z.dump.enc
 Linux (cron, ежедневно в 03:15):
 
 ```cron
-15 3 * * * cd /opt/router-control && docker compose --profile backup run --rm backup >> /var/log/router-control-backup.log 2>&1
+15 3 * * * cd /opt/routx && docker compose --profile backup run --rm backup >> /var/log/routx-backup.log 2>&1
 ```
 
 Windows (Task Scheduler): запускать

@@ -1,4 +1,4 @@
-// JanusNew: HTTPS-клиент к Router Control.
+// JanusNew: HTTPS-клиент к RoutX.
 // Токен и подпись передаются через временный curl-config (0600), а не в argv.
 // Тело ответа и HTTP-код пишутся в разные файлы: output в config, write-out в stdout.
 

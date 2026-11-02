@@ -63,7 +63,7 @@ export async function refreshSingBoxCatalog(pool: Pool): Promise<number> {
         {
           headers: {
             accept: 'application/vnd.github+json',
-            'user-agent': 'router-control/0.1 (+https://github.com/)',
+            'user-agent': 'routx/0.1 (+https://github.com/)',
           },
           signal: AbortSignal.timeout(10_000),
         },

@@ -91,7 +91,7 @@ export async function registerTemplateRoutes(app: FastifyInstance, ctx: RouteCon
       const client = await pool.connect();
       try {
         await client.query('begin');
-        await client.query("select pg_advisory_xact_lock(hashtext('router-control:templates'))");
+        await client.query("select pg_advisory_xact_lock(hashtext('routx:templates'))");
         const count = await client.query<{ count: string }>(
           'select count(*)::text as count from templates where owner_id = $1 and archived_at is null',
           [auth.userId],

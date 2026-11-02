@@ -216,7 +216,7 @@ const SUBSCRIPTION_RE = /^https?:\/\/\S+$/i;
 const SECTION_RE = /^[A-Za-z0-9_.-]{1,64}$/;
 const CONNECTIONS_STATE = util.STATE_DIR + "/connections.json";
 
-// Какие VLESS-ссылки в секции добавил Router Control. Нужно, чтобы при
+// Какие VLESS-ссылки в секции добавил RoutX. Нужно, чтобы при
 // повторном применении не стирать ссылки, добавленные пользователем вручную.
 function load_link_state() {
 	let parsed = util.json_parse(util.read_file(CONNECTIONS_STATE, ""));
@@ -524,7 +524,7 @@ function apply_connections(product, args) {	if (product != "forkop" && product !
 		let value = trim(util.as_string(raw));
 		if (value == "")
 			continue;
-		// Удаляем только те ссылки, которые Router Control добавил сам.
+		// Удаляем только те ссылки, которые RoutX добавил сам.
 		if (previous[util.sha256_hex(value)])
 			continue;
 		push(preserved, value);
@@ -540,7 +540,7 @@ function apply_connections(product, args) {	if (product != "forkop" && product !
 	if (label == "")
 		label = util.as_string(cursor.get(product, section, "label"));
 	if (label == "")
-		label = "Router Control";
+		label = "RoutX";
 
 	let action = util.as_string(args.action);
 	if (action == "")
@@ -577,7 +577,7 @@ function apply_connections(product, args) {	if (product != "forkop" && product !
 	}
 
 	// Собираем подписки, которые остались в секции после удаления старых
-	// записей Router Control. Если такая ссылка уже есть, не создаём дубликат.
+	// записей RoutX. Если такая ссылка уже есть, не создаём дубликат.
 	all = cursor.get_all(product);
 	if (type(all) != "object")
 		all = {};
@@ -617,7 +617,7 @@ function apply_connections(product, args) {	if (product != "forkop" && product !
 	}
 
 	// Внешние подписки и ссылки не должны выключаться только потому,
-	// что Router Control удалил свои подключения.
+	// что RoutX удалил свои подключения.
 	if (!enabled && (length(merged_links) > 0 || foreign_subscriptions > 0))
 		enabled = true;
 	if (!enabled && !has_other_enabled_section(product, cursor, section))

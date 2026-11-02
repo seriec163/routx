@@ -43,7 +43,7 @@ const secureCookie =
   config.RC_COOKIE_SECURE === 'true' ||
   (config.RC_COOKIE_SECURE === 'auto' && config.RC_PUBLIC_URL.startsWith('https://'));
 
-const masterKey = config.RC_MASTER_KEY ?? 'router-control-development-master-key-please-change';
+const masterKey = config.RC_MASTER_KEY ?? 'routx-development-master-key-please-change';
 
 import { existsSync } from 'node:fs';
 import path from 'node:path';
@@ -82,7 +82,7 @@ async function shutdown(signal: NodeJS.Signals): Promise<void> {
   if (closing) return;
   closing = true;
 
-  app.log.info({ signal }, 'остановка Router Control');
+  app.log.info({ signal }, 'остановка RoutX');
   try {
     await worker.stop();
     await app.close();
@@ -111,7 +111,7 @@ try {
       agent_signature: config.RC_AGENT_REQUIRE_SIGNATURE,
       bootstrap: bootstrap.created ? 'created' : bootstrap.reason,
     },
-    'Router Control запущен',
+    'RoutX запущен',
   );
 
   if (!bootstrap.created && bootstrap.reason === 'no_credentials') {

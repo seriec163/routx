@@ -397,7 +397,7 @@ return view.extend({
 		else {
 			node.appendChild(document.createTextNode(server));
 		}
-		node.appendChild(E('small', {}, 'Router Control'));
+		node.appendChild(E('small', {}, 'RoutX'));
 	},
 
 	paint: function(root, status) {
@@ -514,7 +514,7 @@ return view.extend({
 		}
 
 		r.footer.textContent = [
-			'Router Control',
+			'RoutX',
 			'последний опрос: ' + humanAge(secondsSince(st.last_poll_at)),
 			'статус обновлён: ' + humanAge(secondsSince(st.updated_at))
 		].join(' · ');
@@ -740,7 +740,7 @@ return view.extend({
 
 	handleRevokeDevice: function(root, device) {
 		ui.showModal('Удалить устройство?', [
-			E('p', {}, 'Телефон «' + (device.name || 'Устройство') + '» выйдет из панели Router Control. Чтобы вернуть доступ, отсканируйте новый QR на этой странице.'),
+			E('p', {}, 'Телефон «' + (device.name || 'Устройство') + '» выйдет из панели RoutX. Чтобы вернуть доступ, отсканируйте новый QR на этой странице.'),
 			E('div', { 'class': 'right' }, [
 				E('button', {
 					'class': 'btn',
@@ -829,7 +829,7 @@ return view.extend({
 				E('div', {}, [
 					E('div', { 'class': 'jn-mobile-title' }, 'Мобильный доступ'),
 					E('div', { 'class': 'jn-mobile-text' },
-						'QR открывает панель Router Control на телефоне и сразу входит владельцем роутера. ' +
+						'QR открывает панель RoutX на телефоне и сразу входит владельцем роутера. ' +
 						'Ссылка одноразовая и действует 5 минут. Новый QR добавляет ещё один телефон и не отключает предыдущие.')
 				]),
 				E('div', { 'class': 'jn-mobile-actions' }, [ qrButton, qrStatus ])

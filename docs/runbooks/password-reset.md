@@ -5,7 +5,7 @@
 Ссылка создаётся в разделе **«Пользователи» → «Пригласить»**. Формат:
 
 ```text
-https://router-control.example/#/invite/<token>
+https://routx.example/#/invite/<token>
 ```
 
 Токен находится во фрагменте (`#`), поэтому не попадает в журналы reverse proxy.
@@ -33,7 +33,7 @@ https://router-control.example/#/invite/<token>
 Ссылка:
 
 ```text
-https://router-control.example/#/reset-password/<token>
+https://routx.example/#/reset-password/<token>
 ```
 
 * действует 1 час;
@@ -53,7 +53,7 @@ https://router-control.example/#/reset-password/<token>
 Если в системе нет другого администратора, используется CLI на сервере:
 
 ```sh
-npm run password-reset -w @router-control/server -- admin@example.com
+npm run password-reset -w @routx/server -- admin@example.com
 ```
 
 В production-контейнере:

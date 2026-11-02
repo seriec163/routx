@@ -132,7 +132,7 @@ export async function registerDiagnosticsRoutes(
 
     const body =
       row.report_text ??
-      ['Router Control — диагностический отчёт', JSON.stringify(row.report, null, 2)].join('\n\n');
+      ['RoutX — диагностический отчёт', JSON.stringify(row.report, null, 2)].join('\n\n');
 
     reply.type('text/plain; charset=utf-8');
     reply.header(

@@ -184,7 +184,7 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
 
   app.get('/healthz', async () => ({
     status: 'ok',
-    service: 'router-control',
+    service: 'routx',
     version: APP_VERSION,
     uptime_s: Math.round(process.uptime()),
     now: new Date().toISOString(),
@@ -238,7 +238,7 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
     try {
       const schemaVersion = await deps.db.getSchemaVersion();
       return {
-        name: 'router-control',
+        name: 'routx',
         version: APP_VERSION,
         api_version: 'v1',
         schema_version: schemaVersion,

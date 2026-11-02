@@ -93,7 +93,7 @@ export async function registerRouterRoutes(app: FastifyInstance, ctx: RouteConte
       const client = await pool.connect();
       try {
         await client.query('begin');
-        await client.query("select pg_advisory_xact_lock(hashtext('router-control:routers'))");
+        await client.query("select pg_advisory_xact_lock(hashtext('routx:routers'))");
 
         const ownerCount = await client.query<{ count: string }>(
           'select count(*)::text as count from routers where owner_id = $1 and archived_at is null',
@@ -774,7 +774,7 @@ export async function registerRouterRoutes(app: FastifyInstance, ctx: RouteConte
     );
 
     // Если шаблон привязан к существующей физической секции (например,
-    // router_control → gga), Router Control должен писать подключения именно
+    // router_control → gga), RoutX должен писать подключения именно
     // в неё. Иначе появится вторая секция с тем же подключением. Берём
     // физическую секцию из уже сопоставленного payload, а не угадываем по
     // старому managed_section.

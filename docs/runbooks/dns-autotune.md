@@ -11,7 +11,7 @@
 OpenWrt 24.10 / opkg:
 
 ```sh
-wget -qO /tmp/janusnew.ipk https://router-control.example/agent/janusnew.ipk
+wget -qO /tmp/janusnew.ipk https://routx.example/agent/janusnew.ipk
 opkg install --force-reinstall /tmp/janusnew.ipk
 /etc/init.d/janusnew restart
 ```
@@ -19,7 +19,7 @@ opkg install --force-reinstall /tmp/janusnew.ipk
 OpenWrt 25+ / apk:
 
 ```sh
-wget -qO /tmp/janusnew.apk https://router-control.example/agent/janusnew.apk
+wget -qO /tmp/janusnew.apk https://routx.example/agent/janusnew.apk
 apk add --upgrade --allow-untrusted --force-overwrite /tmp/janusnew.apk
 /etc/init.d/janusnew restart
 ```

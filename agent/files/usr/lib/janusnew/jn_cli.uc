@@ -6,7 +6,7 @@ const daemon = require("jn_daemon");
 const util = require("jn_util");
 
 function usage() {
-	print("JanusNew - Router Control agent\n\n");
+	print("JanusNew - RoutX agent\n\n");
 	print("Usage: janusnew <command>\n\n");
 	print("Commands:\n");
 	print("  status      Show agent status\n");

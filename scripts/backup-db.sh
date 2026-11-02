@@ -1,5 +1,5 @@
 #!/bin/sh
-# Шифрованный дамп PostgreSQL для Router Control.
+# Шифрованный дамп PostgreSQL для RoutX.
 # Запускается в контейнере backup (postgres:16-alpine + openssl).
 set -eu
 

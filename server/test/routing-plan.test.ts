@@ -13,7 +13,7 @@ function payload(overrides: Record<string, unknown> = {}) {
       router_control: {
         action: 'connection',
         enabled: '1',
-        label: 'Router Control',
+        label: 'RoutX',
         community_lists: ['youtube', 'telegram'],
       },
     },

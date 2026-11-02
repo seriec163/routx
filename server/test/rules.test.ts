@@ -41,7 +41,7 @@ describe('пресет шаблона без имени секции', () => {
           router_control: {
             action: 'bypass',
             enabled: '1',
-            label: 'Router Control',
+            label: 'RoutX',
             community_lists: ['youtube'],
           },
         },

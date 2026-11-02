@@ -99,7 +99,7 @@ export function provisioningUri(options: {
   email: string;
   issuer?: string;
 }): string {
-  const issuer = options.issuer ?? 'Router Control';
+  const issuer = options.issuer ?? 'RoutX';
   const label = encodeURIComponent(`${issuer}:${options.email}`);
   const params = new URLSearchParams({
     secret: options.secret,

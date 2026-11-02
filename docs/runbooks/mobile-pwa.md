@@ -3,7 +3,7 @@
 ## Где QR
 
 QR-код живёт **на самом роутере**: LuCI → **Служба → JanusNew** → «Показать QR для
-телефона». В панели Router Control QR не выпускается: ссылка должна появляться
+телефона». В панели RoutX QR не выпускается: ссылка должна появляться
 только у того, кто физически рядом с устройством.
 
 ## Как работает
@@ -30,7 +30,7 @@ QR-код живёт **на самом роутере**: LuCI → **Служба
 * Для установки PWA на iPhone/Android нужен **HTTPS**:
 
 ```env
-RC_PUBLIC_URL=https://router-control.example
+RC_PUBLIC_URL=https://routx.example
 RC_COOKIE_SECURE=true
 ```
 

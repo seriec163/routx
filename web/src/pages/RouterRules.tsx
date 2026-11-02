@@ -789,7 +789,7 @@ function ConnectionRow(props: {
           {connection.masked}
         </code>
         <span className="muted-text small">
-          {connection.managed ? 'Router Control' : 'вне Router Control'}
+          {connection.managed ? 'RoutX' : 'вне RoutX'}
           {connection.missing ? ' · нет на роутере' : ''}
         </span>
       </div>

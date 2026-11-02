@@ -1505,7 +1505,7 @@ export function RouterDetailPage({ id }: { id: string }) {
       {router.status === 'conflict' ? (
         <InfoBanner tone="warn">
           На роутере одновременно обнаружены Forkop и Prokop. Изменения запрещены: устраните конфликт
-          вручную, Router Control ничего не удаляет и не переустанавливает.
+          вручную, RoutX ничего не удаляет и не переустанавливает.
         </InfoBanner>
       ) : null}
       {router.status === 'unsupported' ? (
@@ -2148,7 +2148,7 @@ export function RouterDetailPage({ id }: { id: string }) {
         <div className="stack">
           <Panel
             title="Вариант sing-box"
-            subtitle="Prokop удаляет текущий пакет перед установкой нового варианта, затем ставит новый. При неудаче Router Control попробует вернуть предыдущий."
+            subtitle="Prokop удаляет текущий пакет перед установкой нового варианта, затем ставит новый. При неудаче RoutX попробует вернуть предыдущий."
           >
             <div className="kv">
               <span>Сейчас</span>
@@ -2517,7 +2517,7 @@ export function RouterDetailPage({ id }: { id: string }) {
           }
         >
           <InfoBanner>
-            Ссылка или компактный секрет записывается только в отдельную секцию Router Control.
+            Ссылка или компактный секрет записывается только в отдельную секцию RoutX.
             Существующие правила и подключения не перезаписываются.
           </InfoBanner>
           <Field label="Тип">
@@ -2649,7 +2649,7 @@ export function RouterDetailPage({ id }: { id: string }) {
         >
           <InfoBanner>
             Текущий секрет скрыт и не возвращается через API. Вставьте новую ссылку или компактный
-            секрет — Router Control заменит его и применит изменения на роутере.
+            секрет — RoutX заменит его и применит изменения на роутере.
           </InfoBanner>
           <Field label="Название">
             <TextInput value={editLabel} onChange={setEditLabel} />
@@ -2752,7 +2752,7 @@ export function RouterDetailPage({ id }: { id: string }) {
             />
           </Field>
           <p className="muted-text small">
-            Перед изменением создаётся снимок. Если применение не удастся, Router Control
+            Перед изменением создаётся снимок. Если применение не удастся, RoutX
             попробует вернуть предыдущую конфигурацию.
           </p>
         </Modal>
@@ -2927,7 +2927,7 @@ export function RouterDetailPage({ id }: { id: string }) {
                 Пока идёт установка, sing-box может быть временно недоступен — это ожидаемо.
               </p>
               <p className="muted-text">
-                Если новая версия не запустится, Router Control попробует автоматически вернуть{' '}
+                Если новая версия не запустится, RoutX попробует автоматически вернуть{' '}
                 {router.sing_box_previous_variant ?? router.sing_box_variant ?? 'предыдущий вариант'}.
                 Пользовательские подключения не изменяются.
               </p>

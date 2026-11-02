@@ -91,7 +91,7 @@ function agentContext(request: FastifyRequest): AgentAuthContext {
 }
 
 const INSTALL_SCRIPT = `#!/bin/sh
-# JanusNew installer for Router Control.
+# JanusNew installer for RoutX.
 # Usage: sh install.sh --server URL --token BINDING_TOKEN [--product prokop|forkop] [--sing-box tiny|stable|extended]
 set -eu
 

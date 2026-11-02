@@ -38,7 +38,7 @@ describe('служебные эндпоинты', () => {
     const response = await app.inject({ method: 'GET', url: '/healthz' });
 
     expect(response.statusCode).toBe(200);
-    expect(response.json()).toMatchObject({ status: 'ok', service: 'router-control' });
+    expect(response.json()).toMatchObject({ status: 'ok', service: 'routx' });
   });
 
   it('/readyz отвечает 200, когда БД доступна', async () => {
@@ -74,7 +74,7 @@ describe('служебные эндпоинты', () => {
 
     expect(response.statusCode).toBe(200);
     expect(response.json()).toMatchObject({
-      name: 'router-control',
+      name: 'routx',
       api_version: 'v1',
       schema_version: '1',
     });

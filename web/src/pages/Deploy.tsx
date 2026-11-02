@@ -151,7 +151,7 @@ export function DeployPage() {
       const result = await apiDownload('/api/v1/deploy/export', {
         method: 'POST',
         body: { passphrase: passphrase.trim() },
-        filenameHint: 'router-control.rcbackup',
+        filenameHint: 'routx.rcbackup',
       });
       toast.success(`Файл переноса сохранён (${formatBytes(result.size)})`);
     } catch (caught) {
@@ -422,7 +422,7 @@ export function DeployPage() {
 
                 {!preview.compatible ? (
                   <InfoBanner tone="warn">
-                    Файл создан более новой версией панели. Обновите Router Control на этом
+                    Файл создан более новой версией панели. Обновите RoutX на этом
                     сервере и повторите.
                   </InfoBanner>
                 ) : null}
@@ -472,7 +472,7 @@ export function DeployPage() {
       <Panel title="Как переехать без простоя">
         <ol className="bullets">
           <li>
-            На новом сервере установите Router Control с тем же доменом в <code>RC_PUBLIC_URL</code>{' '}
+            На новом сервере установите RoutX с тем же доменом в <code>RC_PUBLIC_URL</code>{' '}
             и тем же <code>POSTGRES_PASSWORD</code>. Панель поднимется с пустой базой.
           </li>
           <li>

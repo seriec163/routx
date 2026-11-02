@@ -72,7 +72,7 @@ jobs:
         run: docker compose config --quiet
 
       - name: Docker image build
-        run: docker build --tag router-control:ci .
+        run: docker build --tag routx:ci .
 
       - name: Runtime smoke test
         run: |

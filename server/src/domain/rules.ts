@@ -46,7 +46,7 @@ export interface AgentSection {
 
 export interface RuleConnectionView {
   kind: 'subscription' | 'link';
-  /** Идентификатор router_connections, если подключение ведёт Router Control. */
+  /** Идентификатор router_connections, если подключение ведёт RoutX. */
   id: string | null;
   /** Имя UCI-секции подписки (для внешних подписок). */
   name: string | null;
@@ -58,7 +58,7 @@ export interface RuleConnectionView {
   tail: string;
   managed: boolean;
   enabled: boolean;
-  /** Подключение сохранено в Router Control, но не найдено на роутере. */
+  /** Подключение сохранено в RoutX, но не найдено на роутере. */
   missing: boolean;
 }
 
@@ -338,11 +338,11 @@ export function buildRuleViews(input: {
       const mask = connectionMask(connection.value);
       if (mask.tail !== '' && externalTails.has(mask.tail)) {
         warnings.push(
-          `Подписка «${connection.label}» совпадает с внешней подпиской …${mask.tail}. На роутере она лежит вне Router Control; заменяйте и удаляйте именно внешнюю запись.`,
+          `Подписка «${connection.label}» совпадает с внешней подпиской …${mask.tail}. На роутере она лежит вне RoutX; заменяйте и удаляйте именно внешнюю запись.`,
         );
         continue;
       }
-      warnings.push(`Подписка «${connection.label}» сохранена в Router Control, но не найдена на роутере.`);
+      warnings.push(`Подписка «${connection.label}» сохранена в RoutX, но не найдена на роутере.`);
       subscriptions.push({
         kind: 'subscription',
         id: connection.id,
@@ -360,7 +360,7 @@ export function buildRuleViews(input: {
     for (const connection of storedLinks) {
       if (usedLinkIds.has(connection.id)) continue;
       const mask = connectionMask(connection.value);
-      warnings.push(`Ссылка «${connection.label}» сохранена в Router Control, но не найдена на роутере.`);
+      warnings.push(`Ссылка «${connection.label}» сохранена в RoutX, но не найдена на роутере.`);
       links.push({
         kind: 'link',
         id: connection.id,
