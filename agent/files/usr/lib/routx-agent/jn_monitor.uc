@@ -64,6 +64,18 @@ function is_group(proxy) {
 	return kind == "selector" || kind == "urltest" || kind == "fallback";
 }
 
+function pick_single(proxies, sections) {
+	if (type(proxies) != "object")
+		return "";
+	for (let section in sections) {
+		let tag = section + "-out";
+		let proxy = proxies[tag];
+		if (type(proxy) == "object" && !is_group(proxy))
+			return tag;
+	}
+	return "";
+}
+
 function pick_group(proxies, sections) {
 	if (type(proxies) != "object")
 		return "";
@@ -183,7 +195,20 @@ function probe_proxy(product, force) {
 	let sections = enabled_sections(product);
 	let group = pick_group(proxies.value.proxies, sections);
 	if (group == "") {
-		result.detail = "нет группы прокси";
+		let single = pick_single(proxies.value.proxies, sections);
+		if (single == "") {
+			result.detail = "нет группы прокси";
+			return result;
+		}
+		let res = cli(product, [ "clash_api", "get_proxy_latency", single, "5000" ], 20);
+		let delay = res.ok && res.value.success !== false && measured(res.value.delay)
+			? res.value.delay : null;
+		result.total_tags = 1;
+		result.failed_tags = delay == null ? 1 : 0;
+		result.latency_ms = delay;
+		result.proxy_health = delay == null ? "dead" : "healthy";
+		result.detail = "подключение " + group_display(product, single) +
+			(delay == null ? ": не отвечает" : ": " + delay + " мс");
 		return result;
 	}
 	let display_group = group_display(product, group);
