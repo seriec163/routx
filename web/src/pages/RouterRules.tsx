@@ -225,7 +225,10 @@ export function RouterRulesPanel(props: {
     rule: RuleView;
     connection: RuleConnectionView | null;
   } | null>(null);
-  const [subscriptionTarget, setSubscriptionTarget] = useState<RuleView | null>(null);
+  const [subscriptionTarget, setSubscriptionTarget] = useState<{
+    rule: RuleView;
+    connection: RuleConnectionView | null;
+  } | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<{
     rule: RuleView;
     connection: RuleConnectionView;
@@ -685,7 +688,11 @@ export function RouterRulesPanel(props: {
                 }
                 onDelete={(connection) => requestDelete(rule, connection)}
                 onSelectProxy={selectProxy}
-                onManageSubscription={isPodkop ? () => setSubscriptionTarget(rule) : undefined}
+                onManageSubscription={
+                  isPodkop
+                    ? (connection) => setSubscriptionTarget({ rule, connection: connection ?? null })
+                    : undefined
+                }
                 onToggle={() => requestToggle(rule)}
                 disabled={!online}
               />
@@ -734,7 +741,8 @@ export function RouterRulesPanel(props: {
       {subscriptionTarget ? (
         <SubscriptionModal
           routerId={props.routerId}
-          rule={subscriptionTarget}
+          rule={subscriptionTarget.rule}
+          connection={subscriptionTarget.connection}
           onClose={() => setSubscriptionTarget(null)}
           onDone={async () => {
             setSubscriptionTarget(null);
@@ -815,7 +823,7 @@ function RuleCard(props: {
   onReplace: (connection: RuleConnectionView) => void;
   onDelete: (connection: RuleConnectionView) => void;
   onSelectProxy?: (section: string, connection: RuleConnectionView) => void;
-  onManageSubscription?: () => void;
+  onManageSubscription?: (connection?: RuleConnectionView) => void;
   onToggle: () => void;
 }) {
   const { rule } = props;
@@ -936,7 +944,7 @@ function RuleCard(props: {
                   disabled={props.disabled}
                   onReplace={() => props.onReplace(connection)}
                   onDelete={() => props.onDelete(connection)}
-                  onExpand={props.onManageSubscription}
+                  onExpand={() => props.onManageSubscription?.(connection)}
                 />
               ))}
               {rule.links.map((connection) => (
@@ -947,6 +955,9 @@ function RuleCard(props: {
                   onReplace={() => props.onReplace(connection)}
                   onDelete={() => props.onDelete(connection)}
                   onConfigure={connection.synthetic ? props.onEdit : undefined}
+                  onSubscribe={
+                    connection.synthetic ? () => props.onManageSubscription?.() : undefined
+                  }
                 />
               ))}
             </ul>
@@ -967,7 +978,7 @@ function RuleCard(props: {
           <Button
             size="sm"
             variant="ghost"
-            onClick={props.onManageSubscription}
+            onClick={() => props.onManageSubscription?.()}
             disabled={props.disabled}
           >
             Подписка
@@ -988,6 +999,7 @@ function ConnectionRow(props: {
   onDelete: () => void;
   onExpand?: () => void;
   onConfigure?: () => void;
+  onSubscribe?: () => void;
 }) {
   const { connection } = props;
   return (
@@ -1014,6 +1026,11 @@ function ConnectionRow(props: {
         {props.onConfigure ? (
           <Button size="sm" variant="ghost" onClick={props.onConfigure} disabled={props.disabled}>
             Изменить JSON
+          </Button>
+        ) : null}
+        {props.onSubscribe ? (
+          <Button size="sm" variant="ghost" onClick={props.onSubscribe} disabled={props.disabled}>
+            Подписка
           </Button>
         ) : null}
         {props.onExpand ? (
@@ -2095,10 +2112,12 @@ function RuleDiffModal(props: {
 function SubscriptionModal(props: {
   routerId: string;
   rule: RuleView;
+  connection?: RuleConnectionView | null;
   onClose: () => void;
   onDone: () => Promise<void>;
 }) {
   const toast = useToast();
+  const source = props.connection ?? null;
   const [catalog, setCatalog] = useState<CatalogSubscription[]>([]);
   const [catalogId, setCatalogId] = useState('');
   const [url, setUrl] = useState('');
@@ -2113,12 +2132,12 @@ function SubscriptionModal(props: {
       .catch(() => undefined);
   }, []);
 
-  async function submit(): Promise<void> {
+  async function submit(useExisting = false): Promise<void> {
     setBusy(true);
     setError(null);
     setJob(null);
     try {
-      if (!catalogId && url.trim() === '') {
+      if (!useExisting && !catalogId && url.trim() === '') {
         throw new Error('Выберите подписку из каталога или вставьте URL');
       }
       const response = await api<{
@@ -2131,7 +2150,11 @@ function SubscriptionModal(props: {
         body: {
           section: props.rule.section,
           mode,
-          ...(catalogId ? { subscription_id: catalogId } : { url: url.trim() }),
+          ...(useExisting
+            ? { connection_id: source?.id }
+            : catalogId
+              ? { subscription_id: catalogId }
+              : { url: url.trim() }),
         },
       });
       setJob(response.job);
@@ -2160,7 +2183,12 @@ function SubscriptionModal(props: {
           <Button variant="ghost" onClick={props.onClose} disabled={busy}>
             Отмена
           </Button>
-          <Button onClick={() => void submit()} busy={busy}>
+          {source?.id ? (
+            <Button variant="subtle" onClick={() => void submit(true)} busy={busy}>
+              Обновить текущую
+            </Button>
+          ) : null}
+          <Button onClick={() => void submit(false)} busy={busy}>
             {mode === 'replace' ? 'Заменить ссылки' : 'Добавить ссылки'}
           </Button>
         </>
@@ -2171,6 +2199,12 @@ function SubscriptionModal(props: {
         Podkop не поддерживает подписки. RoutX скачает её и сохранит ссылки как отдельные
         подключения секции «{props.rule.section}».
       </p>
+      {source ? (
+        <InfoBanner tone="info">
+          Текущая подписка: «{source.label}». «Обновить текущую» перечитает её по сохранённой
+          ссылке. Чтобы сменить адрес, выберите каталог или вставьте новый URL.
+        </InfoBanner>
+      ) : null}
       <Field label="Режим">
         <Select value={mode} onChange={(value) => setMode(value as 'add' | 'replace')}>
           <option value="add">Добавить к текущим подключениям</option>

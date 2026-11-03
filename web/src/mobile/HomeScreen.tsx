@@ -1,4 +1,4 @@
-﻿import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { api, errorMessage } from '../lib/api';
 import { PRODUCT_LABEL } from '../lib/format';
 import { waitForJob } from '../lib/jobs';
@@ -13,11 +13,11 @@ import { requestCamera } from './camera';
 import { updatePwa } from './pwaUpdate';
 
 const STATUS: Record<string, { label: string; tone: string }> = {
-  online: { label: 'РџРѕРґРєР»СЋС‡РµРЅРѕ', tone: 'ok' },
-  offline: { label: 'РќРµС‚ СЃРІСЏР·Рё', tone: 'bad' },
-  pending: { label: 'РћР¶РёРґР°РµС‚ РїСЂРёРІСЏР·РєРё', tone: 'warn' },
-  unsupported: { label: 'РќРµ РїРѕРґРґРµСЂР¶РёРІР°РµС‚СЃСЏ', tone: 'warn' },
-  conflict: { label: 'РљРѕРЅС„Р»РёРєС‚ РїСЂРѕРґСѓРєС‚РѕРІ', tone: 'bad' },
+  online: { label: 'Подключено', tone: 'ok' },
+  offline: { label: 'Нет связи', tone: 'bad' },
+  pending: { label: 'Ожидает привязки', tone: 'warn' },
+  unsupported: { label: 'Не поддерживается', tone: 'warn' },
+  conflict: { label: 'Конфликт продуктов', tone: 'bad' },
 };
 
 interface ConnectionEntry extends RuleConnectionView {
@@ -44,6 +44,10 @@ export function HomeScreen() {
   const [subscriptionBusy, setSubscriptionBusy] = useState(false);
   const [subscriptionJob, setSubscriptionJob] = useState<Job | null>(null);
   const [subscriptionError, setSubscriptionError] = useState<string | null>(null);
+  const [subscriptionSource, setSubscriptionSource] = useState<{
+    id: string;
+    label: string;
+  } | null>(null);
   const [outboundTarget, setOutboundTarget] = useState<ConnectionEntry | null>(null);
   const [outboundValue, setOutboundValue] = useState('');
   const [outboundBusy, setOutboundBusy] = useState(false);
@@ -82,7 +86,7 @@ export function HomeScreen() {
         await waitForJob(started.job);
         if (!cancelled) await rules.reload();
       } catch {
-        // РљСЌС€ СѓР¶Рµ РїРѕРєР°Р·Р°РЅ; РѕС€РёР±РєР° live-С‡С‚РµРЅРёСЏ РЅРµ Р±Р»РѕРєРёСЂСѓРµС‚ СЌРєСЂР°РЅ.
+        // Кэш уже показан; ошибка live-чтения не блокирует экран.
       }
     })();
     return () => {
@@ -94,7 +98,7 @@ export function HomeScreen() {
   const protocolChips = useMemo(() => {
     const chips = new Set<string>();
     for (const rule of rules.data?.rules ?? []) {
-      if (rule.subscriptions.length > 0) chips.add('РџРѕРґРїРёСЃРєР°');
+      if (rule.subscriptions.length > 0) chips.add('Подписка');
       if (rule.links.length > 0) chips.add('VLESS');
     }
     return [...chips];
@@ -161,10 +165,10 @@ export function HomeScreen() {
       setJob(started.job);
       const done = await waitForJob(started.job, setJob);
       if (done.status !== 'success') {
-        throw new Error(done.error?.message ?? 'РќРµ СѓРґР°Р»РѕСЃСЊ РїРµСЂРµРєР»СЋС‡РёС‚СЊ РїРѕРґРєР»СЋС‡РµРЅРёРµ');
+        throw new Error(done.error?.message ?? 'Не удалось переключить подключение');
       }
       await reload();
-      toast.success('РђРєС‚РёРІРЅРѕРµ РїРѕРґРєР»СЋС‡РµРЅРёРµ РїРµСЂРµРєР»СЋС‡РµРЅРѕ');
+      toast.success('Активное подключение переключено');
     } catch (caught) {
       toast.error(errorMessage(caught));
     } finally {
@@ -173,18 +177,23 @@ export function HomeScreen() {
     }
   }
 
-  function openSubscription(section?: string): void {
+  function openSubscription(section?: string, connection?: ConnectionEntry): void {
     const first = section ?? rules.data?.rules[0]?.section ?? 'main';
     setSubscriptionSection(first);
     setSubscriptionUrl('');
     setSubscriptionMode('replace');
     setSubscriptionError(null);
     setSubscriptionJob(null);
+    setSubscriptionSource(
+      connection?.kind === 'subscription' && connection.id
+        ? { id: connection.id, label: connection.label }
+        : null,
+    );
     setSubscriptionOpen(true);
   }
 
-  async function saveSubscription(): Promise<void> {
-    if (!selected || subscriptionUrl.trim() === '') return;
+  async function saveSubscription(useExisting = false): Promise<void> {
+    if (!selected || (!useExisting && subscriptionUrl.trim() === '')) return;
     setSubscriptionBusy(true);
     setSubscriptionError(null);
     setSubscriptionJob(null);
@@ -196,16 +205,18 @@ export function HomeScreen() {
           body: {
             section: subscriptionSection,
             mode: subscriptionMode,
-            url: subscriptionUrl.trim(),
+            ...(useExisting
+              ? { connection_id: subscriptionSource?.id }
+              : { url: subscriptionUrl.trim() }),
           },
         },
       );
       setSubscriptionJob(started.job);
       const done = await waitForJob(started.job, undefined, 600_000);
       if (done.status !== 'success') {
-        throw new Error(done.error?.message ?? 'РќРµ СѓРґР°Р»РѕСЃСЊ РїСЂРёРјРµРЅРёС‚СЊ РїРѕРґРїРёСЃРєСѓ');
+        throw new Error(done.error?.message ?? 'Не удалось применить подписку');
       }
-      toast.success('РџРѕРґРїРёСЃРєР° СЂР°Р·РѕР±СЂР°РЅР° РЅР° РїРѕРґРєР»СЋС‡РµРЅРёСЏ');
+      toast.success('Подписка разобрана на подключения');
       setSubscriptionOpen(false);
       await rules.reload();
     } catch (caught) {
@@ -241,9 +252,9 @@ export function HomeScreen() {
       setOutboundJob(started.job);
       const done = await waitForJob(started.job, undefined, 300_000);
       if (done.status !== 'success') {
-        throw new Error(done.error?.message ?? 'РќРµ СѓРґР°Р»РѕСЃСЊ СЃРѕС…СЂР°РЅРёС‚СЊ outbound JSON');
+        throw new Error(done.error?.message ?? 'Не удалось сохранить outbound JSON');
       }
-      toast.success('Outbound JSON СЃРѕС…СЂР°РЅС‘РЅ');
+      toast.success('Outbound JSON сохранён');
       setOutboundTarget(null);
       await rules.reload();
     } catch (caught) {
@@ -263,10 +274,10 @@ export function HomeScreen() {
       setJob(started.job);
       const done = await waitForJob(started.job, setJob);
       if (done.status !== 'success') {
-        throw new Error(done.error?.message ?? 'РџСЂРѕРІРµСЂРєР° РЅРµ СѓРґР°Р»Р°СЃСЊ');
+        throw new Error(done.error?.message ?? 'Проверка не удалась');
       }
       await reload();
-      toast.success('Р—Р°РґРµСЂР¶РєР° РѕР±РЅРѕРІР»РµРЅР°');
+      toast.success('Задержка обновлена');
     } catch (caught) {
       toast.error(errorMessage(caught));
     } finally {
@@ -277,7 +288,7 @@ export function HomeScreen() {
 
   async function restartVpn(): Promise<void> {
     if (!selected || action !== 'idle') return;
-    if (!window.confirm(`РџРµСЂРµР·Р°РїСѓСЃС‚РёС‚СЊ VPN РЅР° СЂРѕСѓС‚РµСЂРµ В«${selected.name}В»?`)) return;
+    if (!window.confirm(`Перезапустить VPN на роутере «${selected.name}»?`)) return;
     setAction('vpn');
     try {
       const started = await api<{ job: Job }>(`/api/v1/routers/${selected.id}/service`, {
@@ -287,10 +298,10 @@ export function HomeScreen() {
       setJob(started.job);
       const done = await waitForJob(started.job, setJob);
       if (done.status !== 'success') {
-        throw new Error(done.error?.message ?? 'РЎР»СѓР¶Р±Р° РЅРµ РїРµСЂРµР·Р°РїСѓСЃС‚РёР»Р°СЃСЊ');
+        throw new Error(done.error?.message ?? 'Служба не перезапустилась');
       }
       await reload();
-      toast.success('VPN РїРµСЂРµР·Р°РїСѓС‰РµРЅ');
+      toast.success('VPN перезапущен');
     } catch (caught) {
       toast.error(errorMessage(caught));
     } finally {
@@ -302,7 +313,7 @@ export function HomeScreen() {
   async function rebootRouter(): Promise<void> {
     if (!selected || action !== 'idle') return;
     const confirmed = window.confirm(
-      `РџРµСЂРµР·Р°РіСЂСѓР·РёС‚СЊ СЂРѕСѓС‚РµСЂ В«${selected.name}В»?\n\nРЎРІСЏР·СЊ РїСЂРѕРїР°РґС‘С‚ РїСЂРёРјРµСЂРЅРѕ РЅР° РјРёРЅСѓС‚Сѓ. VPN, РїСЂР°РІРёР»Р° Рё РїРѕРґРєР»СЋС‡РµРЅРёСЏ СЃРѕС…СЂР°РЅСЏС‚СЃСЏ.`,
+      `Перезагрузить роутер «${selected.name}»?\n\nСвязь пропадёт примерно на минуту. VPN, правила и подключения сохранятся.`,
     );
     if (!confirmed) return;
     setAction('reboot');
@@ -313,9 +324,9 @@ export function HomeScreen() {
       setJob(started.job);
       const done = await waitForJob(started.job, setJob);
       if (done.status !== 'success') {
-        throw new Error(done.error?.message ?? 'Р РѕСѓС‚РµСЂ РЅРµ РїСЂРёРЅСЏР» РєРѕРјР°РЅРґСѓ');
+        throw new Error(done.error?.message ?? 'Роутер не принял команду');
       }
-      toast.info('Р РѕСѓС‚РµСЂ РїРµСЂРµР·Р°РіСЂСѓР¶Р°РµС‚СЃСЏ. Р­С‚Рѕ Р·Р°Р№РјС‘С‚ РѕРєРѕР»Рѕ РјРёРЅСѓС‚С‹.');
+      toast.info('Роутер перезагружается. Это займёт около минуты.');
       await reload();
     } catch (caught) {
       toast.error(errorMessage(caught));
@@ -331,17 +342,17 @@ export function HomeScreen() {
     if (value === '') {
       setReplaceError(
         replaceTarget.kind === 'subscription'
-          ? 'Р’СЃС‚Р°РІСЊС‚Рµ РЅРѕРІСѓСЋ СЃСЃС‹Р»РєСѓ РїРѕРґРїРёСЃРєРё https://вЂ¦'
-          : 'Р’СЃС‚Р°РІСЊС‚Рµ РЅРѕРІСѓСЋ СЃСЃС‹Р»РєСѓ РїРѕРґРєР»СЋС‡РµРЅРёСЏ',
+          ? 'Вставьте новую ссылку подписки https://…'
+          : 'Вставьте новую ссылку подключения',
       );
       return;
     }
     if (replaceTarget.kind === 'subscription' && !/^https?:\/\//i.test(value)) {
-      setReplaceError('РЎСЃС‹Р»РєР° РїРѕРґРїРёСЃРєРё РґРѕР»Р¶РЅР° РЅР°С‡РёРЅР°С‚СЊСЃСЏ СЃ http:// РёР»Рё https://');
+      setReplaceError('Ссылка подписки должна начинаться с http:// или https://');
       return;
     }
     if (!replaceTarget.id && !replaceTarget.name && !replaceTarget.hash) {
-      setReplaceError('РќРµ СѓРґР°Р»РѕСЃСЊ РѕРїСЂРµРґРµР»РёС‚СЊ РїРѕРґРєР»СЋС‡РµРЅРёРµ РЅР° СЂРѕСѓС‚РµСЂРµ. РћР±РЅРѕРІРёС‚Рµ СЃРїРёСЃРѕРє.');
+      setReplaceError('Не удалось определить подключение на роутере. Обновите список.');
       return;
     }
 
@@ -377,10 +388,10 @@ export function HomeScreen() {
       setReplaceJob(response.job);
       const done = await waitForJob(response.job, setReplaceJob);
       if (done.status !== 'success') {
-        throw new Error(done.error?.message ?? 'РќРµ СѓРґР°Р»РѕСЃСЊ Р·Р°РјРµРЅРёС‚СЊ РїРѕРґРєР»СЋС‡РµРЅРёРµ');
+        throw new Error(done.error?.message ?? 'Не удалось заменить подключение');
       }
       await rules.reload();
-      toast.success('РџРѕРґРєР»СЋС‡РµРЅРёРµ Р·Р°РјРµРЅРµРЅРѕ');
+      toast.success('Подключение заменено');
       setReplaceTarget(null);
       setReplaceValue('');
     } catch (caught) {
@@ -392,7 +403,7 @@ export function HomeScreen() {
   }
 
   async function openQrScanner(): Promise<void> {
-    // Р—Р°РїСЂР°С€РёРІР°РµРј РєР°РјРµСЂСѓ РїСЂСЏРјРѕ РёР· Р¶РµСЃС‚Р°, С‡С‚РѕР±С‹ РЅРµ С‚СЂРµР±РѕРІР°Р»РѕСЃСЊ РІС‚РѕСЂРѕРµ РЅР°Р¶Р°С‚РёРµ.
+    // Запрашиваем камеру прямо из жеста, чтобы не требовалось второе нажатие.
     await requestCamera();
     navigate('/app/routers?add=1');
   }
@@ -415,7 +426,7 @@ export function HomeScreen() {
           <button
             type="button"
             className="m-iconbtn"
-            aria-label="РЎРєР°РЅРёСЂРѕРІР°С‚СЊ QR"
+            aria-label="Сканировать QR"
             onClick={() => void openQrScanner()}
           >
             <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -430,19 +441,19 @@ export function HomeScreen() {
         {!standalone && !installBannerHidden ? (
           <div className="m-installbar">
             <div className="m-installbar-text">
-              <strong>РЈСЃС‚Р°РЅРѕРІРёС‚СЊ RoutX</strong>
-              <span>РРєРѕРЅРєР° РЅР° РґРѕРјР°С€РЅРµРј СЌРєСЂР°РЅРµ, Р±РµР· Р°РґСЂРµСЃРЅРѕР№ СЃС‚СЂРѕРєРё</span>
+              <strong>Установить RoutX</strong>
+              <span>Иконка на домашнем экране, без адресной строки</span>
             </div>
             <button type="button" className="m-mini" onClick={() => setGuideOpen(true)}>
-              РРЅСЃС‚СЂСѓРєС†РёСЏ
+              Инструкция
             </button>
             <button
               type="button"
               className="m-installbar-close"
-              aria-label="РЎРєСЂС‹С‚СЊ"
+              aria-label="Скрыть"
               onClick={() => setInstallBannerHidden(true)}
             >
-              Г—
+              ×
             </button>
           </div>
         ) : null}
@@ -453,7 +464,7 @@ export function HomeScreen() {
           onClick={() => setSheet(true)}
           aria-haspopup="listbox"
         >
-          <span>{selected?.name ?? (loading ? 'Р—Р°РіСЂСѓР·РєР°вЂ¦' : 'РќРµС‚ СЂРѕСѓС‚РµСЂРѕРІ')}</span>
+          <span>{selected?.name ?? (loading ? 'Загрузка…' : 'Нет роутеров')}</span>
           <svg viewBox="0 0 24 24" aria-hidden="true">
             <path d="m7 10 5 5 5-5" />
           </svg>
@@ -462,7 +473,7 @@ export function HomeScreen() {
         <section className="m-card m-hero">
           <span className={`m-status m-status-${status?.tone ?? 'warn'}`}>
             <span className="m-dot" />
-            {status?.label ?? 'РќРµС‚ РґР°РЅРЅС‹С…'}
+            {status?.label ?? 'Нет данных'}
           </span>
           <div className="m-clock">{time}</div>
           <div className="m-date">{date}</div>
@@ -470,11 +481,11 @@ export function HomeScreen() {
             <button type="button" className="m-link" onClick={() => navigate('/app/routers')}>
               {PRODUCT_LABEL[selected.product] ?? selected.product}
               {selected.product_version ? ` ${selected.product_version}` : ''}
-              {selected.sing_box_version ? ` В· sing-box ${selected.sing_box_version}` : ''}
+              {selected.sing_box_version ? ` · sing-box ${selected.sing_box_version}` : ''}
             </button>
           ) : (
             <button type="button" className="m-link" onClick={() => navigate('/app/routers')}>
-              Р”РѕР±Р°РІСЊС‚Рµ СЂРѕСѓС‚РµСЂ, С‡С‚РѕР±С‹ РЅР°С‡Р°С‚СЊ
+              Добавьте роутер, чтобы начать
             </button>
           )}
         </section>
@@ -492,7 +503,7 @@ export function HomeScreen() {
         {connections.length > 0 ? (
           <section className="m-card m-list">
             <div className="m-list-head">
-              <span className="m-label">РџРѕРґРєР»СЋС‡РµРЅРёСЏ В· {connections.length}</span>
+              <span className="m-label">Подключения · {connections.length}</span>
               <div className="m-list-actions">
                 <button
                   type="button"
@@ -500,11 +511,11 @@ export function HomeScreen() {
                   onClick={() => void rules.reload()}
                   disabled={rules.loading}
                 >
-                  РћР±РЅРѕРІРёС‚СЊ
+                  Обновить
                 </button>
                 {selected?.product === 'podkop' ? (
                   <button type="button" className="m-mini" onClick={() => openSubscription()}>
-                    РџРѕРґРїРёСЃРєР°
+                    Подписка
                   </button>
                 ) : null}
               </div>
@@ -513,7 +524,7 @@ export function HomeScreen() {
               const active = group.items.find((item) => item.active);
               return (
                 <div className="m-select-row" key={group.section}>
-                  <span className="m-label">РђРєС‚РёРІРЅРѕРµ В· {group.sectionLabel}</span>
+                  <span className="m-label">Активное · {group.sectionLabel}</span>
                   <select
                     className="m-select"
                     value={active?.proxy_tag ?? ''}
@@ -529,7 +540,7 @@ export function HomeScreen() {
                       <option key={connection.proxy_tag} value={connection.proxy_tag}>
                         {connection.label}
                         {connection.delay_ms != null
-                          ? ` В· ${Math.round(connection.delay_ms)} РјСЃ`
+                          ? ` · ${Math.round(connection.delay_ms)} мс`
                           : ''}
                       </option>
                     ))}
@@ -550,17 +561,17 @@ export function HomeScreen() {
                     {connection.synthetic
                       ? 'JSON outbound'
                       : connection.kind === 'subscription'
-                        ? 'РџРѕРґРїРёСЃРєР°'
+                        ? 'Подписка'
                         : 'VLESS'}{' '}
-                    В· {connection.sectionLabel} В·{' '}
+                    · {connection.sectionLabel} ·{' '}
                     {connection.synthetic ? connection.host : connection.masked}
-                    {connection.missing ? ' В· РЅРµС‚ РЅР° СЂРѕСѓС‚РµСЂРµ' : ''}
-                    {!connection.enabled ? ' В· РІС‹РєР»СЋС‡РµРЅРѕ' : ''}
-                    {connection.kind === 'link' && connection.active ? ' В· Р°РєС‚РёРІРЅРѕ' : ''}
+                    {connection.missing ? ' · нет на роутере' : ''}
+                    {!connection.enabled ? ' · выключено' : ''}
+                    {connection.kind === 'link' && connection.active ? ' · активно' : ''}
                     {connection.kind === 'link' && connection.delay_ms != null
-                      ? ` В· ${Math.round(connection.delay_ms)} РјСЃ`
+                      ? ` · ${Math.round(connection.delay_ms)} мс`
                       : connection.kind === 'link' && connection.alive === false
-                        ? ' В· РЅРµ РѕС‚РІРµС‡Р°РµС‚'
+                        ? ' · не отвечает'
                         : ''}
                   </span>
                 </span>
@@ -571,26 +582,38 @@ export function HomeScreen() {
                     onClick={() => void selectConnection(connection)}
                     disabled={!selected || selected.status !== 'online' || action !== 'idle'}
                   >
-                    {action === 'select' ? 'РџРµСЂРµРєР»СЋС‡Р°РµРјвЂ¦' : 'Р’С‹Р±СЂР°С‚СЊ'}
+                    {action === 'select' ? 'Переключаем…' : 'Выбрать'}
                   </button>
                 ) : null}
                 {connection.synthetic ? (
-                  <button
-                    type="button"
-                    className="m-mini"
-                    onClick={() => openOutbound(connection)}
-                    disabled={!selected || selected.status !== 'online'}
-                  >
-                    РР·РјРµРЅРёС‚СЊ JSON
-                  </button>
+                  <>
+                    <button
+                      type="button"
+                      className="m-mini"
+                      onClick={() => openOutbound(connection)}
+                      disabled={!selected || selected.status !== 'online'}
+                    >
+                      Изменить JSON
+                    </button>
+                    {selected?.product === 'podkop' ? (
+                      <button
+                        type="button"
+                        className="m-mini"
+                        onClick={() => openSubscription(connection.section)}
+                        disabled={!selected || selected.status !== 'online'}
+                      >
+                        Подписка
+                      </button>
+                    ) : null}
+                  </>
                 ) : selected?.product === 'podkop' && connection.kind === 'subscription' ? (
                   <button
                     type="button"
                     className="m-mini"
-                    onClick={() => openSubscription(connection.section)}
+                    onClick={() => openSubscription(connection.section, connection)}
                     disabled={!selected || selected.status !== 'online'}
                   >
-                    РР·РјРµРЅРёС‚СЊ РїРѕРґРїРёСЃРєСѓ
+                    Изменить подписку
                   </button>
                 ) : (
                   <button
@@ -607,7 +630,7 @@ export function HomeScreen() {
                       (!connection.id && !connection.name && !connection.hash)
                     }
                   >
-                    Р—Р°РјРµРЅРёС‚СЊ
+                    Заменить
                   </button>
                 )}
               </div>
@@ -617,9 +640,9 @@ export function HomeScreen() {
 
         <section className="m-card m-latency">
           <div>
-            <div className="m-label">Р—Р°РґРµСЂР¶РєР° В· Р°РєС‚РёРІРЅС‹Р№ СЃРµСЂРІРµСЂ</div>
+            <div className="m-label">Задержка · активный сервер</div>
             <div className="m-latency-value">
-              {latency != null ? Math.round(latency) : 'вЂ”'} <small>РјСЃ</small>
+              {latency != null ? Math.round(latency) : '—'} <small>мс</small>
             </div>
           </div>
           <button
@@ -628,21 +651,21 @@ export function HomeScreen() {
             onClick={() => void testPing()}
             disabled={!selected || action !== 'idle'}
           >
-            {action === 'ping' ? 'РџСЂРѕРІРµСЂСЏРµРјвЂ¦' : 'РўРµСЃС‚ РїРёРЅРіР°'}
+            {action === 'ping' ? 'Проверяем…' : 'Тест пинга'}
           </button>
         </section>
 
         <section className="m-card m-ipcard">
           <div className="m-iprow">
-            <span className="m-label">IP Р±РµР· VPN</span>
-            <code className="m-ip">{selected?.direct_ip ?? 'вЂ”'}</code>
+            <span className="m-label">IP без VPN</span>
+            <code className="m-ip">{selected?.direct_ip ?? '—'}</code>
           </div>
           <div className="m-iprow">
-            <span className="m-label">IP С‡РµСЂРµР· VPN</span>
-            <code className="m-ip">{selected?.vpn_ip ?? 'вЂ”'}</code>
+            <span className="m-label">IP через VPN</span>
+            <code className="m-ip">{selected?.vpn_ip ?? '—'}</code>
           </div>
           <p className="m-footnote">
-            Р‘РµР· VPN вЂ” РїСЂСЏРјРѕР№ РІС‹С…РѕРґ СЂРѕСѓС‚РµСЂР°, С‡РµСЂРµР· VPN вЂ” РІС‹С…РѕРґ Р°РєС‚РёРІРЅРѕРіРѕ СЃРµСЂРІРµСЂР°.
+            Без VPN — прямой выход роутера, через VPN — выход активного сервера.
           </p>
         </section>
 
@@ -656,23 +679,23 @@ export function HomeScreen() {
 
         <section className="m-card m-update-card">
           <div className="m-update-main">
-            <span className="m-label">РџСЂРёР»РѕР¶РµРЅРёРµ RoutX</span>
-            <strong>РћР±РЅРѕРІРёС‚СЊ Р±РµР· РїРµСЂРµСѓСЃС‚Р°РЅРѕРІРєРё</strong>
+            <span className="m-label">Приложение RoutX</span>
+            <strong>Обновить без переустановки</strong>
             <p className="m-note">
-              Р—Р°РіСЂСѓР·РёС‚ СЃРІРµР¶СѓСЋ РІРµСЂСЃРёСЋ Рё РїРµСЂРµР·Р°РїСѓСЃС‚РёС‚ РїСЂРёР»РѕР¶РµРЅРёРµ. Р’С…РѕРґ, РЅР°СЃС‚СЂРѕР№РєРё Рё РїСЂРёРІСЏР·РєР°
-              СЃРѕС…СЂР°РЅСЏС‚СЃСЏ вЂ” QR СЃРєР°РЅРёСЂРѕРІР°С‚СЊ Р·Р°РЅРѕРІРѕ РЅРµ РЅСѓР¶РЅРѕ.
+              Загрузит свежую версию и перезапустит приложение. Вход, настройки и привязка
+              сохранятся — QR сканировать заново не нужно.
             </p>
             <span className="m-build">
-              РЎР±РѕСЂРєР°{' '}
+              Сборка{' '}
               {new Date(__BUILD_TIME__).toLocaleString('ru-RU', {
                 day: '2-digit',
                 month: '2-digit',
                 hour: '2-digit',
                 minute: '2-digit',
               })}
-              {' В· '}
-              {standalone ? 'PWA' : 'Р±СЂР°СѓР·РµСЂ'}
-              {' В· '}
+              {' · '}
+              {standalone ? 'PWA' : 'браузер'}
+              {' · '}
               {window.innerHeight} px
             </span>
           </div>
@@ -682,7 +705,7 @@ export function HomeScreen() {
             onClick={() => void refreshPwa()}
             disabled={pwaBusy}
           >
-            {pwaBusy ? 'РћР±РЅРѕРІР»СЏРµРјвЂ¦' : 'РћР±РЅРѕРІРёС‚СЊ'}
+            {pwaBusy ? 'Обновляем…' : 'Обновить'}
           </button>
         </section>
 
@@ -695,7 +718,7 @@ export function HomeScreen() {
           <svg viewBox="0 0 24 24" aria-hidden="true">
             <path d="M12 5v14M5 12h14" />
           </svg>
-          Р”РѕР±Р°РІРёС‚СЊ Р°РґСЂРµСЃ РґР»СЏ РѕР±С…РѕРґР°
+          Добавить адрес для обхода
         </button>
 
         <div className="m-row2">
@@ -709,7 +732,7 @@ export function HomeScreen() {
               <path d="M4 12a8 8 0 1 0 2.6-5.9" />
               <path d="M4 4v4h4" />
             </svg>
-            <span>{action === 'vpn' ? 'РџРµСЂРµР·Р°РїСѓСЃРєвЂ¦' : 'РџРµСЂРµР·Р°РіСЂСѓР·РёС‚СЊ VPN'}</span>
+            <span>{action === 'vpn' ? 'Перезапуск…' : 'Перезагрузить VPN'}</span>
           </button>
           <button
             type="button"
@@ -721,17 +744,17 @@ export function HomeScreen() {
               <path d="M12 3v9" />
               <path d="M6.5 7a8 8 0 1 0 11 0" />
             </svg>
-            <span>{action === 'reboot' ? 'РџРµСЂРµР·Р°РіСЂСѓР·РєР°вЂ¦' : 'РџРµСЂРµР·Р°РіСЂСѓР·РёС‚СЊ СЂРѕСѓС‚РµСЂ'}</span>
+            <span>{action === 'reboot' ? 'Перезагрузка…' : 'Перезагрузить роутер'}</span>
           </button>
         </div>
 
-        <JobProgress job={job} label="Р’С‹РїРѕР»РЅСЏРµРј РЅР° СЂРѕСѓС‚РµСЂРµ" />
+        <JobProgress job={job} label="Выполняем на роутере" />
 
         {routers.length === 0 && !loading ? (
           <div className="m-card m-empty">
-            <p>Р РѕСѓС‚РµСЂРѕРІ РїРѕРєР° РЅРµС‚.</p>
+            <p>Роутеров пока нет.</p>
             <button type="button" className="m-link" onClick={() => navigate('/app/routers')}>
-              Р”РѕР±Р°РІРёС‚СЊ СЂРѕСѓС‚РµСЂ
+              Добавить роутер
             </button>
           </div>
         ) : null}
@@ -748,14 +771,14 @@ export function HomeScreen() {
         >
           <div className="m-sheet" onClick={(event) => event.stopPropagation()}>
             <div className="m-sheet-grip" />
-            <h2 className="m-sheet-title">Р—Р°РјРµРЅРёС‚СЊ РїРѕРґРєР»СЋС‡РµРЅРёРµ</h2>
+            <h2 className="m-sheet-title">Заменить подключение</h2>
             <p className="m-note">
-              РЎРµРєС†РёСЏ В«{replaceTarget.sectionLabel}В». РЎРµР№С‡Р°СЃ РёСЃРїРѕР»СЊР·СѓРµС‚СЃСЏ:{' '}
-              <strong>{replaceTarget.label}</strong> В· {replaceTarget.masked}
+              Секция «{replaceTarget.sectionLabel}». Сейчас используется:{' '}
+              <strong>{replaceTarget.label}</strong> · {replaceTarget.masked}
             </p>
             {replaceError ? <p className="m-note m-note-warn">{replaceError}</p> : null}
             <label className="m-inputlabel" htmlFor="replace-value">
-              {replaceTarget.kind === 'subscription' ? 'РќРѕРІР°СЏ СЃСЃС‹Р»РєР° РїРѕРґРїРёСЃРєРё' : 'РќРѕРІР°СЏ СЃСЃС‹Р»РєР° VLESS'}
+              {replaceTarget.kind === 'subscription' ? 'Новая ссылка подписки' : 'Новая ссылка VLESS'}
             </label>
             <textarea
               id="replace-value"
@@ -766,23 +789,23 @@ export function HomeScreen() {
               placeholder={
                 replaceTarget.kind === 'subscription'
                   ? 'https://example.com/subscription'
-                  : 'vless://вЂ¦'
+                  : 'vless://…'
               }
               spellCheck={false}
               disabled={replaceBusy}
             />
             <p className="m-note">
-              РќРѕРІР°СЏ СЃСЃС‹Р»РєР° Р·Р°РјРµРЅРёС‚ С‚РµРєСѓС‰СѓСЋ РІ СЃРµРєС†РёРё В«{replaceTarget.sectionLabel}В». РЎС‚Р°СЂС‹Р№ СЃРµСЂРІРµСЂ
-              РїРµСЂРµСЃС‚Р°РЅРµС‚ РёСЃРїРѕР»СЊР·РѕРІР°С‚СЊСЃСЏ.
+              Новая ссылка заменит текущую в секции «{replaceTarget.sectionLabel}». Старый сервер
+              перестанет использоваться.
             </p>
-            <JobProgress job={replaceJob} label="Р—Р°РјРµРЅСЏРµРј РЅР° СЂРѕСѓС‚РµСЂРµ" />
+            <JobProgress job={replaceJob} label="Заменяем на роутере" />
             <button
               type="button"
               className="m-action m-action-sm"
               onClick={() => void replaceConnection()}
               disabled={replaceBusy || replaceValue.trim() === ''}
             >
-              {replaceBusy ? 'Р—Р°РјРµРЅСЏРµРјвЂ¦' : 'Р—Р°РјРµРЅРёС‚СЊ'}
+              {replaceBusy ? 'Заменяем…' : 'Заменить'}
             </button>
             <button
               type="button"
@@ -790,7 +813,7 @@ export function HomeScreen() {
               onClick={() => setReplaceTarget(null)}
               disabled={replaceBusy}
             >
-              РћС‚РјРµРЅР°
+              Отмена
             </button>
           </div>
         </div>
@@ -805,13 +828,19 @@ export function HomeScreen() {
         >
           <div className="m-sheet" onClick={(event) => event.stopPropagation()}>
             <div className="m-sheet-grip" />
-            <h2 className="m-sheet-title">РџРѕРґРїРёСЃРєР° Podkop</h2>
+            <h2 className="m-sheet-title">Подписка Podkop</h2>
             <p className="m-note">
-              RoutX СЃРєР°С‡Р°РµС‚ РїРѕРґРїРёСЃРєСѓ Рё СЃРѕС…СЂР°РЅРёС‚ СЃСЃС‹Р»РєРё РєР°Рє РѕС‚РґРµР»СЊРЅС‹Рµ РїРѕРґРєР»СЋС‡РµРЅРёСЏ. URL РїРѕРґРїРёСЃРєРё
-              РЅР° СЂРѕСѓС‚РµСЂ РЅРµ РїРµСЂРµРґР°С‘С‚СЃСЏ.
+              RoutX скачает подписку и сохранит ссылки как отдельные подключения. URL подписки
+              на роутер не передаётся.
             </p>
+            {subscriptionSource ? (
+              <p className="m-note">
+                Текущая подписка: «{subscriptionSource.label}». Кнопка «Обновить текущую»
+                перечитает её по сохранённой ссылке.
+              </p>
+            ) : null}
             <label className="m-inputlabel" htmlFor="sub-section">
-              РЎРµРєС†РёСЏ
+              Секция
             </label>
             <select
               id="sub-section"
@@ -827,7 +856,7 @@ export function HomeScreen() {
               ))}
             </select>
             <label className="m-inputlabel" htmlFor="sub-mode">
-              Р РµР¶РёРј
+              Режим
             </label>
             <select
               id="sub-mode"
@@ -838,11 +867,11 @@ export function HomeScreen() {
               }
               disabled={subscriptionBusy}
             >
-              <option value="add">Р”РѕР±Р°РІРёС‚СЊ Рє С‚РµРєСѓС‰РёРј</option>
-              <option value="replace">Р—Р°РјРµРЅРёС‚СЊ РІСЃРµ РїРѕРґРєР»СЋС‡РµРЅРёСЏ</option>
+              <option value="add">Добавить к текущим</option>
+              <option value="replace">Заменить все подключения</option>
             </select>
             <label className="m-inputlabel" htmlFor="sub-url">
-              URL РїРѕРґРїРёСЃРєРё
+              URL подписки
             </label>
             <textarea
               id="sub-url"
@@ -856,20 +885,30 @@ export function HomeScreen() {
             />
             {subscriptionMode === 'replace' ? (
               <p className="m-note m-note-warn">
-                РўРµРєСѓС‰РёРµ СЃСЃС‹Р»РєРё РІС‹Р±СЂР°РЅРЅРѕР№ СЃРµРєС†РёРё Р±СѓРґСѓС‚ Р·Р°РјРµРЅРµРЅС‹ СЃСЃС‹Р»РєР°РјРё РёР· РїРѕРґРїРёСЃРєРё.
+                Текущие ссылки выбранной секции будут заменены ссылками из подписки.
               </p>
             ) : null}
             {subscriptionError ? (
               <p className="m-note m-note-warn">{subscriptionError}</p>
             ) : null}
-            <JobProgress job={subscriptionJob} label="Р Р°Р·Р±РёСЂР°РµРј РїРѕРґРїРёСЃРєСѓ" />
+            <JobProgress job={subscriptionJob} label="Разбираем подписку" />
+            {subscriptionSource ? (
+              <button
+                type="button"
+                className="m-action m-action-sm"
+                onClick={() => void saveSubscription(true)}
+                disabled={subscriptionBusy}
+              >
+                {subscriptionBusy ? 'Применяем…' : 'Обновить текущую подписку'}
+              </button>
+            ) : null}
             <button
               type="button"
               className="m-action m-action-sm"
-              onClick={() => void saveSubscription()}
+              onClick={() => void saveSubscription(false)}
               disabled={subscriptionBusy || subscriptionUrl.trim() === ''}
             >
-              {subscriptionBusy ? 'РџСЂРёРјРµРЅСЏРµРјвЂ¦' : 'РџСЂРёРјРµРЅРёС‚СЊ РїРѕРґРїРёСЃРєСѓ'}
+              {subscriptionBusy ? 'Применяем…' : 'Применить подписку'}
             </button>
             <button
               type="button"
@@ -877,7 +916,7 @@ export function HomeScreen() {
               onClick={() => setSubscriptionOpen(false)}
               disabled={subscriptionBusy}
             >
-              РћС‚РјРµРЅР°
+              Отмена
             </button>
           </div>
         </div>
@@ -894,27 +933,27 @@ export function HomeScreen() {
             <div className="m-sheet-grip" />
             <h2 className="m-sheet-title">Outbound JSON</h2>
             <p className="m-note">
-              РЎРµРєС†РёСЏ В«{outboundTarget.sectionLabel}В». РўРµРєСѓС‰РёР№ JSON СЃРєСЂС‹С‚; РІСЃС‚Р°РІСЊС‚Рµ РѕР±СЉРµРєС‚
-              С†РµР»РёРєРѕРј. РџСЂРё РѕС€РёР±РєРµ Podkop РѕС‚РєР°С‚РёС‚ РєРѕРЅС„РёРіСѓСЂР°С†РёСЋ.
+              Секция «{outboundTarget.sectionLabel}». Текущий JSON скрыт; вставьте объект
+              целиком. При ошибке Podkop откатит конфигурацию.
             </p>
             <textarea
               className="m-input m-textarea"
               rows={10}
               value={outboundValue}
               onChange={(event) => setOutboundValue(event.target.value)}
-              placeholder={'{"type":"vless","server":"example.com",вЂ¦}'}
+              placeholder={'{"type":"vless","server":"example.com",…}'}
               spellCheck={false}
               disabled={outboundBusy}
             />
             {outboundError ? <p className="m-note m-note-warn">{outboundError}</p> : null}
-            <JobProgress job={outboundJob} label="РџСЂРѕРІРµСЂСЏРµРј Рё РїСЂРёРјРµРЅСЏРµРј" />
+            <JobProgress job={outboundJob} label="Проверяем и применяем" />
             <button
               type="button"
               className="m-action m-action-sm"
               onClick={() => void saveOutbound()}
               disabled={outboundBusy || outboundValue.trim() === ''}
             >
-              {outboundBusy ? 'РџСЂРёРјРµРЅСЏРµРјвЂ¦' : 'РЎРѕС…СЂР°РЅРёС‚СЊ JSON'}
+              {outboundBusy ? 'Применяем…' : 'Сохранить JSON'}
             </button>
             <button
               type="button"
@@ -922,7 +961,7 @@ export function HomeScreen() {
               onClick={() => setOutboundTarget(null)}
               disabled={outboundBusy}
             >
-              РћС‚РјРµРЅР°
+              Отмена
             </button>
           </div>
         </div>
@@ -932,7 +971,7 @@ export function HomeScreen() {
         <div className="m-overlay" role="dialog" aria-modal="true" onClick={() => setSheet(false)}>
           <div className="m-sheet" onClick={(event) => event.stopPropagation()}>
             <div className="m-sheet-grip" />
-            <h2 className="m-sheet-title">Р’С‹Р±РµСЂРёС‚Рµ СЂРѕСѓС‚РµСЂ</h2>
+            <h2 className="m-sheet-title">Выберите роутер</h2>
             {routers.map((router) => (
               <button
                 type="button"
@@ -947,7 +986,7 @@ export function HomeScreen() {
                 <span className="m-pick-name">{router.name}</span>
                 <span className="m-pick-meta">
                   {PRODUCT_LABEL[router.product] ?? router.product}
-                  {router.latency_ms != null ? ` В· ${Math.round(router.latency_ms)} РјСЃ` : ''}
+                  {router.latency_ms != null ? ` · ${Math.round(router.latency_ms)} мс` : ''}
                 </span>
               </button>
             ))}
@@ -959,7 +998,7 @@ export function HomeScreen() {
                 navigate('/app/routers');
               }}
             >
-              + Р”РѕР±Р°РІРёС‚СЊ СЂРѕСѓС‚РµСЂ
+              + Добавить роутер
             </button>
           </div>
         </div>
