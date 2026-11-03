@@ -472,7 +472,7 @@ function access_check(product, target) {
 	if (tag == "")
 		return { ok: false, error: "no_active_proxy", message: "Не выбран активный прокси" };
 
-	let res = cli(product, [ "clash_api", "get_proxy_latency", tag, "5000", target ], 20);
+	let res = product_api.proxy_latency(product, tag, "5000", target);
 	if (!res.ok)
 		return { ok: false, error: "proxy_check_failed", message: res.error };
 	if (res.value.success === false) {
