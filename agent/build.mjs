@@ -12,6 +12,13 @@ const stage = join(dist, 'stage');
 
 const version = (await readFile(join(root, 'VERSION'), 'utf8')).trim();
 
+// Версия в пакете и в probe должны совпадать, иначе панель показывает
+// старое значение и не предлагает обновление.
+const clientSource = await readFile(join(files, 'usr/lib/routx-agent/jn_client.uc'), 'utf8');
+if (!clientSource.includes(`const VERSION = "${version}";`)) {
+  throw new Error(`agent/VERSION (${version}) не совпадает с jn_client.uc`);
+}
+
 await mkdir(dist, { recursive: true });
 
 // Все файлы агента — текст. На Windows рабочие копии могут быть с CRLF:
