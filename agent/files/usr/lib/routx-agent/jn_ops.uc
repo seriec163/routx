@@ -418,7 +418,7 @@ function list_connections(product, args) {
 			if (util.as_string(sect.section) != section)
 				continue;
 			let info = connection_mask(sect.url);
-			push(subscriptions, { name: sname, host: info.host, tail: info.tail });
+			push(subscriptions, { name: sname, tag: trim(util.as_string(sect.tag)), host: info.host, tail: info.tail });
 		}
 	}
 
@@ -769,6 +769,15 @@ function subscription_links(product, section, proxies, existing, subscriptions) 
 		let prefix = group_tag + "/";
 		if (substr(label, 0, length(prefix)) == prefix)
 			label = substr(label, length(prefix));
+		// Провайдер подписки добавляет свой tag: sub2/<имя сервера>.
+		for (let subscription in subscriptions) {
+			let tag = trim(util.as_string(subscription.tag));
+			let sub_prefix = tag + "/";
+			if (tag != "" && substr(label, 0, length(sub_prefix)) == sub_prefix) {
+				label = substr(label, length(sub_prefix));
+				break;
+			}
+		}
 		let delay = proxy_last_delay(info);
 		push(links, {
 			index: index_value++,
