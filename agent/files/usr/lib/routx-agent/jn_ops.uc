@@ -122,6 +122,21 @@ function podkop_log_tail() {
 	return util.truncate_text(util.mask_secrets(join(" | ", tail)), 900);
 }
 
+function podkop_temp_config_error() {
+	let entries = fs.lsdir("/tmp") || [];
+	for (let name in entries) {
+		if (substr(name, 0, 4) != "tmp.")
+			continue;
+		let path = "/tmp/" + name;
+		if (!util.file_exists(path) || util.file_size(path) == 0)
+			continue;
+		let res = run.run([ "sing-box", "check", "-c", path ], 60);
+		if (!res.ok)
+			return "temp " + path + ": " + run.error_text(res);
+	}
+	return "";
+}
+
 // Проверка результата reload для Podkop: конфиг sing-box должен проходить
 // `sing-box check`, а служба — реально работать. Иначе сервер откатит снимок.
 function podkop_reload_check() {
@@ -147,6 +162,9 @@ function podkop_reload_check() {
 		let parsed = util.json_parse(status.stdout);
 		if (type(parsed) != "object" || int(parsed.running) != 1) {
 			tail = podkop_log_tail();
+			let temp = podkop_temp_config_error();
+			if (temp != "")
+				tail = tail + " | " + temp;
 			return { ok: false, error: "sing_box_not_running" + (tail != "" ? ": " + tail : "") };
 		}
 	}
