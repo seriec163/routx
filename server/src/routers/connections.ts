@@ -244,7 +244,7 @@ export async function registerRouterConnectionRoutes(
         type: 'manage_connection',
         routerId: router.id,
         requestedBy: auth.userId,
-        timeoutSeconds: 240,
+        timeoutSeconds: 600,
         payload: {
           section: body.section ?? router.managed_section ?? 'router_control',
           action: body.action,
@@ -375,7 +375,7 @@ export async function registerRouterConnectionRoutes(
         routerId: params.id,
         requestedBy: auth.userId,
         payload: { reason: 'connection_add', section },
-        timeoutSeconds: 240,
+        timeoutSeconds: 600,
       });
 
       await audit(pool, {
@@ -486,7 +486,7 @@ export async function registerRouterConnectionRoutes(
         routerId: params.id,
         requestedBy: auth.userId,
         payload: { reason: 'connection_update', section: row.section },
-        timeoutSeconds: 240,
+        timeoutSeconds: 600,
       });
 
       await audit(pool, {
@@ -565,7 +565,7 @@ export async function registerRouterConnectionRoutes(
       routerId: params.id,
       requestedBy: auth.userId,
       payload: { reason: 'connection_delete', section },
-      timeoutSeconds: 240,
+      timeoutSeconds: 600,
     });
 
     await audit(pool, {
@@ -656,7 +656,19 @@ export async function registerRouterConnectionRoutes(
       const fresh = parsed.links.filter((link) => !existingLinks.has(link));
 
       if (fresh.length === 0) {
-        return { imported: 0, total: parsed.total, skipped: parsed.skipped, job: null };
+        const job = await enqueueJob(pool, {
+          type: 'connections_apply',
+          routerId: router.id,
+          requestedBy: auth.userId,
+          timeoutSeconds: 600,
+          payload: { reason: 'subscription_import_retry', section },
+        });
+        return {
+          imported: 0,
+          total: parsed.total,
+          skipped: parsed.skipped,
+          job: jobJson(job),
+        };
       }
 
       const client = await pool.connect();
@@ -696,7 +708,7 @@ export async function registerRouterConnectionRoutes(
         type: 'connections_apply',
         routerId: router.id,
         requestedBy: auth.userId,
-        timeoutSeconds: 240,
+        timeoutSeconds: 600,
         payload: { reason: 'subscription_import', section },
       });
 

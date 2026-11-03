@@ -739,7 +739,7 @@ export async function applyRun(ctx: HandlerContext, job: JobRow): Promise<Json> 
     await setJobPhase(ctx, job.id, 'reload', 60);
 
     // 3. Перезагрузка и проверка результата чтением состояния.
-    await runCommand(ctx, job, 'reload', {}, 90_000);
+    await runCommand(ctx, job, 'reload', {}, 300_000);
     await setJobPhase(ctx, job.id, 'verify', 85);
     const raw = await runCommand(ctx, job, 'read_state', {}, 60_000);
     const current = await saveState(ctx.pool, routerId, raw, 'verify');
@@ -800,7 +800,7 @@ export async function applyRun(ctx: HandlerContext, job: JobRow): Promise<Json> 
       await setJobPhase(ctx, job.id, 'rollback', 90);
       try {
         await runCommand(ctx, job, 'snapshot_restore', { snapshot: snapshotRef, kind: 'local' }, 180_000);
-        await runCommand(ctx, job, 'reload', {}, 90_000);
+        await runCommand(ctx, job, 'reload', {}, 300_000);
         const raw = await runCommand(ctx, job, 'read_state', {}, 60_000);
         await saveState(ctx.pool, routerId, raw, 'rollback');
         rollback = 'ok';
@@ -1173,7 +1173,7 @@ export async function restoreSnapshot(ctx: HandlerContext, job: JobRow): Promise
     { snapshot: snap.external_id ?? snapshotId, kind: snap.kind },
     180_000,
   );
-  await runCommand(ctx, job, 'reload', {}, 90_000);
+  await runCommand(ctx, job, 'reload', {}, 300_000);
   const raw = await runCommand(ctx, job, 'read_state', {}, 60_000);
   await saveState(ctx.pool, routerId, raw, 'restore');
 
@@ -1248,7 +1248,7 @@ export async function singBoxInstall(ctx: HandlerContext, job: JobRow): Promise<
       timeout,
     );
 
-    await runCommand(ctx, job, 'reload', {}, 90_000);
+    await runCommand(ctx, job, 'reload', {}, 300_000);
     const verify = await runCommand(ctx, job, 'verify', {}, 60_000);
     if (verify.ok === false) {
       throw new JobFailure('post_install_verify_failed', 'Проверка после установки не пройдена');
@@ -1331,7 +1331,7 @@ export async function singBoxInstall(ctx: HandlerContext, job: JobRow): Promise<
           { variant: rollbackVariant, version_tag: rollbackVersion },
           timeout,
         );
-        await runCommand(ctx, job, 'reload', {}, 90_000);
+        await runCommand(ctx, job, 'reload', {}, 300_000);
         const verify = await runCommand(ctx, job, 'verify', {}, 60_000);
         if (verify.ok === false) {
           rollback = 'failed';
@@ -1583,7 +1583,7 @@ export async function applyRouterConnections(ctx: HandlerContext, job: JobRow): 
     }
 
     await setJobPhase(ctx, job.id, 'reload', 70);
-    await runCommand(ctx, job, 'reload', {}, 90_000);
+    await runCommand(ctx, job, 'reload', {}, 300_000);
     await setJobPhase(ctx, job.id, 'verify', 85);
     const raw = await runCommand(ctx, job, 'read_state', {}, 60_000);
     const current = await saveState(ctx.pool, routerId, raw, 'connections');
@@ -1606,7 +1606,7 @@ export async function applyRouterConnections(ctx: HandlerContext, job: JobRow): 
       await setJobPhase(ctx, job.id, 'rollback', 90);
       try {
         await runCommand(ctx, job, 'snapshot_restore', { snapshot: snapshotRef, kind: 'local' }, 180_000);
-        await runCommand(ctx, job, 'reload', {}, 90_000);
+        await runCommand(ctx, job, 'reload', {}, 300_000);
         const raw = await runCommand(ctx, job, 'read_state', {}, 60_000);
         await saveState(ctx.pool, routerId, raw, 'connections_rollback');
         rollback = 'ok';
@@ -1811,7 +1811,7 @@ export async function manageConnection(ctx: HandlerContext, job: JobRow): Promis
         60_000,
       );
       await setJobPhase(ctx, job.id, 'reload', 60);
-      await runCommand(ctx, job, 'reload', {}, 90_000);
+      await runCommand(ctx, job, 'reload', {}, 300_000);
       await setJobPhase(ctx, job.id, 'verify', 85);
       const raw = await runCommand(ctx, job, 'read_state', {}, 60_000);
       await saveState(ctx.pool, routerId, raw, 'connection_manage');
@@ -1846,7 +1846,7 @@ export async function manageConnection(ctx: HandlerContext, job: JobRow): Promis
         await setJobPhase(ctx, job.id, 'rollback', 90);
         try {
           await runCommand(ctx, job, 'snapshot_restore', { snapshot: snapshotRef, kind: 'local' }, 180_000);
-          await runCommand(ctx, job, 'reload', {}, 90_000);
+          await runCommand(ctx, job, 'reload', {}, 300_000);
           const raw = await runCommand(ctx, job, 'read_state', {}, 60_000);
           await saveState(ctx.pool, routerId, raw, 'connection_manage_rollback');
           rollback = 'ok';
