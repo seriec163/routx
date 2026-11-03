@@ -4,6 +4,7 @@ import { api, errorMessage } from '../lib/api';
 import { waitForJob } from '../lib/jobs';
 import type { Job } from '../lib/types';
 import { JobProgress, useToast } from '../components/ui';
+import { haptic, hapticMove, hapticTap } from './haptics';
 
 interface Site {
   id: string;
@@ -200,6 +201,7 @@ export function SiteStatusCard({
   function beginDrag(event: ReactPointerEvent<HTMLButtonElement>, index: number): void {
     event.preventDefault();
     event.stopPropagation();
+    hapticTap();
     setDragIndex(index);
     setDragOver(index);
     event.currentTarget.setPointerCapture(event.pointerId);
@@ -212,11 +214,17 @@ export function SiteStatusCard({
       ?.closest<HTMLElement>('[data-site-index]');
     if (!target) return;
     const over = Number(target.dataset.siteIndex);
-    if (Number.isInteger(over)) setDragOver(over);
+    if (Number.isInteger(over) && over !== dragOver) {
+      haptic(6);
+      setDragOver(over);
+    }
   }
 
   function endDrag(event: ReactPointerEvent<HTMLButtonElement>): void {
-    if (dragIndex != null && dragOver != null) moveSiteTo(dragIndex, dragOver);
+    if (dragIndex != null && dragOver != null) {
+      moveSiteTo(dragIndex, dragOver);
+      hapticMove();
+    }
     setDragIndex(null);
     setDragOver(null);
     try {
@@ -285,9 +293,11 @@ export function SiteStatusCard({
                     if (event.key === 'ArrowUp') {
                       event.preventDefault();
                       moveSiteTo(index, index - 1);
+                      hapticMove();
                     } else if (event.key === 'ArrowDown') {
                       event.preventDefault();
                       moveSiteTo(index, index + 1);
+                      hapticMove();
                     }
                   }}
                 >

@@ -11,6 +11,8 @@ import { BypassScreen } from './BypassScreen';
 import { RoutersScreen } from './RoutersScreen';
 import { NotificationsHub } from './NotificationsSheet';
 import { useNotificationToasts } from '../lib/notifications';
+import { readScannedRouterIds, rememberScannedRouter } from './scannedRouters';
+import { hapticTap } from './haptics';
 
 const SELECTED_KEY = 'rc.mobile.router';
 
@@ -19,6 +21,7 @@ export interface MobileState {
   selected: MonitoringItem | null;
   selectedId: string | null;
   select: (id: string) => void;
+  rememberRouter: (id: string) => void;
   reload: () => Promise<void>;
   loading: boolean;
   error: string | null;
@@ -72,8 +75,13 @@ export function MobileApp() {
   const [selectedId, setSelectedId] = useState<string | null>(() =>
     window.localStorage.getItem(SELECTED_KEY),
   );
+  const [scannedIds, setScannedIds] = useState<string[]>(() => readScannedRouterIds());
 
-  const routers = useMemo(() => overview.data?.items ?? [], [overview.data]);
+  const allRouters = useMemo(() => overview.data?.items ?? [], [overview.data]);
+  const routers = useMemo(
+    () => allRouters.filter((item) => scannedIds.includes(item.id)),
+    [allRouters, scannedIds],
+  );
 
   // Выбранный роутер: сохранённый, иначе первый в сети.
   useEffect(() => {
@@ -100,6 +108,10 @@ export function MobileApp() {
     await overview.reload();
   }, [overview]);
 
+  const rememberRouter = useCallback((id: string) => {
+    setScannedIds(rememberScannedRouter(id));
+  }, []);
+
   const selected = routers.find((item) => item.id === selectedId) ?? null;
 
   const state: MobileState = {
@@ -107,20 +119,37 @@ export function MobileApp() {
     selected,
     selectedId,
     select: setSelectedId,
+    rememberRouter,
     reload,
     loading: overview.loading,
     error: overview.error,
   };
 
   const section = route.segments[1] ?? 'home';
-  const active = section === 'bypass' || section === 'routers' ? section : 'home';
+  const active = (
+    section === 'bypass' || section === 'routers' ? section : 'home'
+  ) as 'home' | 'bypass' | 'routers';
+  const order = { home: 0, bypass: 1, routers: 2 } as const;
+  const previous = useRef(active);
+  const direction =
+    previous.current === active ? 'none' : order[active] > order[previous.current] ? 'next' : 'prev';
+  useEffect(() => {
+    previous.current = active;
+  }, [active]);
 
   return (
     <MobileContext.Provider value={state}>
       <div className="m-app">
-        {active === 'home' ? <HomeScreen /> : null}
-        {active === 'bypass' ? <BypassScreen /> : null}
-        {active === 'routers' ? <RoutersScreen /> : null}
+        <div
+          className={`m-view ${
+            direction === 'next' ? 'm-view-next' : direction === 'prev' ? 'm-view-prev' : ''
+          }`}
+          key={active}
+        >
+          {active === 'home' ? <HomeScreen /> : null}
+          {active === 'bypass' ? <BypassScreen /> : null}
+          {active === 'routers' ? <RoutersScreen /> : null}
+        </div>
         <nav className="m-bottomnav" aria-label="Разделы приложения">
           <BottomLink to="/app" label="Главная" icon="home" active={active === 'home'} />
           <BottomLink to="/app/bypass" label="Обход" icon="route" active={active === 'bypass'} />
@@ -147,6 +176,7 @@ function BottomLink(props: {
       to={props.to}
       className={`m-navlink ${props.active ? 'm-navlink-active' : ''}`}
       aria-current={props.active ? 'page' : undefined}
+      onClick={() => hapticTap()}
     >
       <NavIcon name={props.icon} />
       <span>{props.label}</span>

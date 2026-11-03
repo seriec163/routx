@@ -118,7 +118,7 @@ export function RoutersScreen() {
 function AddRouterSheet({ onClose }: { onClose: () => void }) {
   const toast = useToast();
   const { reload } = useSession();
-  const { select } = useMobile();
+  const { select, rememberRouter } = useMobile();
   const [tab, setTab] = useState<'scan' | 'link'>('scan');
   const [text, setText] = useState('');
   const [busy, setBusy] = useState(false);
@@ -139,7 +139,9 @@ function AddRouterSheet({ onClose }: { onClose: () => void }) {
       });
       setStatus('Входим и выбираем роутер…');
       await reload();
-      select(result.router_id || parsed.routerId || '');
+      const routerId = result.router_id || parsed.routerId || '';
+      if (routerId) rememberRouter(routerId);
+      select(routerId);
       toast.success('Роутер добавлен');
       onClose();
       navigate('/app');

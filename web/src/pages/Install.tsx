@@ -4,6 +4,7 @@ import { Button, ErrorBanner, InfoBanner, Spinner } from '../components/ui';
 import { api, errorMessage } from '../lib/api';
 import { navigate } from '../lib/router';
 import { useSession } from '../session';
+import { rememberScannedRouter } from '../mobile/scannedRouters';
 
 interface BeforeInstallPromptEvent extends Event {
   prompt: () => Promise<void>;
@@ -83,6 +84,7 @@ export function InstallPage({
         setTargetRouter(response.router_id || routerId);
         if (response.router_id) {
           window.localStorage.setItem('rc.mobile.router', response.router_id);
+          rememberScannedRouter(response.router_id);
         }
         // Сразу в приложение: инструкция по установке живёт в верхней плашке
         // на главном экране, а не отдельной страницей после QR.

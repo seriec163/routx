@@ -26,6 +26,23 @@ export interface ParsedSubscription {
   links: string[];
   total: number;
   skipped: number;
+  title: string | null;
+}
+
+function decodeProfileTitle(raw: string | null): string | null {
+  if (!raw) return null;
+  let value = raw.trim();
+  if (value === '') return null;
+  try {
+    if (/^base64:/i.test(value)) {
+      value = Buffer.from(value.slice(7).trim(), 'base64').toString('utf8').trim();
+    } else if (/^urlencoded:/i.test(value)) {
+      value = decodeURIComponent(value.slice(11).trim());
+    }
+  } catch {
+    // заголовок повреждён — используем как есть
+  }
+  return value === '' ? null : value.slice(0, 120);
 }
 
 export function isUnsupportedPodkopLink(link: string): boolean {
@@ -106,7 +123,7 @@ export function parseSubscriptionBody(body: string): ParsedSubscription {
       'В подписке не найдено поддерживаемых Podkop ссылок (vless, ss, trojan, hysteria2, socks)',
     );
   }
-  return { links, total: links.length + skipped, skipped };
+  return { links, total: links.length + skipped, skipped, title: null };
 }
 
 export async function fetchSubscription(url: string): Promise<ParsedSubscription> {
@@ -139,7 +156,10 @@ export async function fetchSubscription(url: string): Promise<ParsedSubscription
     if (Buffer.byteLength(body, 'utf8') > MAX_BYTES) {
       throw badRequest('subscription_too_large', 'Ответ подписки слишком большой');
     }
-    return parseSubscriptionBody(body);
+    return {
+      ...parseSubscriptionBody(body),
+      title: decodeProfileTitle(response.headers.get('profile-title')),
+    };
   } catch (error) {
     if (error instanceof Error && error.name === 'AbortError') {
       throw badRequest('subscription_timeout', 'Подписка не ответила за 20 секунд');

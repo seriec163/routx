@@ -11,6 +11,7 @@ import { SiteStatusCard } from './SiteStatusCard';
 import { InstallGuide } from './InstallGuide';
 import { requestCamera } from './camera';
 import { updatePwa } from './pwaUpdate';
+import { hapticSuccess, hapticTap } from './haptics';
 
 const STATUS: Record<string, { label: string; tone: string }> = {
   online: { label: 'Подключено', tone: 'ok' },
@@ -48,6 +49,7 @@ export function HomeScreen() {
     id: string;
     label: string;
   } | null>(null);
+  const [subscriptionView, setSubscriptionView] = useState<ConnectionEntry | null>(null);
   const [outboundTarget, setOutboundTarget] = useState<ConnectionEntry | null>(null);
   const [outboundValue, setOutboundValue] = useState('');
   const [outboundBusy, setOutboundBusy] = useState(false);
@@ -118,6 +120,38 @@ export function HomeScreen() {
     return items;
   }, [rules.data]);
 
+  const subscriptionBySection = useMemo(() => {
+    const map = new Map<string, ConnectionEntry>();
+    for (const connection of connections) {
+      if (connection.kind !== 'subscription' || connection.synthetic) continue;
+      if (!map.has(connection.section)) map.set(connection.section, connection);
+    }
+    return map;
+  }, [connections]);
+
+  const subscriptionItems = useMemo(() => {
+    const map = new Map<string, ConnectionEntry[]>();
+    for (const connection of connections) {
+      if (connection.kind !== 'link' || connection.synthetic) continue;
+      if (!subscriptionBySection.has(connection.section)) continue;
+      const items = map.get(connection.section) ?? [];
+      items.push(connection);
+      map.set(connection.section, items);
+    }
+    return map;
+  }, [connections, subscriptionBySection]);
+
+  const mainConnections = useMemo(
+    () =>
+      connections.filter(
+        (connection) =>
+          connection.kind === 'subscription' ||
+          connection.synthetic ||
+          !subscriptionBySection.has(connection.section),
+      ),
+    [connections, subscriptionBySection],
+  );
+
   const selectGroups = useMemo(() => {
     const map = new Map<
       string,
@@ -125,6 +159,7 @@ export function HomeScreen() {
     >();
     for (const connection of connections) {
       if (!connection.selectable || !connection.proxy_tag) continue;
+      if (subscriptionBySection.has(connection.section)) continue;
       const group = map.get(connection.section) ?? {
         section: connection.section,
         sectionLabel: connection.sectionLabel,
@@ -134,7 +169,12 @@ export function HomeScreen() {
       map.set(connection.section, group);
     }
     return [...map.values()];
-  }, [connections]);
+  }, [connections, subscriptionBySection]);
+
+  const subscriptionViewItems = subscriptionView
+    ? subscriptionItems.get(subscriptionView.section) ?? []
+    : [];
+  const subscriptionViewActive = subscriptionViewItems.find((item) => item.active) ?? null;
 
   const status = selected ? STATUS[selected.status] ?? { label: selected.status, tone: 'warn' } : null;
   const latency = selected?.latency_ms;
@@ -154,6 +194,7 @@ export function HomeScreen() {
     )
       return;
     setAction('select');
+    hapticTap();
     try {
       const started = await api<{ job: Job }>(
         `/api/v1/routers/${selected.id}/proxies/select`,
@@ -167,7 +208,8 @@ export function HomeScreen() {
       if (done.status !== 'success') {
         throw new Error(done.error?.message ?? 'Не удалось переключить подключение');
       }
-      await reload();
+      await Promise.all([reload(), rules.reload()]);
+      hapticSuccess();
       toast.success('Активное подключение переключено');
     } catch (caught) {
       toast.error(errorMessage(caught));
@@ -503,7 +545,7 @@ export function HomeScreen() {
         {connections.length > 0 ? (
           <section className="m-card m-list">
             <div className="m-list-head">
-              <span className="m-label">Подключения · {connections.length}</span>
+              <span className="m-label">Подключения · {mainConnections.length}</span>
               <div className="m-list-actions">
                 <button
                   type="button"
@@ -548,93 +590,123 @@ export function HomeScreen() {
                 </div>
               );
             })}
-            {connections.map((connection) => (
-              <div
-                className="m-listrow"
-                key={`${connection.section}:${connection.kind}:${
-                  connection.id ?? connection.name ?? connection.hash
-                }`}
-              >
-                <span className="m-conn">
-                  <span className="m-conn-label">{connection.label}</span>
-                  <span className="m-conn-meta">
-                    {connection.synthetic
-                      ? 'JSON outbound'
-                      : connection.kind === 'subscription'
-                        ? 'Подписка'
-                        : 'VLESS'}{' '}
-                    · {connection.sectionLabel} ·{' '}
-                    {connection.synthetic ? connection.host : connection.masked}
-                    {connection.missing ? ' · нет на роутере' : ''}
-                    {!connection.enabled ? ' · выключено' : ''}
-                    {connection.kind === 'link' && connection.active ? ' · активно' : ''}
-                    {connection.kind === 'link' && connection.delay_ms != null
-                      ? ` · ${Math.round(connection.delay_ms)} мс`
-                      : connection.kind === 'link' && connection.alive === false
-                        ? ' · не отвечает'
-                        : ''}
-                  </span>
-                </span>
-                {connection.selectable && !connection.active ? (
-                  <button
-                    type="button"
-                    className="m-mini"
-                    onClick={() => void selectConnection(connection)}
-                    disabled={!selected || selected.status !== 'online' || action !== 'idle'}
+            {mainConnections.map((connection) => {
+              if (connection.kind === 'subscription') {
+                const items = subscriptionItems.get(connection.section) ?? [];
+                const active = items.find((item) => item.active);
+                const title =
+                  connection.label === 'Подписка' && connection.host
+                    ? connection.host
+                    : connection.label;
+                const open = () => {
+                  hapticTap();
+                  setSubscriptionView(connection);
+                };
+                return (
+                  <div
+                    className="m-listrow m-listrow-tap"
+                    key={`sub:${connection.section}:${connection.id ?? connection.name ?? ''}`}
+                    role="button"
+                    tabIndex={0}
+                    onClick={open}
+                    onKeyDown={(event) => {
+                      if (event.key === 'Enter' || event.key === ' ') {
+                        event.preventDefault();
+                        open();
+                      }
+                    }}
                   >
-                    {action === 'select' ? 'Переключаем…' : 'Выбрать'}
-                  </button>
-                ) : null}
-                {connection.synthetic ? (
-                  <>
+                    <span className="m-conn">
+                      <span className="m-conn-label">{title}</span>
+                      <span className="m-conn-meta">
+                        Подписка · {connection.sectionLabel} · {items.length} подключений
+                        {active ? ` · активно: ${active.label}` : ''}
+                        {connection.missing && selected?.product !== 'podkop'
+                          ? ' · нет на роутере'
+                          : ''}
+                      </span>
+                    </span>
+                    <svg className="m-chevron" viewBox="0 0 24 24" aria-hidden="true">
+                      <path d="m9 6 6 6-6 6" />
+                    </svg>
+                  </div>
+                );
+              }
+              return (
+                <div
+                  className="m-listrow"
+                  key={`${connection.section}:${connection.kind}:${
+                    connection.id ?? connection.name ?? connection.hash
+                  }`}
+                >
+                  <span className="m-conn">
+                    <span className="m-conn-label">{connection.label}</span>
+                    <span className="m-conn-meta">
+                      {connection.synthetic ? 'JSON outbound' : 'VLESS'} ·{' '}
+                      {connection.sectionLabel} ·{' '}
+                      {connection.synthetic ? connection.host : connection.masked}
+                      {connection.missing ? ' · нет на роутере' : ''}
+                      {!connection.enabled ? ' · выключено' : ''}
+                      {connection.kind === 'link' && connection.active ? ' · активно' : ''}
+                      {connection.kind === 'link' && connection.delay_ms != null
+                        ? ` · ${Math.round(connection.delay_ms)} мс`
+                        : connection.kind === 'link' && connection.alive === false
+                          ? ' · не отвечает'
+                          : ''}
+                    </span>
+                  </span>
+                  {connection.selectable && !connection.active ? (
                     <button
                       type="button"
                       className="m-mini"
-                      onClick={() => openOutbound(connection)}
-                      disabled={!selected || selected.status !== 'online'}
+                      onClick={() => void selectConnection(connection)}
+                      disabled={!selected || selected.status !== 'online' || action !== 'idle'}
                     >
-                      Изменить JSON
+                      {action === 'select' ? 'Переключаем…' : 'Выбрать'}
                     </button>
-                    {selected?.product === 'podkop' ? (
+                  ) : null}
+                  {connection.synthetic ? (
+                    <>
                       <button
                         type="button"
                         className="m-mini"
-                        onClick={() => openSubscription(connection.section)}
+                        onClick={() => openOutbound(connection)}
                         disabled={!selected || selected.status !== 'online'}
                       >
-                        Подписка
+                        Изменить JSON
                       </button>
-                    ) : null}
-                  </>
-                ) : selected?.product === 'podkop' && connection.kind === 'subscription' ? (
-                  <button
-                    type="button"
-                    className="m-mini"
-                    onClick={() => openSubscription(connection.section, connection)}
-                    disabled={!selected || selected.status !== 'online'}
-                  >
-                    Изменить подписку
-                  </button>
-                ) : (
-                  <button
-                    type="button"
-                    className="m-mini"
-                    onClick={() => {
-                      setReplaceTarget(connection);
-                      setReplaceValue('');
-                      setReplaceError(null);
-                    }}
-                    disabled={
-                      !selected ||
-                      selected.status !== 'online' ||
-                      (!connection.id && !connection.name && !connection.hash)
-                    }
-                  >
-                    Заменить
-                  </button>
-                )}
-              </div>
-            ))}
+                      {selected?.product === 'podkop' ? (
+                        <button
+                          type="button"
+                          className="m-mini"
+                          onClick={() => openSubscription(connection.section)}
+                          disabled={!selected || selected.status !== 'online'}
+                        >
+                          Подписка
+                        </button>
+                      ) : null}
+                    </>
+                  ) : (
+                    <button
+                      type="button"
+                      className="m-mini"
+                      onClick={() => {
+                        setReplaceTarget(connection);
+                        setReplaceValue('');
+                        setReplaceError(null);
+                      }}
+                      disabled={
+                        !selected ||
+                        selected.status !== 'online' ||
+                        (!connection.id && !connection.name && !connection.hash)
+                      }
+                    >
+                      Заменить
+                    </button>
+                  )}
+                </div>
+              );
+            })}
           </section>
         ) : null}
 
@@ -814,6 +886,112 @@ export function HomeScreen() {
               disabled={replaceBusy}
             >
               Отмена
+            </button>
+          </div>
+        </div>
+      ) : null}
+
+      {subscriptionView ? (
+        <div
+          className="m-overlay"
+          role="dialog"
+          aria-modal="true"
+          onClick={() => setSubscriptionView(null)}
+        >
+          <div className="m-sheet m-sheet-tall" onClick={(event) => event.stopPropagation()}>
+            <div className="m-sheet-grip" />
+            <div className="m-sheet-head">
+              <h2 className="m-sheet-title">
+                {subscriptionView.label === 'Подписка' && subscriptionView.host
+                  ? subscriptionView.host
+                  : subscriptionView.label}
+              </h2>
+              <button
+                type="button"
+                className="m-iconbtn"
+                aria-label="Закрыть"
+                onClick={() => setSubscriptionView(null)}
+              >
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <path d="M6 6l12 12M18 6 6 18" />
+                </svg>
+              </button>
+            </div>
+            <p className="m-note">
+              Подписка · {subscriptionView.sectionLabel} · {subscriptionViewItems.length}{' '}
+              подключений
+              {subscriptionViewActive ? ` · сейчас активно: ${subscriptionViewActive.label}` : ''}
+            </p>
+
+            {subscriptionViewItems.length === 0 ? (
+              <p className="m-note m-note-warn">
+                В этой подписке пока нет подключений на роутере. Обновите подписку или
+                дождитесь чтения состояния.
+              </p>
+            ) : (
+              <div className="m-card m-list">
+                {subscriptionViewItems.map((item) => (
+                  <div
+                    className={`m-listrow ${item.active ? 'm-listrow-active' : ''}`}
+                    key={item.id ?? item.hash ?? item.label}
+                  >
+                    <span className="m-conn">
+                      <span className="m-conn-label">{item.label}</span>
+                      <span className="m-conn-meta">
+                        {item.host}
+                        {item.delay_ms != null
+                          ? ` · ${Math.round(item.delay_ms)} мс`
+                          : item.alive === false
+                            ? ' · не отвечает'
+                            : ''}
+                        {item.missing ? ' · нет на роутере' : ''}
+                      </span>
+                    </span>
+                    {item.active ? (
+                      <span className="m-active-pill">активно</span>
+                    ) : item.selectable ? (
+                      <button
+                        type="button"
+                        className="m-mini"
+                        onClick={() => void selectConnection(item)}
+                        disabled={!selected || selected.status !== 'online' || action !== 'idle'}
+                      >
+                        {action === 'select' ? 'Переключаем…' : 'Выбрать'}
+                      </button>
+                    ) : null}
+                  </div>
+                ))}
+              </div>
+            )}
+
+            <button
+              type="button"
+              className="m-action m-action-sm"
+              onClick={() => void rules.reload()}
+              disabled={rules.loading}
+            >
+              {rules.loading ? 'Обновляем…' : 'Обновить список'}
+            </button>
+            {selected?.product === 'podkop' ? (
+              <button
+                type="button"
+                className="m-action m-action-sm"
+                onClick={() => {
+                  const current = subscriptionView;
+                  setSubscriptionView(null);
+                  openSubscription(current.section, current);
+                }}
+                disabled={!selected || selected.status !== 'online'}
+              >
+                Изменить подписку
+              </button>
+            ) : null}
+            <button
+              type="button"
+              className="m-link m-link-center"
+              onClick={() => setSubscriptionView(null)}
+            >
+              Закрыть
             </button>
           </div>
         </div>

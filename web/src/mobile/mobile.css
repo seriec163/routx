@@ -51,6 +51,52 @@ body.routx-app-body #root {
   -webkit-font-smoothing: antialiased;
 }
 
+.m-view {
+  flex: 1 1 auto;
+  min-height: 0;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.m-view-next {
+  animation: m-view-next 240ms cubic-bezier(0.22, 0.61, 0.36, 1) both;
+}
+
+.m-view-prev {
+  animation: m-view-prev 240ms cubic-bezier(0.22, 0.61, 0.36, 1) both;
+}
+
+@keyframes m-view-next {
+  from {
+    opacity: 0;
+    transform: translateX(22px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+@keyframes m-view-prev {
+  from {
+    opacity: 0;
+    transform: translateX(-22px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .m-view-next,
+  .m-view-prev {
+    animation: none;
+  }
+}
+
 .m-screen {
   flex: 1 1 auto;
   width: 100%;
@@ -727,6 +773,46 @@ body.routx-app-body #root {
 
 .m-listrow:last-child {
   border-bottom: none;
+}
+
+.m-listrow-tap {
+  cursor: pointer;
+  border-radius: 12px;
+  transition:
+    background-color 140ms ease,
+    transform 140ms ease;
+}
+
+.m-listrow-tap:active {
+  background: rgba(216, 27, 96, 0.06);
+  transform: scale(0.995);
+}
+
+.m-listrow-active {
+  background: rgba(216, 27, 96, 0.06);
+  border-radius: 12px;
+}
+
+.m-chevron {
+  width: 18px;
+  height: 18px;
+  flex: 0 0 auto;
+  stroke: currentColor;
+  fill: none;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  color: var(--m-muted);
+}
+
+.m-active-pill {
+  flex: 0 0 auto;
+  padding: 4px 9px;
+  border-radius: 999px;
+  background: var(--m-accent-soft);
+  color: var(--m-accent);
+  font-size: 0.7rem;
+  font-weight: 700;
 }
 
 .m-listrow-value {

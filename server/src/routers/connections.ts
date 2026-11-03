@@ -46,6 +46,15 @@ function maskValue(value: string): string {
   return `${scheme}••••••••${tail}`;
 }
 
+function subscriptionHostLabel(url: string): string {
+  try {
+    const host = new URL(url).hostname.replace(/^www\./i, '');
+    return host.slice(0, 120);
+  } catch {
+    return 'Подписка';
+  }
+}
+
 function subscriptionLinkLabel(link: string, index: number): string {
   const hash = link.indexOf('#');
   if (hash >= 0) {
@@ -1026,7 +1035,7 @@ export async function registerRouterConnectionRoutes(
       }
 
       let sourceUrl = body.url ?? '';
-      let label = body.label ?? 'Подписка';
+      let label = body.label ?? '';
       let catalogId: string | null = null;
       let sourceConnectionId: string | null = null;
 
@@ -1068,6 +1077,9 @@ export async function registerRouterConnectionRoutes(
       }
 
       const parsed = await fetchSubscription(sourceUrl);
+      if (label.trim() === '' || (sourceConnectionId && label.trim() === 'Подписка')) {
+        label = parsed.title ?? subscriptionHostLabel(sourceUrl);
+      }
       const result = await storeImportedLinks({
         pool,
         masterKey,
