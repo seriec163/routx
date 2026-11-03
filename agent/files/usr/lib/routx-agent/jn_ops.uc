@@ -468,6 +468,41 @@ function list_connections(product, args) {
 		index_value++;
 	}
 
+	if (product != "podkop") {
+		// Tachyon/Forkop 2.x хранят JSON-outbound отдельными элементами.
+		let raw_jsons = cursor.get(product, section, "outbound_jsons");
+		let json_items = type(raw_jsons) == "array" ? raw_jsons : (raw_jsons == null ? [] : [ raw_jsons ]);
+		let json_index = 0;
+		for (let raw_json in json_items) {
+			let text = util.as_string(raw_json);
+			if (text == "")
+				continue;
+			let parsed = util.json_parse(text);
+			if (type(parsed) != "object")
+				continue;
+			let kind = util.as_string(parsed.type);
+			let server = util.as_string(parsed.server);
+			let port = util.as_string(parsed.server_port);
+			let tag = util.as_string(parsed.tag);
+			if (tag == "")
+				tag = section + "-json-" + (json_index + 1) + "-out";
+			let host = server;
+			if (host != "" && port != "")
+				host = host + ":" + port;
+			push(links, {
+				index: index_value + json_index,
+				hash: util.sha256_hex(text),
+				scheme: kind == "" ? "json" : kind,
+				host: host,
+				tail: "",
+				label: tag,
+				synthetic: true,
+				proxy_tag: tag
+			});
+			json_index++;
+		}
+	}
+
 	if (product == "podkop") {
 		if (mode == "outbound") {
 			let outbound_raw = util.as_string(cursor.get("podkop", section, "outbound_json"));
@@ -829,16 +864,18 @@ function enrich_links(product, section, links, proxies) {
 	let group = proxies[group_tag];
 	for (let i = 0; i < length(links); i++) {
 		let link = links[i];
-		let tag;
-		if (product_api.is_forkop_v2(product)) {
-			let child = trim(util.as_string(link.label));
-			if (child == "")
-				child = trim(util.as_string(link.host));
-			if (child == "")
-				child = "" + (i + 1);
-			tag = group_tag + "/" + child;
-		} else {
-			tag = mode == "url" || mode == "outbound" ? group_tag : section + "-" + (i + 1) + "-out";
+		let tag = trim(util.as_string(link.proxy_tag));
+		if (tag == "") {
+			if (product_api.is_forkop_v2(product)) {
+				let child = trim(util.as_string(link.label));
+				if (child == "")
+					child = trim(util.as_string(link.host));
+				if (child == "")
+					child = "" + (i + 1);
+				tag = group_tag + "/" + child;
+			} else {
+				tag = mode == "url" || mode == "outbound" ? group_tag : section + "-" + (i + 1) + "-out";
+			}
 		}
 		let info = proxies[tag];
 		let delay = proxy_last_delay(info);
