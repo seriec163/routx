@@ -496,6 +496,38 @@ export function RouterRulesPanel(props: {
     }
   }
 
+  async function expandSubscription(
+    section: string,
+    connection: RuleConnectionView,
+  ): Promise<void> {
+    if (!connection.id) return;
+    try {
+      const response = await api<{
+        imported: number;
+        total: number;
+        skipped: number;
+        job: Job | null;
+      }>(`/api/v1/routers/${props.routerId}/podkop/import-subscription`, {
+        method: 'POST',
+        body: { section, connection_id: connection.id },
+      });
+      if (response.job) {
+        const job = await waitForJob(response.job, 300_000);
+        if (job.status !== 'success') {
+          throw new Error(job.error?.message ?? 'Не удалось применить импортированные ссылки');
+        }
+      }
+      toast.success(
+        `Импортировано ссылок: ${response.imported}` +
+          (response.skipped > 0 ? `, пропущено: ${response.skipped}` : ''),
+      );
+      await readLive();
+      props.onChanged();
+    } catch (caught) {
+      toast.error(errorMessage(caught));
+    }
+  }
+
   function submitRule(body: RuleBody, pending: PendingConnection[]): void {
     const userEnabled = body.enabled;
     const hasOutbound =
@@ -658,6 +690,7 @@ export function RouterRulesPanel(props: {
                   setConnectionTarget({ rule, connection })
                 }
                 onDelete={(connection) => requestDelete(rule, connection)}
+                onExpandSubscription={isPodkop ? expandSubscription : undefined}
                 onToggle={() => requestToggle(rule)}
                 disabled={!online}
               />
@@ -773,6 +806,7 @@ function RuleCard(props: {
   onAddConnection: () => void;
   onReplace: (connection: RuleConnectionView) => void;
   onDelete: (connection: RuleConnectionView) => void;
+  onExpandSubscription?: (section: string, connection: RuleConnectionView) => void;
   onToggle: () => void;
 }) {
   const { rule } = props;
@@ -863,6 +897,11 @@ function RuleCard(props: {
                   disabled={props.disabled}
                   onReplace={() => props.onReplace(connection)}
                   onDelete={() => props.onDelete(connection)}
+                  onExpand={
+                    props.onExpandSubscription
+                      ? () => props.onExpandSubscription!(rule.section, connection)
+                      : undefined
+                  }
                 />
               ))}
               {rule.links.map((connection) => (
@@ -901,6 +940,7 @@ function ConnectionRow(props: {
   disabled: boolean;
   onReplace: () => void;
   onDelete: () => void;
+  onExpand?: () => void;
 }) {
   const { connection } = props;
   return (
@@ -918,6 +958,11 @@ function ConnectionRow(props: {
         </span>
       </div>
       <div className="row-actions">
+        {props.onExpand ? (
+          <Button size="sm" variant="ghost" onClick={props.onExpand} disabled={props.disabled}>
+            Разобрать
+          </Button>
+        ) : null}
         <Button size="sm" variant="ghost" onClick={props.onReplace} disabled={props.disabled}>
           Заменить
         </Button>
@@ -2002,17 +2047,19 @@ function ConnectionModal(props: {
   const [label, setLabel] = useState(editing?.label ?? '');
   const [value, setValue] = useState('');
   const [catalogId, setCatalogId] = useState('');
+  const [importCatalogId, setImportCatalogId] = useState('');
+  const [importUrl, setImportUrl] = useState('');
   const [catalog, setCatalog] = useState<CatalogSubscription[]>([]);
   const [busy, setBusy] = useState(false);
   const [job, setJob] = useState<Job | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (editing || kind !== 'subscription') return;
+    if (!isPodkop && (editing || kind !== 'subscription')) return;
     void api<{ items: CatalogSubscription[] }>('/api/v1/subscriptions')
       .then((response) => setCatalog(response.items))
       .catch(() => undefined);
-  }, [editing, kind]);
+  }, [editing, kind, isPodkop]);
 
   async function waitWithProgress(start: Job): Promise<Job> {
     let current = start;
@@ -2023,6 +2070,50 @@ function ConnectionModal(props: {
       setJob(current);
     }
     return current;
+  }
+
+  async function importSubscription(): Promise<void> {
+    setBusy(true);
+    setError(null);
+    setJob(null);
+    try {
+      if (!importCatalogId && importUrl.trim() === '') {
+        throw new Error('Выберите подписку из каталога или вставьте URL');
+      }
+      const response = await api<{
+        imported: number;
+        total: number;
+        skipped: number;
+        job: Job | null;
+      }>(`/api/v1/routers/${props.routerId}/podkop/import-subscription`, {
+        method: 'POST',
+        body: {
+          section: props.rule.section,
+          ...(importCatalogId
+            ? { subscription_id: importCatalogId }
+            : { url: importUrl.trim() }),
+        },
+      });
+      if (response.job) {
+        const finished = await waitWithProgress(response.job);
+        if (finished.status !== 'success') {
+          throw new Error(finished.error?.message ?? 'Не удалось применить импортированные ссылки');
+        }
+      }
+      if (response.imported === 0) {
+        toast.info('Новых ссылок в подписке не найдено');
+      } else {
+        toast.success(
+          `Импортировано ссылок: ${response.imported}` +
+            (response.skipped > 0 ? `, пропущено: ${response.skipped}` : ''),
+        );
+      }
+      await props.onDone();
+    } catch (caught) {
+      setError(errorMessage(caught));
+    } finally {
+      setBusy(false);
+    }
   }
 
   async function submit(): Promise<void> {
@@ -2103,6 +2194,36 @@ function ConnectionModal(props: {
     >
       {error ? <ErrorBanner message={error} /> : null}
       {busy || job ? <JobProgress job={job} label="Применяем подключение" /> : null}
+
+      {isPodkop && !editing ? (
+        <div className="rule-connection-box">
+          <h3>Импорт подписки</h3>
+          <p className="muted-text small">
+            Podkop не поддерживает подписки. RoutX скачает подписку, разберёт её на отдельные
+            vless/ss/trojan/hysteria2/socks-ссылки и добавит их в секцию «{props.rule.label}».
+          </p>
+          <Field label="Подписка из каталога" hint="Необязательно, если вставляете URL вручную.">
+            <Select value={importCatalogId} onChange={setImportCatalogId}>
+              <option value="">Не выбирать</option>
+              {catalog.map((item) => (
+                <option key={item.id} value={item.id}>
+                  {item.name} · {item.masked}
+                </option>
+              ))}
+            </Select>
+          </Field>
+          <Field label="URL подписки">
+            <TextInput
+              value={importUrl}
+              onChange={setImportUrl}
+              placeholder="https://…"
+            />
+          </Field>
+          <Button onClick={() => void importSubscription()} disabled={busy}>
+            Импортировать ссылки
+          </Button>
+        </div>
+      ) : null}
       {!editing && !isPodkop ? (
         <Field label="Тип">
           <Select value={kind} onChange={(next) => setKind(next as 'subscription' | 'vless')}>

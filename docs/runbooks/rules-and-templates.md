@@ -60,7 +60,10 @@
   (текущее значение скрыто). Замена проверяется через `sing-box check`,
   при ошибке конфиг откатывается;
 * низкоуровневые параметры: UDP over TCP, mixed proxy, domain resolver,
-  resolve real IP, интервал/допуск/URL urltest, порт mixed proxy.
+  resolve real IP, интервал/допуск/URL urltest, порт mixed proxy;
+* импорт подписки: RoutX скачивает URL, разбирает `vless/ss/trojan/
+  hysteria2/socks`-ссылки и добавляет их как отдельные подключения
+  Podkop. Сама подписка на роутер не передаётся.
 
 После сохранения RoutX делает снимок `/etc/config/podkop`, записывает
 изменения, выполняет `podkop reload`, проверяет `sing-box check` и запуск

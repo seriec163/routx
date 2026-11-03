@@ -7,6 +7,7 @@ import { decryptSecret, encryptSecret } from '../lib/crypto.js';
 import { badRequest, conflict, notFound } from '../lib/errors.js';
 import { uuidv7 } from '../lib/ids.js';
 import { enqueueJob, jobJson } from '../jobs/queue.js';
+import { fetchSubscription } from '../domain/subscription.js';
 import { assertOnline, getRouter, getRouterForMutation } from './service.js';
 import { loadAccessibleSubscription } from '../subscriptions/service.js';
 import {
@@ -45,8 +46,22 @@ function maskValue(value: string): string {
   return `${scheme}••••••••${tail}`;
 }
 
-function validateValue(kind: 'subscription' | 'vless', value: string): string {
-  const text = value.trim();
+function subscriptionLinkLabel(link: string, index: number): string {
+  const hash = link.indexOf('#');
+  if (hash >= 0) {
+    const raw = link.slice(hash + 1);
+    try {
+      const decoded = decodeURIComponent(raw).trim();
+      if (decoded !== '') return decoded.slice(0, 120);
+    } catch {
+      if (raw.trim() !== '') return raw.trim().slice(0, 120);
+    }
+  }
+  const match = /^[a-z0-9]+:\/\/(?:[^@/]+@)?([^:/?#]+)/i.exec(link);
+  return (match?.[1] ?? `link ${index + 1}`).slice(0, 120);
+}
+
+function validateValue(kind: 'subscription' | 'vless', value: string): string {  const text = value.trim();
   if (text.length < 8 || text.length > 8192) {
     throw badRequest('invalid_connection', 'Ссылка пустая или слишком длинная');
   }
@@ -567,4 +582,155 @@ export async function registerRouterConnectionRoutes(
 
     return { job: jobJson(job) };
   });
+
+  app.post(
+    '/api/v1/routers/:id/podkop/import-subscription',
+    { config: { rateLimit: { max: 10, timeWindow: '1 minute' } } },
+    async (request, reply) => {
+      const auth = requireUser(request);
+      const params = z.object({ id: z.string().uuid() }).parse(request.params);
+      const body = z
+        .object({
+          section: z.string().regex(/^[A-Za-z0-9_.-]{1,64}$/).optional(),
+          subscription_id: z.string().uuid().optional(),
+          connection_id: z.string().uuid().optional(),
+          url: z.string().trim().max(2048).optional(),
+        })
+        .strict()
+        .refine(
+          (value) =>
+            [value.subscription_id, value.connection_id, value.url].filter(Boolean).length === 1,
+          { message: 'Укажите подписку из каталога, существующее подключение или URL' },
+        )
+        .parse(request.body);
+
+      const router = await getRouterForMutation(pool, auth, params.id);
+      assertOnline(router);
+      if (router.product !== 'podkop') {
+        throw badRequest('podkop_required', 'Импорт подписок доступен только для Podkop');
+      }
+
+      let sourceUrl = body.url ?? '';
+      let section = body.section ?? router.managed_section ?? 'main';
+      let sourceConnectionId: string | null = null;
+
+      if (body.subscription_id) {
+        const catalog = await loadAccessibleSubscription(pool, auth, body.subscription_id);
+        sourceUrl = decryptSecret(catalog.secret_enc, masterKey);
+      } else if (body.connection_id) {
+        const source = await pool.query<{ kind: string; section: string; secret_enc: string }>(
+          'select kind, section, secret_enc from router_connections where id = $1 and router_id = $2',
+          [body.connection_id, router.id],
+        );
+        const row = source.rows[0];
+        if (!row || row.kind !== 'subscription') {
+          throw notFound('Подписка не найдена');
+        }
+        sourceUrl = decryptSecret(row.secret_enc, masterKey);
+        if (!body.section) section = row.section || section;
+        sourceConnectionId = body.connection_id;
+      }
+
+      const state = await pool.query<{ managed: Record<string, unknown> | null }>(
+        'select managed from router_state where router_id = $1',
+        [router.id],
+      );
+      const managed = state.rows[0]?.managed ?? {};
+      if (managed[`section.${section}.connection_type`] === undefined) {
+        throw badRequest(
+          'section_missing',
+          `Секция «${section}» не найдена в Podkop. Сначала прочитайте состояние или создайте секцию.`,
+        );
+      }
+
+      const parsed = await fetchSubscription(sourceUrl);
+
+      const existing = await pool.query<{ secret_enc: string }>(
+        `select secret_enc from router_connections
+          where router_id = $1 and section = $2 and kind = 'vless'`,
+        [router.id, section],
+      );
+      const existingLinks = new Set(
+        existing.rows.map((row) => decryptSecret(row.secret_enc, masterKey)),
+      );
+      const fresh = parsed.links.filter((link) => !existingLinks.has(link));
+
+      if (fresh.length === 0) {
+        return { imported: 0, total: parsed.total, skipped: parsed.skipped, job: null };
+      }
+
+      const client = await pool.connect();
+      try {
+        await client.query('begin');
+        let index = 0;
+        for (const link of fresh) {
+          await client.query(
+            `insert into router_connections
+               (id, router_id, section, kind, label, secret_enc, enabled, created_by)
+             values ($1,$2,$3,'vless',$4,$5,true,$6)`,
+            [
+              uuidv7(),
+              router.id,
+              section,
+              subscriptionLinkLabel(link, index++),
+              encryptSecret(link, masterKey),
+              auth.userId,
+            ],
+          );
+        }
+        if (sourceConnectionId) {
+          await client.query(
+            'update router_connections set enabled = false, section = $2, updated_at = now() where id = $1',
+            [sourceConnectionId, section],
+          );
+        }
+        await client.query('commit');
+      } catch (error) {
+        await client.query('rollback');
+        throw error;
+      } finally {
+        client.release();
+      }
+
+      const job = await enqueueJob(pool, {
+        type: 'connections_apply',
+        routerId: router.id,
+        requestedBy: auth.userId,
+        timeoutSeconds: 240,
+        payload: { reason: 'subscription_import', section },
+      });
+
+      await audit(pool, {
+        actorId: auth.userId,
+        actorRole: auth.role,
+        action: 'router.podkop_subscription_import',
+        targetType: 'router',
+        targetId: router.id,
+        routerId: router.id,
+        result: 'ok',
+        ip: request.ip,
+        userAgent: request.headers['user-agent'],
+        metadata: {
+          section,
+          imported: fresh.length,
+          total: parsed.total,
+          skipped: parsed.skipped,
+          source: body.subscription_id
+            ? 'catalog'
+            : body.connection_id
+              ? 'connection'
+              : 'url',
+          job_id: job.id,
+        },
+      });
+
+      reply.code(202);
+      return {
+        imported: fresh.length,
+        total: parsed.total,
+        skipped: parsed.skipped,
+        job: jobJson(job),
+      };
+    },
+  );
 }
