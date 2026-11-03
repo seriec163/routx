@@ -645,15 +645,40 @@ export async function registerRouterConnectionRoutes(
 
       const parsed = await fetchSubscription(sourceUrl);
 
-      const existing = await pool.query<{ secret_enc: string }>(
-        `select secret_enc from router_connections
-          where router_id = $1 and section = $2 and kind = 'vless'`,
+      const existing = await pool.query<{ secret_enc: string; label: string }>(
+        `select secret_enc, label from router_connections
+          where router_id = $1 and section = $2`,
         [router.id, section],
       );
       const existingLinks = new Set(
-        existing.rows.map((row) => decryptSecret(row.secret_enc, masterKey)),
+        existing.rows
+          .filter((row) => row.secret_enc)
+          .map((row) => decryptSecret(row.secret_enc, masterKey)),
       );
-      const fresh = parsed.links.filter((link) => !existingLinks.has(link));
+      const existingLabels = new Set(existing.rows.map((row) => row.label));
+      const usedLabels = new Set(existingLabels);
+      const fresh: Array<{ link: string; label: string }> = [];
+      let duplicateLinks = 0;
+      let index = 0;
+      for (const link of parsed.links) {
+        if (existingLinks.has(link)) {
+          duplicateLinks++;
+          continue;
+        }
+        const base = subscriptionLinkLabel(link, index++);
+        if (existingLabels.has(base)) {
+          duplicateLinks++;
+          continue;
+        }
+        let label = base;
+        let suffix = 2;
+        while (usedLabels.has(label)) {
+          label = `${base.slice(0, 114)} #${suffix++}`;
+        }
+        usedLabels.add(label);
+        fresh.push({ link, label });
+      }
+      const skipped = parsed.skipped + duplicateLinks;
 
       if (fresh.length === 0) {
         const job = await enqueueJob(pool, {
@@ -663,19 +688,13 @@ export async function registerRouterConnectionRoutes(
           timeoutSeconds: 600,
           payload: { reason: 'subscription_import_retry', section },
         });
-        return {
-          imported: 0,
-          total: parsed.total,
-          skipped: parsed.skipped,
-          job: jobJson(job),
-        };
+        return { imported: 0, total: parsed.total, skipped, job: jobJson(job) };
       }
 
       const client = await pool.connect();
       try {
         await client.query('begin');
-        let index = 0;
-        for (const link of fresh) {
+        for (const item of fresh) {
           await client.query(
             `insert into router_connections
                (id, router_id, section, kind, label, secret_enc, enabled, created_by)
@@ -684,8 +703,8 @@ export async function registerRouterConnectionRoutes(
               uuidv7(),
               router.id,
               section,
-              subscriptionLinkLabel(link, index++),
-              encryptSecret(link, masterKey),
+              item.label,
+              encryptSecret(item.link, masterKey),
               auth.userId,
             ],
           );
@@ -726,7 +745,7 @@ export async function registerRouterConnectionRoutes(
           section,
           imported: fresh.length,
           total: parsed.total,
-          skipped: parsed.skipped,
+          skipped,
           source: body.subscription_id
             ? 'catalog'
             : body.connection_id
@@ -740,7 +759,7 @@ export async function registerRouterConnectionRoutes(
       return {
         imported: fresh.length,
         total: parsed.total,
-        skipped: parsed.skipped,
+        skipped,
         job: jobJson(job),
       };
     },
