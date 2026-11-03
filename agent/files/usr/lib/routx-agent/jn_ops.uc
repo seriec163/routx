@@ -394,6 +394,20 @@ function list_connections(product, args) {
 	let all = cursor.get_all(product);
 	if (type(all) != "object")
 		all = {};
+	let mode = "selector";
+	if (product == "podkop") {
+		let configured = util.as_string(cursor.get("podkop", section, "proxy_config_type"));
+		if (configured == "url" || configured == "selector" || configured == "urltest" || configured == "outbound")
+			mode = configured;
+		else if (cursor.get("podkop", section, "outbound_json") != null)
+			mode = "outbound";
+		else if (cursor.get("podkop", section, "urltest_proxy_links") != null)
+			mode = "urltest";
+		else if (cursor.get("podkop", section, "selector_proxy_links") != null)
+			mode = "selector";
+		else
+			mode = "url";
+	}
 	let subscriptions = [];
 	if (product != "podkop") {
 		for (let sname in all) {
@@ -409,9 +423,15 @@ function list_connections(product, args) {
 
 	let links = [];
 	let raw = [];
-	let link_keys = product == "podkop"
-		? [ "urltest_proxy_links", "selector_proxy_links" ]
-		: [ "selector_proxy_links" ];
+	let link_keys = [];
+	if (product == "podkop") {
+		if (mode == "selector")
+			link_keys = [ "selector_proxy_links" ];
+		else if (mode == "urltest")
+			link_keys = [ "urltest_proxy_links" ];
+	} else {
+		link_keys = [ "selector_proxy_links" ];
+	}
 	for (let key in link_keys) {
 		let value = cursor.get(product, section, key);
 		if (type(value) == "array") {
@@ -421,7 +441,7 @@ function list_connections(product, args) {
 			push(raw, value);
 		}
 	}
-	if (product == "podkop") {
+	if (product == "podkop" && mode == "url") {
 		let single = util.as_string(cursor.get(product, section, "proxy_string"));
 		if (single != "")
 			push(raw, single);
@@ -448,25 +468,10 @@ function list_connections(product, args) {
 	}
 
 	if (product == "podkop") {
-		let mode = "";
-		let cursor_mode = uci.cursor();
-		let configured = util.as_string(cursor_mode.get("podkop", section, "proxy_config_type"));
-		if (configured == "outbound")
-			mode = "outbound";
-		else if (configured == "url" || configured == "selector" || configured == "urltest")
-			mode = configured;
-		else if (cursor_mode.get("podkop", section, "outbound_json") != null)
-			mode = "outbound";
-		else if (cursor_mode.get("podkop", section, "urltest_proxy_links") != null)
-			mode = "urltest";
-		else if (cursor_mode.get("podkop", section, "selector_proxy_links") != null)
-			mode = "selector";
-		else
-			mode = "url";
 		if (mode == "outbound") {
-			let raw = util.as_string(cursor_mode.get("podkop", section, "outbound_json"));
-			if (raw != "") {
-				let parsed = util.json_parse(raw);
+			let outbound_raw = util.as_string(cursor.get("podkop", section, "outbound_json"));
+			if (outbound_raw != "") {
+				let parsed = util.json_parse(outbound_raw);
 				let kind = type(parsed) == "object" ? util.as_string(parsed.type) : "";
 				let server = type(parsed) == "object" ? util.as_string(parsed.server) : "";
 				let port = type(parsed) == "object" ? util.as_string(parsed.server_port) : "";
@@ -475,7 +480,7 @@ function list_connections(product, args) {
 					host = host + ":" + port;
 				push(links, {
 					index: 0,
-					hash: util.sha256_hex(raw),
+					hash: util.sha256_hex(outbound_raw),
 					scheme: kind == "" ? "json" : kind,
 					host: host,
 					tail: "",
