@@ -6,7 +6,7 @@ const store = require("jn_store");
 const platform = require("jn_platform");
 const uci_state = require("jn_uci_state");
 
-const VERSION = "1.5.3";
+const VERSION = "1.5.4";
 
 function build_probe(product) {
 	let pver = platform.product_version(product);

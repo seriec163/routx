@@ -101,6 +101,7 @@ async function storeImportedLinks(args: {
     label: string;
     catalogId?: string | null;
     connectionId?: string | null;
+    enabled?: boolean;
   };
 }): Promise<{
   imported: number;
@@ -213,20 +214,37 @@ async function storeImportedLinks(args: {
             [routerId, section],
           );
       const secret = encryptSecret(sub.url, masterKey);
+      const sourceEnabled = sub.enabled === true;
       if (existingSub.rows[0]) {
         await client.query(
           `update router_connections
               set section = $2, kind = 'subscription', label = $3, secret_enc = $4,
-                  enabled = false, subscription_id = $5, updated_at = now()
+                  enabled = $6, subscription_id = $5, updated_at = now()
             where id = $1`,
-          [existingSub.rows[0].id, section, sub.label.slice(0, 120), secret, sub.catalogId ?? null],
+          [
+            existingSub.rows[0].id,
+            section,
+            sub.label.slice(0, 120),
+            secret,
+            sub.catalogId ?? null,
+            sourceEnabled,
+          ],
         );
       } else {
         await client.query(
           `insert into router_connections
              (id, router_id, section, kind, label, secret_enc, enabled, created_by, subscription_id)
-           values ($1,$2,$3,'subscription',$4,$5,false,$6,$7)`,
-          [uuidv7(), routerId, section, sub.label.slice(0, 120), secret, userId, sub.catalogId ?? null],
+           values ($1,$2,$3,'subscription',$4,$5,$6,$7,$8)`,
+          [
+            uuidv7(),
+            routerId,
+            section,
+            sub.label.slice(0, 120),
+            secret,
+            sourceEnabled,
+            userId,
+            sub.catalogId ?? null,
+          ],
         );
       }
       await client.query('commit');
@@ -1106,6 +1124,7 @@ export async function registerRouterConnectionRoutes(
           label,
           catalogId,
           connectionId: sourceConnectionId,
+          enabled: router.product !== 'podkop',
         },
       });
 

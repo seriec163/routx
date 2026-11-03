@@ -783,7 +783,7 @@ function collect_proxy_members(proxies, tag, seen, out) {
 // в selector_proxy_links. Достаём их из членов группы Clash API.
 function subscription_links(product, section, proxies, existing, subscriptions) {
 	let links = [];
-	if (!product_api.is_forkop_v2(product) || type(proxies) != "object" || length(subscriptions) == 0)
+	if ((!product_api.is_forkop_v2(product) && product != "tachyon") || type(proxies) != "object" || length(subscriptions) == 0)
 		return links;
 	let group_tag = proxy_group_tag(product, section);
 	let group = proxies[group_tag];

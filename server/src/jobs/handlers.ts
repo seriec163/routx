@@ -1537,6 +1537,11 @@ export async function applyRouterConnections(ctx: HandlerContext, job: JobRow): 
     }
     bySection.set(section, group);
   }
+  if (router.product === 'tachyon') {
+    for (const group of bySection.values()) {
+      if (group.subscriptions.length > 0) group.links = [];
+    }
+  }
   if (requestedSection && !bySection.has(requestedSection)) {
     bySection.set(requestedSection, { links: [], subscriptions: [] });
   }
