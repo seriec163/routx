@@ -123,7 +123,8 @@ function handle_command(cmd) {
 					command += "wget -O /tmp/tachyon-uninstall.sh https://raw.githubusercontent.com/Dushnilin/tachyon/main/uninstall.sh && sh /tmp/tachyon-uninstall.sh -y; ";
 				if (target == "podkop") {
 					command += "PODKOP_INSTALLER=\"$(wget -qO- https://raw.githubusercontent.com/itdoginfo/podkop/main/install.sh)\" && echo n | sh -c \"$PODKOP_INSTALLER\"; ";
-					command += "if ! command -v sing-box >/dev/null 2>&1; then if command -v apk >/dev/null 2>&1; then apk update >/dev/null 2>&1; apk add sing-box >/dev/null 2>&1 || true; else opkg update >/dev/null 2>&1; opkg install sing-box >/dev/null 2>&1 || true; fi; fi";
+					command += "if command -v opkg >/dev/null 2>&1; then opkg remove --force-depends sing-box-forkop tachyon-core luci-i18n-forkop-ru >/dev/null 2>&1 || true; fi; ";
+					command += "if ! command -v sing-box >/dev/null 2>&1; then if command -v apk >/dev/null 2>&1; then apk update >/dev/null 2>&1; apk add sing-box >/dev/null 2>&1 || apk add sing-box-tiny >/dev/null 2>&1 || true; else opkg update >/dev/null 2>&1; opkg install sing-box >/dev/null 2>&1 || opkg install sing-box-tiny >/dev/null 2>&1 || true; fi; fi";
 				} else {
 					command += "wget -qO- https://raw.githubusercontent.com/ushan0v/forkop/main/install.sh | sh -s";
 				}
