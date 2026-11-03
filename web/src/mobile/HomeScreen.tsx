@@ -175,6 +175,7 @@ export function HomeScreen() {
     ? subscriptionItems.get(subscriptionView.section) ?? []
     : [];
   const subscriptionViewActive = subscriptionViewItems.find((item) => item.active) ?? null;
+  const connectionCount = connections.filter((item) => item.kind === 'link').length;
 
   const status = selected ? STATUS[selected.status] ?? { label: selected.status, tone: 'warn' } : null;
   const latency = selected?.latency_ms;
@@ -545,7 +546,7 @@ export function HomeScreen() {
         {connections.length > 0 ? (
           <section className="m-card m-list">
             <div className="m-list-head">
-              <span className="m-label">Подключения · {mainConnections.length}</span>
+              <span className="m-label">Подключения · {connectionCount}</span>
               <div className="m-list-actions">
                 <button
                   type="button"
