@@ -713,6 +713,81 @@ function read_proxies(product) {
 	return res.value.proxies;
 }
 
+function proxy_group_tag(product, section) {
+	if (product_api.is_forkop_v2(product)) {
+		let cursor = uci.cursor();
+		let label = trim(util.as_string(cursor.get(product, section, "label")));
+		return label != "" ? label : section;
+	}
+	return section + "-out";
+}
+
+function proxy_is_group(proxy) {
+	if (type(proxy) != "object")
+		return false;
+	let kind = lc(util.as_string(proxy.type));
+	return kind == "selector" || kind == "urltest" || kind == "fallback";
+}
+
+function collect_proxy_members(proxies, tag, seen, out) {
+	if (tag == "" || seen[tag] === true)
+		return;
+	seen[tag] = true;
+	let info = proxies[tag];
+	if (type(info) != "object")
+		return;
+	if (proxy_is_group(info) && type(info.all) == "array") {
+		for (let member in info.all)
+			collect_proxy_members(proxies, util.as_string(member), seen, out);
+		return;
+	}
+	push(out, tag);
+}
+
+// Forkop 2.x держит подписку провайдером, поэтому её серверы не видны
+// в selector_proxy_links. Достаём их из членов группы Clash API.
+function subscription_links(product, section, proxies, existing, subscriptions) {
+	let links = [];
+	if (!product_api.is_forkop_v2(product) || type(proxies) != "object" || length(subscriptions) == 0)
+		return links;
+	let group_tag = proxy_group_tag(product, section);
+	let group = proxies[group_tag];
+	if (type(group) != "object")
+		return links;
+	let seen = {};
+	for (let item in existing)
+		if (util.as_string(item.proxy_tag) != "")
+			seen[util.as_string(item.proxy_tag)] = true;
+	let members = [];
+	collect_proxy_members(proxies, group_tag, {}, members);
+	let index_value = length(existing);
+	for (let member in members) {
+		if (seen[member] === true)
+			continue;
+		let info = proxies[member];
+		let label = member;
+		let prefix = group_tag + "/";
+		if (substr(label, 0, length(prefix)) == prefix)
+			label = substr(label, length(prefix));
+		let delay = proxy_last_delay(info);
+		push(links, {
+			index: index_value++,
+			hash: util.sha256_hex(member),
+			scheme: "proxy",
+			host: label,
+			tail: "",
+			label: label,
+			proxy_tag: member,
+			proxy_group: group_tag,
+			delay_ms: delay,
+			alive: delay != null,
+			active: util.as_string(group.now) == member,
+			selectable: true
+		});
+	}
+	return links;
+}
+
 function enrich_links(product, section, links, proxies) {
 	let enriched = [];
 	if (type(proxies) != "object") {
@@ -814,6 +889,12 @@ function read_rules(product) {
 		}
 
 		let conn = list_connections(product, { section: name });
+		let links = [];
+		if (conn.ok) {
+			links = enrich_links(product, name, conn.links, proxies);
+			for (let item in subscription_links(product, name, proxies, links, conn.subscriptions))
+				push(links, item);
+		}
 		let lists = {};
 		let paths = options.domain_ip_lists;
 		if (type(paths) != "array")
@@ -840,7 +921,7 @@ function read_rules(product) {
 			section: name,
 			options: options,
 			subscriptions: conn.ok ? conn.subscriptions : [],
-			links: conn.ok ? enrich_links(product, name, conn.links, proxies) : [],
+			links: links,
 			lists: lists
 		});
 	}
