@@ -26,8 +26,11 @@ export async function registerMonitoringRoutes(
               r.sing_box_version, r.last_seen_at, r.last_error, r.monitoring_enabled,
               a.offline_since, a.online_since,
               s.health, s.proxy_health, s.latency_ms, s.failed_tags, s.total_tags, s.ts,
-              s.detail, s.service_state, s.direct_ip, s.vpn_ip
+              s.detail, s.service_state, s.direct_ip, s.vpn_ip,
+              r.owner_id, u.email as owner_email,
+              nullif(btrim(concat_ws(' ', u.last_name, u.first_name, u.middle_name)), '') as owner_name
          from routers r
+         left join users u on u.id = r.owner_id
          left join router_availability a on a.router_id = r.id
          left join lateral (
            select health, proxy_health, latency_ms, failed_tags, total_tags, ts, detail, service_state,

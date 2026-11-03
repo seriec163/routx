@@ -34,7 +34,7 @@ function parseLink(text: string): { token: string; routerId: string | null } | n
 }
 
 export function RoutersScreen() {
-  const { routers, selectedId, select, reload, loading } = useMobile();
+  const { routers, routerGroups, selectedId, select, reload, loading } = useMobile();
   const route = useRoute();
   // Переход с главной по кнопке QR сразу открывает добавление роутера.
   const [addOpen, setAddOpen] = useState(() => route.query.get('add') === '1');
@@ -53,7 +53,7 @@ export function RoutersScreen() {
 
         <div className="m-card m-list">
           <div className="m-list-head">
-            <span className="m-label">Подключено · {routers.length}</span>
+            <span className="m-label">Роутеры · {routers.length}</span>
             <button type="button" className="m-mini" onClick={() => void reload()} disabled={loading}>
               Обновить
             </button>
@@ -64,31 +64,43 @@ export function RoutersScreen() {
               Роутеров пока нет. Отсканируйте QR на странице RoutX роутера или вставьте ссылку.
             </p>
           ) : (
-            routers.map((router) => (
-              <button
-                type="button"
-                key={router.id}
-                className={`m-routerrow ${router.id === selectedId ? 'm-routerrow-active' : ''}`}
-                onClick={() => {
-                  select(router.id);
-                  navigate('/app');
-                }}
-              >
-                <StatusDot item={router} />
-                <span className="m-routerrow-main">
-                  <span className="m-routerrow-name">{router.name}</span>
-                  <span className="m-routerrow-meta">
-                    {PRODUCT_LABEL[router.product] ?? router.product}
-                    {router.product_version ? ` ${router.product_version}` : ''}
-                    {router.latency_ms != null ? ` · ${Math.round(router.latency_ms)} мс` : ''}
-                  </span>
-                </span>
-                {router.id === selectedId ? (
-                  <svg className="m-check" viewBox="0 0 24 24" aria-hidden="true">
-                    <path d="m5 12.5 4.5 4.5L19 7" />
-                  </svg>
-                ) : null}
-              </button>
+            routerGroups.map((group) => (
+              <div className="m-router-group" key={group.id}>
+                <div className="m-router-group-head">
+                  <span className="m-label">{group.label}</span>
+                  <span className="m-router-group-count">{group.items.length}</span>
+                </div>
+                {group.items.map((router) => (
+                  <button
+                    type="button"
+                    key={router.id}
+                    className={`m-routerrow ${
+                      router.id === selectedId ? 'm-routerrow-active' : ''
+                    }`}
+                    onClick={() => {
+                      select(router.id);
+                      navigate('/app');
+                    }}
+                  >
+                    <StatusDot item={router} />
+                    <span className="m-routerrow-main">
+                      <span className="m-routerrow-name">{router.name}</span>
+                      <span className="m-routerrow-meta">
+                        {PRODUCT_LABEL[router.product] ?? router.product}
+                        {router.product_version ? ` ${router.product_version}` : ''}
+                        {router.latency_ms != null
+                          ? ` · ${Math.round(router.latency_ms)} мс`
+                          : ''}
+                      </span>
+                    </span>
+                    {router.id === selectedId ? (
+                      <svg className="m-check" viewBox="0 0 24 24" aria-hidden="true">
+                        <path d="m5 12.5 4.5 4.5L19 7" />
+                      </svg>
+                    ) : null}
+                  </button>
+                ))}
+              </div>
             ))
           )}
         </div>
@@ -118,7 +130,7 @@ export function RoutersScreen() {
 function AddRouterSheet({ onClose }: { onClose: () => void }) {
   const toast = useToast();
   const { reload } = useSession();
-  const { select, rememberRouter } = useMobile();
+  const { select } = useMobile();
   const [tab, setTab] = useState<'scan' | 'link'>('scan');
   const [text, setText] = useState('');
   const [busy, setBusy] = useState(false);
@@ -140,7 +152,6 @@ function AddRouterSheet({ onClose }: { onClose: () => void }) {
       setStatus('Входим и выбираем роутер…');
       await reload();
       const routerId = result.router_id || parsed.routerId || '';
-      if (routerId) rememberRouter(routerId);
       select(routerId);
       toast.success('Роутер добавлен');
       onClose();

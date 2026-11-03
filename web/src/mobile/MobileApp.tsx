@@ -11,17 +11,23 @@ import { BypassScreen } from './BypassScreen';
 import { RoutersScreen } from './RoutersScreen';
 import { NotificationsHub } from './NotificationsSheet';
 import { useNotificationToasts } from '../lib/notifications';
-import { readScannedRouterIds, rememberScannedRouter } from './scannedRouters';
+import { useSession } from '../session';
 import { hapticTap } from './haptics';
 
 const SELECTED_KEY = 'rc.mobile.router';
 
+export interface MobileRouterGroup {
+  id: string;
+  label: string;
+  items: MonitoringItem[];
+}
+
 export interface MobileState {
   routers: MonitoringItem[];
+  routerGroups: MobileRouterGroup[];
   selected: MonitoringItem | null;
   selectedId: string | null;
   select: (id: string) => void;
-  rememberRouter: (id: string) => void;
   reload: () => Promise<void>;
   loading: boolean;
   error: string | null;
@@ -72,16 +78,48 @@ export function MobileApp() {
     };
   }, []);
   const overview = useApi<MonitoringOverview>('/api/v1/monitoring/overview');
+  const { me } = useSession();
   const [selectedId, setSelectedId] = useState<string | null>(() =>
     window.localStorage.getItem(SELECTED_KEY),
   );
-  const [scannedIds, setScannedIds] = useState<string[]>(() => readScannedRouterIds());
 
   const allRouters = useMemo(() => overview.data?.items ?? [], [overview.data]);
-  const routers = useMemo(
-    () => allRouters.filter((item) => scannedIds.includes(item.id)),
-    [allRouters, scannedIds],
-  );
+  const isAdmin = me?.permissions.is_superadmin === true;
+  const currentUserId = me?.user.id ?? null;
+
+  // Администратор видит все роутеры, но сначала свои, затем сгруппированные
+  // по владельцам. Обычный пользователь получает с сервера только свои.
+  const routerGroups = useMemo<MobileRouterGroup[]>(() => {
+    if (allRouters.length === 0) return [];
+    if (!isAdmin) return [{ id: 'own', label: 'Мои роутеры', items: allRouters }];
+
+    const own: MonitoringItem[] = [];
+    const byOwner = new Map<string, MonitoringItem[]>();
+    for (const item of allRouters) {
+      if (currentUserId && item.owner_id === currentUserId) {
+        own.push(item);
+        continue;
+      }
+      const key = item.owner_id ?? 'unknown';
+      const list = byOwner.get(key) ?? [];
+      list.push(item);
+      byOwner.set(key, list);
+    }
+
+    const ownerLabel = (items: MonitoringItem[]): string =>
+      items[0]?.owner_name?.trim() || items[0]?.owner_email || 'Без владельца';
+
+    const groups: MobileRouterGroup[] = [];
+    if (own.length > 0) groups.push({ id: 'own', label: 'Мои роутеры', items: own });
+    for (const [id, items] of [...byOwner.entries()].sort((a, b) =>
+      ownerLabel(a[1]).localeCompare(ownerLabel(b[1]), 'ru'),
+    )) {
+      groups.push({ id, label: ownerLabel(items), items });
+    }
+    return groups;
+  }, [allRouters, isAdmin, currentUserId]);
+
+  const routers = useMemo(() => routerGroups.flatMap((group) => group.items), [routerGroups]);
 
   // Выбранный роутер: сохранённый, иначе первый в сети.
   useEffect(() => {
@@ -108,18 +146,14 @@ export function MobileApp() {
     await overview.reload();
   }, [overview]);
 
-  const rememberRouter = useCallback((id: string) => {
-    setScannedIds(rememberScannedRouter(id));
-  }, []);
-
   const selected = routers.find((item) => item.id === selectedId) ?? null;
 
   const state: MobileState = {
     routers,
+    routerGroups,
     selected,
     selectedId,
     select: setSelectedId,
-    rememberRouter,
     reload,
     loading: overview.loading,
     error: overview.error,

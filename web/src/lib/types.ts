@@ -444,6 +444,9 @@ export interface MonitoringItem {
   detail: string | null;
   direct_ip: string | null;
   vpn_ip: string | null;
+  owner_id?: string | null;
+  owner_name?: string | null;
+  owner_email?: string | null;
 }
 
 export interface MonitoringOverview {

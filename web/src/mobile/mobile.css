@@ -907,6 +907,30 @@ body.routx-app-body #root {
 
 /* Список роутеров ---------------------------------------------------------- */
 
+.m-router-group + .m-router-group {
+  margin-top: 14px;
+  padding-top: 4px;
+}
+
+.m-router-group-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 8px 0 2px;
+}
+
+.m-router-group-count {
+  min-width: 22px;
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: var(--m-accent-soft);
+  color: var(--m-accent);
+  font-size: 0.7rem;
+  font-weight: 700;
+  text-align: center;
+}
+
 .m-routerrow {
   display: flex;
   align-items: center;

@@ -27,7 +27,7 @@ interface ConnectionEntry extends RuleConnectionView {
 }
 
 export function HomeScreen() {
-  const { routers, selected, selectedId, select, reload, loading } = useMobile();
+  const { routers, routerGroups, selected, selectedId, select, reload, loading } = useMobile();
   const toast = useToast();
   const [now, setNow] = useState(() => new Date());
   const [sheet, setSheet] = useState(false);
@@ -1151,23 +1151,31 @@ export function HomeScreen() {
           <div className="m-sheet" onClick={(event) => event.stopPropagation()}>
             <div className="m-sheet-grip" />
             <h2 className="m-sheet-title">Выберите роутер</h2>
-            {routers.map((router) => (
-              <button
-                type="button"
-                key={router.id}
-                className={`m-pick ${router.id === selectedId ? 'm-pick-active' : ''}`}
-                onClick={() => {
-                  select(router.id);
-                  setSheet(false);
-                }}
-              >
-                <StatusDot item={router} />
-                <span className="m-pick-name">{router.name}</span>
-                <span className="m-pick-meta">
-                  {PRODUCT_LABEL[router.product] ?? router.product}
-                  {router.latency_ms != null ? ` · ${Math.round(router.latency_ms)} мс` : ''}
-                </span>
-              </button>
+            {routerGroups.map((group) => (
+              <div className="m-router-group" key={group.id}>
+                <div className="m-router-group-head">
+                  <span className="m-label">{group.label}</span>
+                  <span className="m-router-group-count">{group.items.length}</span>
+                </div>
+                {group.items.map((router) => (
+                  <button
+                    type="button"
+                    key={router.id}
+                    className={`m-pick ${router.id === selectedId ? 'm-pick-active' : ''}`}
+                    onClick={() => {
+                      select(router.id);
+                      setSheet(false);
+                    }}
+                  >
+                    <StatusDot item={router} />
+                    <span className="m-pick-name">{router.name}</span>
+                    <span className="m-pick-meta">
+                      {PRODUCT_LABEL[router.product] ?? router.product}
+                      {router.latency_ms != null ? ` · ${Math.round(router.latency_ms)} мс` : ''}
+                    </span>
+                  </button>
+                ))}
+              </div>
             ))}
             <button
               type="button"
