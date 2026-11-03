@@ -34,6 +34,12 @@ export interface AgentLink {
   host: string;
   tail: string;
   label: string;
+  proxy_tag?: string;
+  proxy_group?: string;
+  delay_ms?: number | null;
+  alive?: boolean | null;
+  active?: boolean;
+  selectable?: boolean;
 }
 
 export interface AgentSection {
@@ -60,6 +66,12 @@ export interface RuleConnectionView {
   enabled: boolean;
   /** Подключение сохранено в RoutX, но не найдено на роутере. */
   missing: boolean;
+  proxy_tag?: string;
+  proxy_group?: string;
+  delay_ms?: number | null;
+  alive?: boolean | null;
+  active?: boolean;
+  selectable?: boolean;
 }
 
 export interface RuleView {
@@ -329,6 +341,12 @@ export function buildRuleViews(input: {
           managed: Boolean(match),
           enabled: match?.enabled ?? true,
           missing: false,
+          proxy_tag: item.proxy_tag,
+          proxy_group: item.proxy_group,
+          delay_ms: item.delay_ms ?? null,
+          alive: item.alive ?? null,
+          active: item.active === true,
+          selectable: item.selectable === true,
         });
       }
     } else {

@@ -78,6 +78,112 @@ function validateValue(kind: 'subscription' | 'vless', value: string): string { 
   return text;
 }
 
+async function storeImportedLinks(args: {
+  pool: Pool;
+  masterKey: string;
+  routerId: string;
+  section: string;
+  parsed: { links: string[]; total: number; skipped: number };
+  sourceConnectionId: string | null;
+  userId: string;
+}): Promise<{
+  imported: number;
+  total: number;
+  skipped: number;
+  job: Awaited<ReturnType<typeof enqueueJob>>;
+}> {
+  const { pool, masterKey, routerId, section, parsed, sourceConnectionId, userId } = args;
+  const existing = await pool.query<{ id: string; secret_enc: string; label: string }>(
+    `select id, secret_enc, label from router_connections
+      where router_id = $1 and section = $2`,
+    [routerId, section],
+  );
+  const existingLinks = new Set<string>();
+  const existingLabels = new Set<string>();
+  const unsupportedIds: string[] = [];
+  for (const row of existing.rows) {
+    const value = decryptSecret(row.secret_enc, masterKey);
+    if (isUnsupportedPodkopLink(value)) {
+      unsupportedIds.push(row.id);
+      continue;
+    }
+    existingLinks.add(value);
+    existingLabels.add(row.label);
+  }
+  if (unsupportedIds.length > 0) {
+    await pool.query('delete from router_connections where router_id = $1 and id = any($2::uuid[])', [
+      routerId,
+      unsupportedIds,
+    ]);
+  }
+  const usedLabels = new Set(existingLabels);
+  const fresh: Array<{ link: string; label: string }> = [];
+  let duplicateLinks = 0;
+  let index = 0;
+  for (const link of parsed.links) {
+    if (existingLinks.has(link)) {
+      duplicateLinks++;
+      continue;
+    }
+    const base = subscriptionLinkLabel(link, index++);
+    if (existingLabels.has(base)) {
+      duplicateLinks++;
+      continue;
+    }
+    let label = base;
+    let suffix = 2;
+    while (usedLabels.has(label)) {
+      label = `${base.slice(0, 114)} #${suffix++}`;
+    }
+    usedLabels.add(label);
+    fresh.push({ link, label });
+  }
+  const skipped = parsed.skipped + duplicateLinks;
+
+  if (fresh.length > 0) {
+    const client = await pool.connect();
+    try {
+      await client.query('begin');
+      for (const item of fresh) {
+        await client.query(
+          `insert into router_connections
+             (id, router_id, section, kind, label, secret_enc, enabled, created_by)
+           values ($1,$2,$3,'vless',$4,$5,true,$6)`,
+          [
+            uuidv7(),
+            routerId,
+            section,
+            item.label,
+            encryptSecret(item.link, masterKey),
+            userId,
+          ],
+        );
+      }
+      if (sourceConnectionId) {
+        await client.query(
+          'update router_connections set enabled = false, section = $2, updated_at = now() where id = $1',
+          [sourceConnectionId, section],
+        );
+      }
+      await client.query('commit');
+    } catch (error) {
+      await client.query('rollback');
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
+  const job = await enqueueJob(pool, {
+    type: 'connections_apply',
+    routerId,
+    requestedBy: userId,
+    timeoutSeconds: 600,
+    payload: { reason: 'subscription_import', section },
+  });
+  return { imported: fresh.length, total: parsed.total, skipped, job };
+}
+
 export async function registerRouterConnectionRoutes(
   app: FastifyInstance,
   ctx: RouteContext,
@@ -306,10 +412,68 @@ export async function registerRouterConnectionRoutes(
       const router = await getRouterForMutation(pool, auth, params.id);
       assertOnline(router);
       if (router.product === 'podkop' && body.kind === 'subscription') {
-        throw badRequest(
-          'podkop_subscription_unsupported',
-          'Podkop поддерживает только прямые ссылки (vless/ss/hysteria2 и т. п.), подписки не поддерживаются',
+        let sourceUrl = body.value ?? '';
+        if (body.subscription_id) {
+          const catalog = await loadAccessibleSubscription(pool, auth, body.subscription_id);
+          sourceUrl = decryptSecret(catalog.secret_enc, masterKey);
+        }
+        if (!SUBSCRIPTION_RE.test(sourceUrl)) {
+          throw badRequest(
+            'invalid_subscription',
+            'Ссылка на подписку должна начинаться с http:// или https://',
+          );
+        }
+        const section =
+          body.section ??
+          (router.managed_section && router.managed_section !== 'router_control'
+            ? router.managed_section
+            : 'main');
+        const state = await pool.query<{ managed: Record<string, unknown> | null }>(
+          'select managed from router_state where router_id = $1',
+          [router.id],
         );
+        if (state.rows[0]?.managed?.[`section.${section}.connection_type`] === undefined) {
+          throw badRequest(
+            'section_missing',
+            `Секция «${section}» не найдена в Podkop. Сначала прочитайте состояние роутера.`,
+          );
+        }
+        const parsed = await fetchSubscription(sourceUrl);
+        const result = await storeImportedLinks({
+          pool,
+          masterKey,
+          routerId: router.id,
+          section,
+          parsed,
+          sourceConnectionId: null,
+          userId: auth.userId,
+        });
+        await audit(pool, {
+          actorId: auth.userId,
+          actorRole: auth.role,
+          action: 'router.podkop_subscription_autoimport',
+          targetType: 'router',
+          targetId: router.id,
+          routerId: router.id,
+          result: 'ok',
+          ip: request.ip,
+          userAgent: request.headers['user-agent'],
+          metadata: {
+            section,
+            imported: result.imported,
+            total: result.total,
+            skipped: result.skipped,
+            source: body.subscription_id ? 'catalog' : 'url',
+            job_id: result.job.id,
+          },
+        });
+        reply.code(202);
+        return {
+          imported: result.imported,
+          total: result.total,
+          skipped: result.skipped,
+          job: jobJson(result.job),
+        };
       }
 
       let value: string;

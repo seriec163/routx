@@ -10,6 +10,7 @@ export type JobType =
   | 'diff_custom'
   | 'diff_podkop'
   | 'podkop_outbound'
+  | 'proxy_select'
   | 'apply'
   | 'read_rules'
   | 'monitor'

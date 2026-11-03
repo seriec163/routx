@@ -95,6 +95,11 @@ function handle_command(cmd) {
 			if (!res.ok) return { status: "failed", error: { code: "podkop_outbound_failed", message: res.error } };
 			return { status: "success", result: res };
 		}
+		if (op == "select_proxy") {
+			let res = ops.select_proxy(product, args);
+			if (!res.ok) return { status: "failed", error: { code: "select_proxy_failed", message: res.error } };
+			return { status: "success", result: res };
+		}
 		if (op == "sb_check_update") {
 			let res = runner.run_product(product, [ "component_action", "sing_box", "check_update" ], 120);
 			let parsed = util.json_parse(res.stdout);

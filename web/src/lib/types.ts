@@ -177,6 +177,12 @@ export interface RuleConnectionView {
   managed: boolean;
   enabled: boolean;
   missing: boolean;
+  proxy_tag?: string;
+  proxy_group?: string;
+  delay_ms?: number | null;
+  alive?: boolean | null;
+  active?: boolean;
+  selectable?: boolean;
 }
 
 export interface RuleView {

@@ -650,6 +650,88 @@ function manage_connection(product, args) {
  * и содержимое локальных .lst. Один вызов вместо list_connections на каждую
  * секцию. Секреты по-прежнему не отдаются: только host/tail/hash.
  */
+function proxy_last_delay(proxy) {
+	if (type(proxy) != "object" || type(proxy.history) != "array")
+		return null;
+	for (let i = length(proxy.history) - 1; i >= 0; i--) {
+		let item = proxy.history[i];
+		if (type(item) == "object" && (type(item.delay) == "int" || type(item.delay) == "double") && item.delay > 0)
+			return item.delay;
+	}
+	return null;
+}
+
+function read_proxies(product) {
+	let res = run.run_product(product, [ "clash_api", "get_proxies" ], 20);
+	if (!res.ok)
+		return null;
+	let parsed = util.json_parse(res.stdout);
+	if (type(parsed) != "object" || type(parsed.proxies) != "object")
+		return null;
+	return parsed.proxies;
+}
+
+function enrich_links(product, section, links, proxies) {
+	let enriched = [];
+	if (type(proxies) != "object") {
+		for (let link in links)
+			push(enriched, link);
+		return enriched;
+	}
+	let mode = "selector";
+	if (product == "podkop") {
+		let cursor = uci.cursor();
+		let configured = util.as_string(cursor.get("podkop", section, "proxy_config_type"));
+		if (configured == "url" || configured == "selector" || configured == "urltest" || configured == "outbound")
+			mode = configured;
+		else if (cursor.get("podkop", section, "outbound_json") != null)
+			mode = "outbound";
+		else if (cursor.get("podkop", section, "urltest_proxy_links") != null)
+			mode = "urltest";
+		else if (cursor.get("podkop", section, "selector_proxy_links") != null)
+			mode = "selector";
+		else
+			mode = "url";
+	}
+	let group_tag = section + "-out";
+	let group = proxies[group_tag];
+	for (let i = 0; i < length(links); i++) {
+		let link = links[i];
+		let tag = mode == "url" || mode == "outbound" ? group_tag : section + "-" + (i + 1) + "-out";
+		let info = proxies[tag];
+		let delay = proxy_last_delay(info);
+		link.proxy_tag = tag;
+		link.proxy_group = group_tag;
+		link.delay_ms = delay;
+		link.alive = delay != null;
+		link.active = type(group) == "object" && util.as_string(group.now) == tag;
+		link.selectable = false;
+		if (type(group) == "object" && type(group.all) == "array") {
+			for (let member in group.all)
+				if (util.as_string(member) == tag)
+					link.selectable = true;
+		}
+		if (mode == "url")
+			link.active = true;
+		push(enriched, link);
+	}
+	return enriched;
+}
+
+function select_proxy(product, args) {
+	let group = util.as_string(args.group);
+	let tag = util.as_string(args.tag);
+	if (match(group, SECTION_RE) == null || match(tag, SECTION_RE) == null)
+		return { ok: false, error: "invalid_proxy_tag" };
+	if (product != "forkop" && product != "prokop" && product != "podkop")
+		return { ok: false, error: "неизвестный продукт" };
+	let res = run.run_product(product, [ "clash_api", "set_group_proxy", group, tag ], 30);
+	let parsed = util.json_parse(res.stdout);
+	if (!res.ok || type(parsed) != "object" || parsed.success !== true)
+		return { ok: false, error: run.error_text(res) };
+	return { ok: true, group: group, tag: tag };
+}
+
 function read_rules(product) {
 	if (product != "forkop" && product != "prokop" && product != "podkop")
 		return { ok: false, error: "неизвестный продукт" };
@@ -665,6 +747,7 @@ function read_rules(product) {
 	}
 
 	let sections = [];
+	let proxies = read_proxies(product);
 	for (let name in names) {
 		let options = {};
 		let prefix = "section." + name + ".";
@@ -700,7 +783,7 @@ function read_rules(product) {
 			section: name,
 			options: options,
 			subscriptions: conn.ok ? conn.subscriptions : [],
-			links: conn.ok ? conn.links : [],
+			links: conn.ok ? enrich_links(product, name, conn.links, proxies) : [],
 			lists: lists
 		});
 	}
@@ -1015,4 +1098,4 @@ function apply_connections(product, args) {
 	};
 }
 
-return { precheck, verify, service_action, reload, apply_uci, apply_connections, list_connections, manage_connection, set_podkop_outbound, read_rules };
+return { precheck, verify, service_action, reload, apply_uci, apply_connections, list_connections, manage_connection, set_podkop_outbound, select_proxy, read_rules };

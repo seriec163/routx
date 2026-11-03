@@ -528,6 +528,31 @@ export function RouterRulesPanel(props: {
     }
   }
 
+  async function selectProxy(
+    section: string,
+    connection: RuleConnectionView,
+  ): Promise<void> {
+    if (!connection.proxy_group || !connection.proxy_tag) return;
+    try {
+      const response = await api<{ job: Job }>(
+        `/api/v1/routers/${props.routerId}/proxies/select`,
+        {
+          method: 'POST',
+          body: { group: connection.proxy_group, tag: connection.proxy_tag },
+        },
+      );
+      const job = await waitForJob(response.job, 90_000);
+      if (job.status !== 'success') {
+        throw new Error(job.error?.message ?? 'Не удалось переключить подключение');
+      }
+      toast.success('Активное подключение переключено');
+      await readLive();
+      props.onChanged();
+    } catch (caught) {
+      toast.error(errorMessage(caught));
+    }
+  }
+
   function submitRule(body: RuleBody, pending: PendingConnection[]): void {
     const userEnabled = body.enabled;
     const hasOutbound =
@@ -691,6 +716,7 @@ export function RouterRulesPanel(props: {
                 }
                 onDelete={(connection) => requestDelete(rule, connection)}
                 onExpandSubscription={isPodkop ? expandSubscription : undefined}
+                onSelectProxy={selectProxy}
                 onToggle={() => requestToggle(rule)}
                 disabled={!online}
               />
@@ -807,6 +833,7 @@ function RuleCard(props: {
   onReplace: (connection: RuleConnectionView) => void;
   onDelete: (connection: RuleConnectionView) => void;
   onExpandSubscription?: (section: string, connection: RuleConnectionView) => void;
+  onSelectProxy?: (section: string, connection: RuleConnectionView) => void;
   onToggle: () => void;
 }) {
   const { rule } = props;
@@ -911,6 +938,11 @@ function RuleCard(props: {
                   disabled={props.disabled}
                   onReplace={() => props.onReplace(connection)}
                   onDelete={() => props.onDelete(connection)}
+                  onSelect={
+                    props.onSelectProxy
+                      ? () => props.onSelectProxy!(rule.section, connection)
+                      : undefined
+                  }
                 />
               ))}
             </ul>
@@ -941,6 +973,7 @@ function ConnectionRow(props: {
   onReplace: () => void;
   onDelete: () => void;
   onExpand?: () => void;
+  onSelect?: () => void;
 }) {
   const { connection } = props;
   return (
@@ -955,9 +988,20 @@ function ConnectionRow(props: {
         <span className="muted-text small">
           {connection.managed ? 'RoutX' : 'вне RoutX'}
           {connection.missing ? ' · нет на роутере' : ''}
+          {connection.kind === 'link' && connection.active ? ' · активно' : ''}
+          {connection.kind === 'link' && connection.delay_ms != null
+            ? ` · ${Math.round(connection.delay_ms)} мс`
+            : connection.kind === 'link' && connection.alive === false
+              ? ' · не отвечает'
+              : ''}
         </span>
       </div>
       <div className="row-actions">
+        {props.onSelect && connection.selectable && !connection.active ? (
+          <Button size="sm" variant="ghost" onClick={props.onSelect} disabled={props.disabled}>
+            Выбрать
+          </Button>
+        ) : null}
         {props.onExpand ? (
           <Button size="sm" variant="ghost" onClick={props.onExpand} disabled={props.disabled}>
             Разобрать

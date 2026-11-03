@@ -271,6 +271,42 @@ export async function registerRouterRuleRoutes(
     },
   );
 
+  app.post('/api/v1/routers/:id/proxies/select', async (request, reply) => {
+    const auth = requireUser(request);
+    const params = z.object({ id: z.string().uuid() }).parse(request.params);
+    const body = z
+      .object({
+        group: z.string().regex(SECTION_RE),
+        tag: z.string().regex(SECTION_RE),
+      })
+      .strict()
+      .parse(request.body);
+
+    const router = await getRouterForMutation(pool, auth, params.id);
+    assertOnline(router);
+    const job = await enqueueJob(pool, {
+      type: 'proxy_select',
+      routerId: router.id,
+      requestedBy: auth.userId,
+      timeoutSeconds: 90,
+      payload: { group: body.group, tag: body.tag },
+    });
+    await audit(pool, {
+      actorId: auth.userId,
+      actorRole: auth.role,
+      action: 'router.proxy_select',
+      targetType: 'router',
+      targetId: router.id,
+      routerId: router.id,
+      result: 'ok',
+      ip: request.ip,
+      userAgent: request.headers['user-agent'],
+      metadata: { group: body.group, tag: body.tag, job_id: job.id },
+    });
+    reply.code(202);
+    return { job: jobJson(job) };
+  });
+
   app.put('/api/v1/routers/:id/podkop/outbound', async (request, reply) => {
     const auth = requireUser(request);
     const params = z.object({ id: z.string().uuid() }).parse(request.params);

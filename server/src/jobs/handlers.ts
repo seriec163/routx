@@ -622,6 +622,18 @@ export async function podkopOutbound(ctx: HandlerContext, job: JobRow): Promise<
   return result;
 }
 
+export async function proxySelect(ctx: HandlerContext, job: JobRow): Promise<Json> {
+  const routerId = requireRouter(job);
+  const group = asString(job.payload.group);
+  const tag = asString(job.payload.tag);
+  if (!group || !tag) throw new JobFailure('invalid_payload', 'Не указана группа или прокси');
+  const raw = await runCommand(ctx, job, 'select_proxy', { group, tag }, 60_000);
+  await ctx.pool.query('update routers set last_error = null, updated_at = now() where id = $1', [
+    routerId,
+  ]);
+  return raw;
+}
+
 function expectedState(items: DiffItem[]): Map<string, UciValue> {
   const expected = new Map<string, UciValue>();
   for (const item of items) {
@@ -1926,6 +1938,7 @@ export const HANDLERS: Record<string, JobHandler> = {
   diff_custom: diffCustom,
   diff_podkop: diffPodkop,
   podkop_outbound: podkopOutbound,
+  proxy_select: proxySelect,
   apply: applyRun,
   read_rules: readRules,
   monitor: monitorProbe,

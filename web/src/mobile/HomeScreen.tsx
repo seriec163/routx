@@ -31,7 +31,7 @@ export function HomeScreen() {
   const [now, setNow] = useState(() => new Date());
   const [sheet, setSheet] = useState(false);
   const [job, setJob] = useState<Job | null>(null);
-  const [action, setAction] = useState<'idle' | 'ping' | 'vpn' | 'reboot'>('idle');
+  const [action, setAction] = useState<'idle' | 'ping' | 'vpn' | 'reboot' | 'select'>('idle');
   const [replaceTarget, setReplaceTarget] = useState<ConnectionEntry | null>(null);
   const [replaceValue, setReplaceValue] = useState('');
   const [replaceBusy, setReplaceBusy] = useState(false);
@@ -89,6 +89,38 @@ export function HomeScreen() {
     day: 'numeric',
     month: 'long',
   });
+
+  async function selectConnection(connection: ConnectionEntry): Promise<void> {
+    if (
+      !selected ||
+      action !== 'idle' ||
+      !connection.proxy_group ||
+      !connection.proxy_tag
+    )
+      return;
+    setAction('select');
+    try {
+      const started = await api<{ job: Job }>(
+        `/api/v1/routers/${selected.id}/proxies/select`,
+        {
+          method: 'POST',
+          body: { group: connection.proxy_group, tag: connection.proxy_tag },
+        },
+      );
+      setJob(started.job);
+      const done = await waitForJob(started.job, setJob);
+      if (done.status !== 'success') {
+        throw new Error(done.error?.message ?? 'Не удалось переключить подключение');
+      }
+      await reload();
+      toast.success('Активное подключение переключено');
+    } catch (caught) {
+      toast.error(errorMessage(caught));
+    } finally {
+      setAction('idle');
+      setJob(null);
+    }
+  }
 
   async function testPing(): Promise<void> {
     if (!selected || action !== 'idle') return;
@@ -353,8 +385,24 @@ export function HomeScreen() {
                     {connection.sectionLabel} · {connection.masked}
                     {connection.missing ? ' · нет на роутере' : ''}
                     {!connection.enabled ? ' · выключено' : ''}
+                    {connection.kind === 'link' && connection.active ? ' · активно' : ''}
+                    {connection.kind === 'link' && connection.delay_ms != null
+                      ? ` · ${Math.round(connection.delay_ms)} мс`
+                      : connection.kind === 'link' && connection.alive === false
+                        ? ' · не отвечает'
+                        : ''}
                   </span>
                 </span>
+                {connection.selectable && !connection.active ? (
+                  <button
+                    type="button"
+                    className="m-mini"
+                    onClick={() => void selectConnection(connection)}
+                    disabled={!selected || selected.status !== 'online' || action !== 'idle'}
+                  >
+                    {action === 'select' ? 'Переключаем…' : 'Выбрать'}
+                  </button>
+                ) : null}
                 <button
                   type="button"
                   className="m-mini"
