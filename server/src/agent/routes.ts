@@ -30,7 +30,7 @@ export interface AgentRouteContext {
 const probeSchema = z
   .object({
     agent_version: z.string().max(40).optional(),
-    product: z.enum(['forkop', 'prokop', 'unknown', 'conflict']).optional(),
+    product: z.enum(['forkop', 'prokop', 'podkop', 'unknown', 'conflict']).optional(),
     product_version: z.string().max(60).nullable().optional(),
     conflict: z.boolean().optional(),
     manifest_version: z.coerce.number().int().nonnegative().nullable().optional(),
@@ -51,7 +51,7 @@ const probeSchema = z
 const bindSchema = z
   .object({
     token: z.string().min(20).max(64),
-    product: z.enum(['forkop', 'prokop', 'unknown', 'conflict']).optional(),
+    product: z.enum(['forkop', 'prokop', 'podkop', 'unknown', 'conflict']).optional(),
     agent_version: z.string().max(40).optional(),
     hardware: z.record(z.string(), z.unknown()).optional(),
   })
@@ -93,7 +93,7 @@ function agentContext(request: FastifyRequest): AgentAuthContext {
 
 const INSTALL_SCRIPT = `#!/bin/sh
 # RoutX agent installer.
-# Usage: sh install.sh --server URL --token BINDING_TOKEN [--product prokop|forkop] [--sing-box tiny|stable|extended] [--reboot]
+# Usage: sh install.sh --server URL --token BINDING_TOKEN [--product prokop|forkop|podkop] [--sing-box tiny|stable|extended] [--reboot]
 set -eu
 
 SERVER=""
@@ -116,8 +116,8 @@ done
 [ -n "$SERVER" ] || { echo "--server is required" >&2; exit 2; }
 [ -n "$TOKEN" ] || { echo "--token is required" >&2; exit 2; }
 case "$PRODUCT_ARG" in
-  ""|prokop|forkop) ;;
-  *) echo "--product must be prokop or forkop" >&2; exit 2 ;;
+  ""|prokop|forkop|podkop) ;;
+  *) echo "--product must be prokop, forkop or podkop" >&2; exit 2 ;;
 esac
 case "$SINGBOX" in
   ""|tiny|stable|extended) ;;
@@ -147,18 +147,52 @@ has_forkop() {
   return 1
 }
 
+pkg_has() {
+  if command -v opkg >/dev/null 2>&1; then
+    opkg list-installed 2>/dev/null | grep -q "^$1 "
+  elif command -v apk >/dev/null 2>&1; then
+    apk info -e "$1" >/dev/null 2>&1
+  else
+    return 1
+  fi
+}
+pkg_del() {
+  if command -v opkg >/dev/null 2>&1; then
+    opkg remove --force-depends "$1" >/dev/null 2>&1 || true
+  elif command -v apk >/dev/null 2>&1; then
+    apk del "$1" >/dev/null 2>&1 || true
+  fi
+}
+
+has_podkop() {
+  # /etc/config/podkop появляется до готовности пакета, поэтому его одного мало.
+  [ -x /usr/bin/podkop ] && return 0
+  [ -x /etc/init.d/podkop ] && return 0
+  if command -v opkg >/dev/null 2>&1; then
+    opkg list-installed 2>/dev/null | grep -q '^podkop ' && return 0
+  elif command -v apk >/dev/null 2>&1; then
+    apk info -e podkop >/dev/null 2>&1 && return 0
+  fi
+  return 1
+}
+
 HAS_PROKOP=0
 HAS_FORKOP=0
+HAS_PODKOP=0
 has_prokop && HAS_PROKOP=1
 has_forkop && HAS_FORKOP=1
-if [ "$HAS_PROKOP" -eq 1 ] && [ "$HAS_FORKOP" -eq 1 ]; then
-  echo "На роутере одновременно найдены Prokop и Forkop. Изменения запрещены: устраните конфликт вручную." >&2
+has_podkop && HAS_PODKOP=1
+FOUND=$((HAS_PROKOP + HAS_FORKOP + HAS_PODKOP))
+if [ "$FOUND" -gt 1 ]; then
+  echo "На роутере одновременно найдено несколько продуктов (Prokop/Forkop/Podkop). Изменения запрещены: устраните конфликт вручную." >&2
   exit 1
 fi
 if [ "$HAS_PROKOP" -eq 1 ]; then
   PRODUCT="prokop"
 elif [ "$HAS_FORKOP" -eq 1 ]; then
   PRODUCT="forkop"
+elif [ "$HAS_PODKOP" -eq 1 ]; then
+  PRODUCT="podkop"
 fi
 if [ -n "$PRODUCT_ARG" ] && [ -n "$PRODUCT" ] && [ "$PRODUCT_ARG" != "$PRODUCT" ]; then
   echo "На роутере уже установлен $PRODUCT, а запрошен $PRODUCT_ARG. Один роутер — один продукт." >&2
@@ -170,18 +204,20 @@ fi
 if [ -z "$PRODUCT" ]; then
   # /dev/tty может существовать как файл, но не открываться без терминала.
   if ! ( : </dev/tty ) 2>/dev/null; then
-    echo "Prokop/Forkop не найден. Запустите установщик в терминале SSH или укажите --product prokop|forkop." >&2
+    echo "Prokop/Forkop/Podkop не найден. Запустите установщик в терминале SSH или укажите --product prokop|forkop|podkop." >&2
     exit 2
   fi
-  printf '\\nProkop или Forkop не найден. Что установить вместе с агентом?\\n' >/dev/tty
+  printf '\\nProkop, Forkop или Podkop не найден. Что установить вместе с агентом?\\n' >/dev/tty
   printf '  1) Prokop (рекомендуется)\\n' >/dev/tty
   printf '  2) Forkop\\n' >/dev/tty
+  printf '  3) Podkop\\n' >/dev/tty
   printf 'Выбор [1]: ' >/dev/tty
   read -r choice </dev/tty || choice=""
   [ -n "$choice" ] || choice="1"
   case "$choice" in
     1) PRODUCT="prokop" ;;
     2) PRODUCT="forkop" ;;
+    3) PRODUCT="podkop" ;;
     *) echo "Некорректный выбор" >&2; exit 2 ;;
   esac
 fi
@@ -298,23 +334,63 @@ rm -f /var/run/routx-agent/status.json
 
 # Агент уже привязан. Теперь ставим продукт, только если его действительно нет.
 # Повторная проверка защищает от гонки и от ложного «продукта нет».
-if ! has_prokop && ! has_forkop; then
+if ! has_prokop && ! has_forkop && ! has_podkop; then
   echo "Агент установлен и привязан. Устанавливаю $PRODUCT ..."
-  if [ "$PRODUCT" = "prokop" ]; then
-    if [ -n "$SINGBOX" ]; then
-      wget -qO- https://asofwar.github.io/prokop/install.sh | sh -s -- --lang ru --sing-box "$SINGBOX"
-    else
-      wget -qO- https://asofwar.github.io/prokop/install.sh | sh -s -- --lang ru
-    fi
-  else
-    wget -qO- https://raw.githubusercontent.com/ushan0v/forkop/main/install.sh | sh -s
-  fi
+  case "$PRODUCT" in
+    prokop)
+      if [ -n "$SINGBOX" ]; then
+        wget -qO- https://asofwar.github.io/prokop/install.sh | sh -s -- --lang ru --sing-box "$SINGBOX"
+      else
+        wget -qO- https://asofwar.github.io/prokop/install.sh | sh -s -- --lang ru
+      fi
+      ;;
+    forkop)
+      wget -qO- https://raw.githubusercontent.com/ushan0v/forkop/main/install.sh | sh -s
+      ;;
+    podkop)
+      REL=$(. /etc/openwrt_release >/dev/null 2>&1; echo "$DISTRIB_RELEASE")
+      MAJOR="\${REL%%.*}"
+      MINOR="\${REL#*.}"
+      MINOR="\${MINOR%%.*}"
+      case "$MAJOR" in ''|*[!0-9]*) MAJOR=0 ;; esac
+      case "$MINOR" in ''|*[!0-9]*) MINOR=0 ;; esac
+      if [ "$MAJOR" -lt 24 ] || { [ "$MAJOR" -eq 24 ] && [ "$MINOR" -lt 10 ]; }; then
+        echo "Podkop требует OpenWrt 24.10 или новее (обнаружено: \${REL:-неизвестно})." >&2
+        exit 1
+      fi
+      AVAIL="$(df /overlay 2>/dev/null | awk 'NR==2 {print $4}')"
+      case "$AVAIL" in ''|*[!0-9]*) AVAIL=0 ;; esac
+      if [ "$AVAIL" -gt 0 ] && [ "$AVAIL" -lt 25600 ]; then
+        echo "Недостаточно места для Podkop: свободно $((AVAIL/1024)) МБ, нужно минимум 25 МБ." >&2
+        exit 1
+      fi
+      if pkg_has https-dns-proxy; then
+        echo "Podkop несовместим с https-dns-proxy: удаляю конфликтующий пакет." >&2
+        pkg_del https-dns-proxy
+        pkg_del luci-app-https-dns-proxy
+        pkg_del luci-i18n-https-dns-proxy-ru
+      fi
+      # Официальный установщик спрашивает только про русскую локализацию:
+      # https-dns-proxy и старый конфиг обработаны выше. Отвечаем "n" —
+      # интерфейс Podkop настраивается в LuCI, а не в RoutX.
+      PODKOP_INSTALLER="$(wget -qO- https://raw.githubusercontent.com/itdoginfo/podkop/main/install.sh 2>/dev/null)" || true
+      if [ -z "$PODKOP_INSTALLER" ]; then
+        echo "Не удалось загрузить установщик Podkop." >&2
+        exit 1
+      fi
+      echo n | sh -c "$PODKOP_INSTALLER" || true
+      ;;
+  esac
 
-  if has_prokop && has_forkop; then
-    echo "После установки обнаружены оба продукта (Prokop и Forkop). Это конфликт: устраните его вручную. Агент не вносит изменений." >&2
+  HAS_AFTER=0
+  has_prokop && HAS_AFTER=$((HAS_AFTER + 1))
+  has_forkop && HAS_AFTER=$((HAS_AFTER + 1))
+  has_podkop && HAS_AFTER=$((HAS_AFTER + 1))
+  if [ "$HAS_AFTER" -gt 1 ]; then
+    echo "После установки обнаружено несколько продуктов. Это конфликт: устраните его вручную. Агент не вносит изменений." >&2
     exit 1
   fi
-  if ! has_prokop && ! has_forkop; then
+  if [ "$HAS_AFTER" -eq 0 ]; then
     echo "Не удалось установить $PRODUCT. Агент остаётся привязанным; установите продукт вручную и перезапустите /etc/init.d/routx-agent." >&2
     exit 1
   fi

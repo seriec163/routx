@@ -347,7 +347,7 @@ export function assertRouterOperable(product: string, status: string): void {
   if (status === 'conflict' || product === 'conflict') {
     throw conflict(
       'router_conflict',
-      'На роутере одновременно обнаружены Forkop и Prokop. Изменения запрещены до устранения конфликта.',
+      'На роутере обнаружено несколько продуктов (Forkop/Prokop/Podkop). Изменения запрещены до устранения конфликта.',
     );
   }
   if (status === 'unsupported') {
@@ -454,7 +454,7 @@ export async function updateRouterFromProbe(
     `update routers set
         product = case
           when $2::boolean then 'conflict'
-          when $3 in ('forkop','prokop') then $3
+          when $3 in ('forkop','prokop','podkop') then $3
           else product end,
         product_version = coalesce($4, product_version),
         agent_version = coalesce($5, agent_version),

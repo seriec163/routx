@@ -25,7 +25,7 @@ function diagnostics_quick(product) {
 		push(reasons, "DNS не настроен");
 
 	push(report.checks, {
-		name: "prokop_service",
+		name: product + "_service",
 		state: !ui_vals.health.product_running ? "error" : (ui_vals.health.product_enabled ? "ok" : "warning"),
 		details: !ui_vals.health.product_running ? "не запущен" :
 			(ui_vals.health.product_enabled ? "запущен, автозапуск включён" : "запущен, автозапуск отключён")
@@ -35,7 +35,7 @@ function diagnostics_quick(product) {
 		state: !ui_vals.health.sing_box_running ? "error" :
 			(ui_vals.health.sing_box_managed || ui_vals.health.sing_box_enabled ? "ok" : "warning"),
 		details: !ui_vals.health.sing_box_running ? "не запущен" :
-			(ui_vals.health.sing_box_managed ? "запущен, автозапуск через " + (product == "forkop" ? "Forkop" : "Prokop") :
+			(ui_vals.health.sing_box_managed ? "запущен, автозапуск через " + (product == "forkop" ? "Forkop" : (product == "podkop" ? "Podkop" : "Prokop")) :
 				(ui_vals.health.sing_box_enabled ? "запущен, автозапуск включён" : "запущен, автозапуск отключён"))
 	});
 
@@ -101,6 +101,9 @@ function diagnostics_quick(product) {
 	} else if (product == "forkop") {
 		let res = run.run_product("forkop", ["get_status"], 20);
 		push(report.checks, check_state("forkop_get_status", res.ok, res.ok ? "ok" : run.error_text(res)));
+	} else if (product == "podkop") {
+		let res = run.run_product("podkop", ["get_status"], 20);
+		push(report.checks, check_state("podkop_get_status", res.ok, res.ok ? "ok" : run.error_text(res)));
 	} else {
 		push(report.checks, { name: "product", state: "not_available", details: "продукт не определён" });
 	}
@@ -120,8 +123,15 @@ function diagnostics_full(product) {
 		} else {
 			push(report.checks, { name: "global_check", state: "error", details: run.error_text(res) });
 		}
+	} else if (product == "podkop") {
+		let res = run.run_product("podkop", ["global_check"], 180);
+		if (res.ok) {
+			push(report.checks, { name: "global_check", state: "ok", details: util.truncate_text(res.stdout, 60000) });
+		} else {
+			push(report.checks, { name: "global_check", state: "error", details: run.error_text(res) });
+		}
 	} else {
-		push(report.checks, { name: "global_check", state: "not_available", details: "доступно только для Prokop" });
+		push(report.checks, { name: "global_check", state: "not_available", details: "доступно только для Prokop/Podkop" });
 	}
 	let text = util.mask_secrets(util.json_string(report));
 	return { report: report, text: text };

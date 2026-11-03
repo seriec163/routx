@@ -124,7 +124,7 @@ export function LoginPage() {
           <BrandMark />
           <div>
             <p className="brand-name">RoutX</p>
-            <p className="brand-sub">OpenWrt · Forkop / Prokop</p>
+            <p className="brand-sub">OpenWrt · Forkop / Prokop / Podkop</p>
           </div>
         </div>
         <div className="auth-pitch">
@@ -140,7 +140,7 @@ export function LoginPage() {
             <li>Каждое изменение — снимок, проверка и откат.</li>
           </ul>
         </div>
-        <p className="fineprint">Forkop и Prokop не переустанавливаются и не мигрируются.</p>
+        <p className="fineprint">Продукты Forkop, Prokop и Podkop не переустанавливаются и не мигрируются.</p>
       </aside>
 
       <main className="auth-main">

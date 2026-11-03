@@ -354,6 +354,8 @@ function productLabel(product) {
 		return 'Prokop';
 	if (product === 'forkop')
 		return 'Forkop';
+	if (product === 'podkop')
+		return 'Podkop';
 	if (product === 'conflict')
 		return 'Конфликт';
 	return 'не определён';

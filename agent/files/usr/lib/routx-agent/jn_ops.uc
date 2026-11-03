@@ -253,7 +253,7 @@ function connection_mask(url) {
 }
 
 function list_connections(product, args) {
-	if (product != "forkop" && product != "prokop")
+	if (product != "forkop" && product != "prokop" && product != "podkop")
 		return { ok: false, error: "неизвестный продукт" };
 	let section = util.as_string(args.section);
 	if (match(section, SECTION_RE) == null)
@@ -267,20 +267,37 @@ function list_connections(product, args) {
 	if (type(all) != "object")
 		all = {};
 	let subscriptions = [];
-	for (let sname in all) {
-		let sect = all[sname];
-		if (type(sect) != "object" || sect[".type"] != "subscription_url")
-			continue;
-		if (util.as_string(sect.section) != section)
-			continue;
-		let info = connection_mask(sect.url);
-		push(subscriptions, { name: sname, host: info.host, tail: info.tail });
+	if (product != "podkop") {
+		for (let sname in all) {
+			let sect = all[sname];
+			if (type(sect) != "object" || sect[".type"] != "subscription_url")
+				continue;
+			if (util.as_string(sect.section) != section)
+				continue;
+			let info = connection_mask(sect.url);
+			push(subscriptions, { name: sname, host: info.host, tail: info.tail });
+		}
 	}
 
 	let links = [];
-	let raw = cursor.get(product, section, "selector_proxy_links");
-	if (type(raw) != "array")
-		raw = raw == null ? [] : [ raw ];
+	let raw = [];
+	let link_keys = product == "podkop"
+		? [ "urltest_proxy_links", "selector_proxy_links" ]
+		: [ "selector_proxy_links" ];
+	for (let key in link_keys) {
+		let value = cursor.get(product, section, key);
+		if (type(value) == "array") {
+			for (let item in value)
+				push(raw, item);
+		} else if (value != null) {
+			push(raw, value);
+		}
+	}
+	if (product == "podkop") {
+		let single = util.as_string(cursor.get(product, section, "proxy_string"));
+		if (single != "")
+			push(raw, single);
+	}
 	let index_value = 0;
 	for (let item in raw) {
 		let link = util.as_string(item);
@@ -411,7 +428,7 @@ function manage_connection(product, args) {
  * секцию. Секреты по-прежнему не отдаются: только host/tail/hash.
  */
 function read_rules(product) {
-	if (product != "forkop" && product != "prokop")
+	if (product != "forkop" && product != "prokop" && product != "podkop")
 		return { ok: false, error: "неизвестный продукт" };
 
 	let rs = state.read_state(product);
@@ -473,7 +490,8 @@ function read_rules(product) {
 	};
 }
 
-function apply_connections(product, args) {	if (product != "forkop" && product != "prokop")
+function apply_connections(product, args) {
+	if (product != "forkop" && product != "prokop")
 		return { ok: false, error: "неизвестный продукт" };
 	args = type(args) == "object" ? args : {};
 

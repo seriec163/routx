@@ -66,8 +66,9 @@ export const ROUTER_STATUS: Record<string, string> = {
 export const PRODUCT_LABEL: Record<string, string> = {
   forkop: 'Forkop',
   prokop: 'Prokop',
+  podkop: 'Podkop',
   unknown: 'Не определён',
-  conflict: 'Forkop + Prokop',
+  conflict: 'Forkop + Prokop + Podkop',
 };
 
 export const JOB_STATUS: Record<string, string> = {

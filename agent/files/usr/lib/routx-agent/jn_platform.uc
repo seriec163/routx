@@ -11,7 +11,7 @@ const SUPPORTED_ARCH = {
 	"aarch64_generic": true
 };
 
-const PRODUCTS = ["forkop", "prokop"];
+const PRODUCTS = ["forkop", "prokop", "podkop"];
 
 function release_info() {
 	let text = util.read_file("/etc/openwrt_release", "");
@@ -77,14 +77,7 @@ function product_binary(product) {
 	return "/usr/bin/" + product;
 }
 
-function product_installed(product) {
-	if (util.file_exists(product_config(product)) || util.file_exists(product_binary(product)))
-		return true;
-	if (util.file_exists("/etc/init.d/" + product))
-		return true;
-
-	// Бинарник и конфиг могут отсутствовать при частично снятом пакете.
-	// Список пакетов — последняя проверка, чтобы не устанавливать второй продукт.
+function package_installed(product) {
 	let list = run.run([ "opkg", "list-installed" ], 20);
 	if (list.ok) {
 		let prefix = product + " ";
@@ -98,20 +91,37 @@ function product_installed(product) {
 	return apk.ok;
 }
 
+function product_installed(product) {
+	// У Podkop конфиг создаётся установщиком до готовности пакета; одного
+	// /etc/config/podkop недостаточно, иначе неполная установка считается рабочей.
+	if (product == "podkop") {
+		if (util.file_exists("/usr/bin/podkop") || util.file_exists("/etc/init.d/podkop"))
+			return true;
+		return package_installed(product);
+	}
+	if (util.file_exists(product_config(product)) || util.file_exists(product_binary(product)))
+		return true;
+	if (util.file_exists("/etc/init.d/" + product))
+		return true;
+
+	// Бинарник и конфиг могут отсутствовать при частично снятом пакете.
+	// Список пакетов — последняя проверка, чтобы не устанавливать второй продукт.
+	return package_installed(product);
+}
+
 function detect_product() {
-	let has_forkop = product_installed("forkop");
-	let has_prokop = product_installed("prokop");
-	if (has_forkop && has_prokop)
+	let found = [];
+	for (let product in PRODUCTS) {
+		if (product_installed(product))
+			push(found, product);
+	}
+	if (length(found) > 1)
 		return "conflict";
-	if (has_prokop)
-		return "prokop";
-	if (has_forkop)
-		return "forkop";
-	return "unknown";
+	return length(found) == 1 ? found[0] : "unknown";
 }
 
 function product_version(product) {
-	if (product != "forkop" && product != "prokop")
+	if (product != "forkop" && product != "prokop" && product != "podkop")
 		return "";
 	let result = run.run_product(product, ["show_version"], 15);
 	if (!result.ok)
@@ -123,7 +133,7 @@ function sing_box_info(product) {
 	let version = "";
 	let variant = "";
 
-	if (product == "forkop" || product == "prokop") {
+	if (product == "forkop" || product == "prokop" || product == "podkop") {
 		let result = run.run_product(product, ["show_sing_box_version"], 15);
 		if (result.ok)
 			version = run.first_line(result.stdout);
@@ -153,6 +163,8 @@ function sing_box_info(product) {
 		if (trim(marker) != "")
 			variant = run.first_line(marker);
 	}
+	if (product == "podkop" && variant == "")
+		variant = "podkop";
 	if (variant == "" && index(version, "extended") >= 0)
 		variant = index(version, "compressed") >= 0 ? "extended_compressed" : "extended";
 
@@ -178,7 +190,39 @@ function platform_state(product) {
 	return "ok";
 }
 
+function podkop_ui_state() {
+	let status = null;
+	let sb = null;
+	let status_res = run.run_product("podkop", ["get_status"], 20);
+	if (status_res.ok)
+		status = util.json_parse(status_res.stdout);
+	let sb_res = run.run_product("podkop", ["get_sing_box_status"], 20);
+	if (sb_res.ok)
+		sb = util.json_parse(sb_res.stdout);
+
+	let enabled = type(status) == "object" && int(status.enabled) == 1;
+	let running = type(sb) == "object" && int(sb.running) == 1;
+	let dns_configured = type(sb) == "object" && int(sb.dns_configured) == 1;
+	return {
+		service: {
+			podkop: {
+				running: running,
+				enabled: enabled,
+				dns_configured: dns_configured
+			},
+			sing_box: {
+				running: running,
+				enabled: type(sb) == "object" && int(sb.enabled) == 1,
+				dns_configured: dns_configured
+			}
+		},
+		capabilities: {}
+	};
+}
+
 function get_ui_state(product) {
+	if (product == "podkop")
+		return podkop_ui_state();
 	if (product != "forkop" && product != "prokop")
 		return null;
 	let result = run.run_product(product, ["get_ui_state"], 20);
@@ -198,7 +242,7 @@ function ui_state_values(product, ui) {
 			capabilities = ui.capabilities;
 	}
 
-	let own = (product == "forkop" || product == "prokop") && type(service[product]) == "object"
+	let own = (product == "forkop" || product == "prokop" || product == "podkop") && type(service[product]) == "object"
 		? service[product] : {};
 	let sing_box = type(service.sing_box) == "object" ? service.sing_box : {};
 	let present = length(keys(service)) > 0;
@@ -208,10 +252,10 @@ function ui_state_values(product, ui) {
 	let sing_box_running = util.is_true(sing_box.running);
 	let sing_box_enabled = util.is_true(sing_box.enabled);
 	let dns_configured = util.is_true(own.dns_configured);
-	// Prokop/Forkop сами запускают sing-box и штатно отключают его standalone
-	// автозапуск. Для них выключенный /etc/rc.d/S99sing-box — норма, если
-	// продукт включён и запущен.
-	let sing_box_managed = (product == "forkop" || product == "prokop") &&
+	// Prokop/Forkop/Podkop сами запускают sing-box и штатно отключают его
+	// standalone автозапуск. Для них выключенный /etc/rc.d/S99sing-box — норма,
+	// если продукт включён и запущен.
+	let sing_box_managed = (product == "forkop" || product == "prokop" || product == "podkop") &&
 		product_running && product_enabled;
 	let sing_box_autostart_ok = sing_box_enabled || sing_box_managed;
 
@@ -249,13 +293,14 @@ function capability_view(product) {
 		product: product,
 		readonly: !writable,
 		write_reason: writable ? null : (platform == "conflict" ? "product_conflict"
-			: platform == "unsupported" ? "unsupported_platform" : "product_unknown"),
+			: platform == "unsupported" ? "unsupported_platform"
+			: product == "podkop" ? "podkop_readonly" : "product_unknown"),
 		snapshots: product == "prokop" ? "native" : (product == "forkop" ? "local" : "none"),
-		sing_box: product == "forkop" || product == "prokop",
+		sing_box: product == "forkop" || product == "prokop" || product == "podkop",
 		proxy_health: true,
 		diagnostics: true,
 		service_actions: ["restart", "start", "stop", "enable", "disable"],
-		uci_allowlist: true
+		uci_allowlist: product == "forkop" || product == "prokop"
 	};
 }
 

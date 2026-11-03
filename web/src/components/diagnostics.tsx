@@ -18,14 +18,17 @@ type Tone = 'ok' | 'warn' | 'bad' | 'neutral' | 'info';
 const CHECK_LABELS: Record<string, string> = {
   service_status: 'Общее состояние службы',
   prokop_service: 'Служба Prokop',
+  forkop_service: 'Служба Forkop',
+  podkop_service: 'Служба Podkop',
   sing_box_service: 'Служба sing-box',
   health_reasons: 'Замечания',
   sing_box_version: 'Версия sing-box',
   prokop_get_status: 'Статус Prokop',
   forkop_get_status: 'Статус Forkop',
+  podkop_get_status: 'Статус Podkop',
   platform: 'Платформа',
   product: 'Продукт',
-  global_check: 'Полная проверка Prokop',
+  global_check: 'Полная проверка',
 };
 
 function payloadOf(report: DiagnosticReportDetail): ReportPayload {

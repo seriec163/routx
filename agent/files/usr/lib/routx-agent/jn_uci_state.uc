@@ -16,8 +16,81 @@ function is_section(obj) {
 	return type(obj) == "object" && obj[".type"] != null;
 }
 
+function podkop_value(value) {
+	if (value == null)
+		return null;
+	if (type(value) == "array") {
+		let out = [];
+		for (let item in value) {
+			let text = trim("" + item);
+			if (text != "")
+				push(out, text);
+		}
+		return length(out) == 0 ? null : out;
+	}
+	return "" + value;
+}
+
+// Podkop не имеет отдельного allowlist в RoutX: для панели читаем только
+// несекретные опции секций и настроек. proxy_string/urltest_proxy_links/
+// selector_proxy_links/outbound_json никогда не попадают в состояние.
+const PODKOP_SECTION_OPTIONS = {
+	connection_type: true, proxy_config_type: true, interface: true,
+	community_lists: true, user_domain_list_type: true, user_domains: true,
+	user_domains_text: true, user_subnet_list_type: true, user_subnets: true,
+	user_subnets_text: true, local_domain_lists: true, local_subnet_lists: true,
+	remote_domain_lists: true, remote_subnet_lists: true, fully_routed_ips: true,
+	enable_udp_over_tcp: true, urltest_check_interval: true,
+	urltest_tolerance: true, urltest_testing_url: true,
+	mixed_proxy_enabled: true, mixed_proxy_port: true,
+	domain_resolver_enabled: true, resolve_real_ip_for_routing: true
+};
+
+const PODKOP_SETTINGS_OPTIONS = {
+	dns_type: true, dns_server: true, bootstrap_dns_server: true,
+	disable_quic: true, update_interval: true, dont_touch_dhcp: true,
+	exclude_ntp: true, log_level: true, source_network_interfaces: true
+};
+
+function read_podkop_state(cursor) {
+	let managed = {};
+	let all = cursor.get_all("podkop");
+	if (type(all) == "object") {
+		for (let sname in all) {
+			let sect = all[sname];
+			if (type(sect) != "object")
+				continue;
+			let stype = "" + sect[".type"];
+			let secname = "" + sect[".name"];
+			if (secname == "")
+				secname = sname;
+			if (stype == "settings") {
+				for (let option in PODKOP_SETTINGS_OPTIONS) {
+					let value = podkop_value(sect[option]);
+					if (value != null)
+						managed["settings." + option] = value;
+				}
+				continue;
+			}
+			if (stype != "section" && stype != "urltest")
+				continue;
+			if (match(secname, /^[A-Za-z0-9_.-]{1,64}$/) == null)
+				continue;
+			for (let option in PODKOP_SECTION_OPTIONS) {
+				let value = podkop_value(sect[option]);
+				if (value != null)
+					managed["section." + secname + "." + option] = value;
+			}
+		}
+	}
+	let state_hash = util.sha256_hex(util.canonical_json(managed));
+	return { managed: managed, state_hash: state_hash };
+}
+
 function read_state(product) {
 	let cursor = uci.cursor();
+	if (product == "podkop")
+		return read_podkop_state(cursor);
 	let managed = {};
 	let config = product == "forkop" ? "forkop" : (product == "prokop" ? "prokop" : null);
 	if (config == null)
@@ -122,4 +195,4 @@ function build_read_state(product) {
 	};
 }
 
-return { load_config, read_state, build_read_state };
+return { load_config, read_state, build_read_state, read_podkop_state };

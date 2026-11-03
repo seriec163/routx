@@ -215,6 +215,7 @@ export function buildRuleViews(input: {
   connections: StoredConnection[];
   extras?: RouterListExtras;
   source: 'live' | 'cache';
+  product?: string;
 }): RuleView[] {
   const sectionNames = new Set<string>();
   const optionsFromState = extractOptions(input.managed, sectionNames);
@@ -258,6 +259,28 @@ export function buildRuleViews(input: {
       const extra = input.extras?.[section];
       manualDomains = [...new Set(extra?.manual_domains ?? [])];
       manualIps = [...new Set(extra?.manual_ips ?? [])];
+    }
+
+    // Podkop хранит свои домены/IP не в domain_ip_lists, а в user_*.
+    if (input.product === 'podkop') {
+      const userDomains =
+        asString(options.user_domains_text) !== ''
+          ? asString(options.user_domains_text)
+          : asString(options.user_domains);
+      const userSubnets =
+        asString(options.user_subnets_text) !== ''
+          ? asString(options.user_subnets_text)
+          : asString(options.user_subnets);
+      manualDomains = [
+        ...new Set(
+          [...manualDomains, ...userDomains.split('\n').map((line) => line.trim()).filter(Boolean)],
+        ),
+      ];
+      manualIps = [
+        ...new Set(
+          [...manualIps, ...userSubnets.split('\n').map((line) => line.trim()).filter(Boolean)],
+        ),
+      ];
     }
 
     const subscriptions: RuleConnectionView[] = [];
@@ -378,12 +401,23 @@ export function buildRuleViews(input: {
 
     const hasSources = subscriptions.length + links.length > 0;
     const rawAction = asString(options.action);
+    const podkopAction = asString(options.connection_type);
     const action =
-      rawAction !== ''
-        ? rawAction
-        : hasSources
-          ? 'connection'
-          : 'bypass';
+      input.product === 'podkop'
+        ? podkopAction === 'block'
+          ? 'block'
+          : podkopAction === 'exclusion'
+            ? 'bypass'
+            : podkopAction === 'proxy' || podkopAction === 'vpn'
+              ? 'connection'
+              : hasSources
+                ? 'connection'
+                : 'bypass'
+        : rawAction !== ''
+          ? rawAction
+          : hasSources
+            ? 'connection'
+            : 'bypass';
 
     rules.push({
       section,

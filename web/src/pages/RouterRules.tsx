@@ -199,6 +199,7 @@ export function RouterRulesPanel(props: {
   const liveLoaded = useRef(false);
 
   const online = props.router.status === 'online';
+  const readonly = props.router.product === 'podkop';
   const actions = catalog.data?.actions?.length ? catalog.data.actions : ACTION_FALLBACK;
   const services = catalog.data?.services ?? [];
 
@@ -472,7 +473,7 @@ export function RouterRulesPanel(props: {
             >
               Прочитать
             </Button>
-            <Button size="sm" onClick={openCreate} disabled={!online}>
+            <Button size="sm" onClick={openCreate} disabled={!online || readonly}>
               Добавить правило
             </Button>
           </div>
@@ -493,6 +494,13 @@ export function RouterRulesPanel(props: {
         {!online ? (
           <InfoBanner tone="warn">
             Роутер не в сети. Показано последнее прочитанное состояние; изменения недоступны.
+          </InfoBanner>
+        ) : null}
+
+        {readonly ? (
+          <InfoBanner tone="warn">
+            Podkop: здесь показаны секции и подключения роутера. Редактирование секций Podkop
+            через RoutX пока не поддерживается — настройте их в LuCI → Службы → Podkop.
           </InfoBanner>
         ) : null}
 
@@ -517,7 +525,7 @@ export function RouterRulesPanel(props: {
               Правил пока нет. Добавьте первое правило: вставьте ссылку на подписку или VLESS,
               выберите ресурс (например, YouTube) и действие.
             </Empty>
-            <Button onClick={openCreate} disabled={!online}>
+            <Button onClick={openCreate} disabled={!online || readonly}>
               Добавить правило
             </Button>
           </div>
@@ -537,7 +545,7 @@ export function RouterRulesPanel(props: {
                 }
                 onDelete={(connection) => requestDelete(rule, connection)}
                 onToggle={() => requestToggle(rule)}
-                disabled={!online}
+                disabled={!online || readonly}
               />
             ))}
           </div>

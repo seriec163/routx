@@ -30,7 +30,7 @@ const createSchema = z
   .object({
     name: z.string().trim().min(1).max(120),
     owner_id: z.string().uuid().optional(),
-    product_hint: z.enum(['any', 'forkop', 'prokop']).default('any'),
+    product_hint: z.enum(['any', 'forkop', 'prokop', 'podkop']).default('any'),
   })
   .strict();
 
@@ -430,7 +430,9 @@ export async function registerRouterRoutes(app: FastifyInstance, ctx: RouteConte
       routerId: router.id,
       createdBy: auth.userId,
       productHint:
-        router.product === 'forkop' || router.product === 'prokop' ? router.product : 'any',
+        router.product === 'forkop' || router.product === 'prokop' || router.product === 'podkop'
+          ? router.product
+          : 'any',
     });
 
     await audit(pool, {
@@ -446,7 +448,9 @@ export async function registerRouterRoutes(app: FastifyInstance, ctx: RouteConte
     });
 
     const productArg =
-      router.product === 'forkop' || router.product === 'prokop' ? ` --product ${router.product}` : '';
+      router.product === 'forkop' || router.product === 'prokop' || router.product === 'podkop'
+        ? ` --product ${router.product}`
+        : '';
     const command = `wget -qO- ${ctx.publicUrl}/agent/install.sh | sh -s -- --server ${ctx.publicUrl} --token ${token.token}${productArg} --reboot`;
 
     return {

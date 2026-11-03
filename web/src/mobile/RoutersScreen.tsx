@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import jsQR from 'jsqr';
 import { api, errorMessage } from '../lib/api';
+import { PRODUCT_LABEL } from '../lib/format';
 import { useToast } from '../components/ui';
 import { navigate, useRoute } from '../lib/router';
 import { useSession } from '../session';
@@ -77,7 +78,7 @@ export function RoutersScreen() {
                 <span className="m-routerrow-main">
                   <span className="m-routerrow-name">{router.name}</span>
                   <span className="m-routerrow-meta">
-                    {router.product === 'prokop' ? 'Prokop' : 'Forkop'}
+                    {PRODUCT_LABEL[router.product] ?? router.product}
                     {router.product_version ? ` ${router.product_version}` : ''}
                     {router.latency_ms != null ? ` · ${Math.round(router.latency_ms)} мс` : ''}
                   </span>

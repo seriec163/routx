@@ -115,7 +115,7 @@ function serviceText(value: unknown): string {
   if (value && typeof value === 'object') {
     const record = value as Record<string, unknown>;
     if (typeof record.status === 'string') return record.status;
-    for (const key of ['prokop', 'forkop']) {
+    for (const key of ['prokop', 'forkop', 'podkop']) {
       const child = record[key];
       if (child && typeof child === 'object' && typeof (child as { status?: unknown }).status === 'string') {
         return `${key}: ${String((child as { status: string }).status)}`;
@@ -662,7 +662,7 @@ export function RouterDetailPage({ id }: { id: string }) {
     [state, router?.product],
   );
   const singBoxSvc = useMemo(() => productService(state?.service, 'sing_box'), [state]);
-  const productLabel = PRODUCT_LABEL[router?.product ?? ''] ?? 'Prokop/Forkop';
+  const productLabel = PRODUCT_LABEL[router?.product ?? ''] ?? 'Prokop/Forkop/Podkop';
   // Prokop/Forkop сами запускают sing-box и при каждом старте отключают его
   // отдельный автозапуск. Поэтому автозапуск пары — это автозапуск продукта.
   const autostartEnabled = productSvc.enabled === true;
@@ -1504,7 +1504,7 @@ export function RouterDetailPage({ id }: { id: string }) {
 
       {router.status === 'conflict' ? (
         <InfoBanner tone="warn">
-          На роутере одновременно обнаружены Forkop и Prokop. Изменения запрещены: устраните конфликт
+          На роутере обнаружено несколько продуктов (Forkop/Prokop/Podkop). Изменения запрещены: устраните конфликт
           вручную, RoutX ничего не удаляет и не переустанавливает.
         </InfoBanner>
       ) : null}
@@ -2457,7 +2457,7 @@ export function RouterDetailPage({ id }: { id: string }) {
 
             <Panel title="Архивирование">
               <p className="page-sub">
-                Архив отключает мониторинг и отзывает учётные данные. Forkop/Prokop на устройстве
+                Архив отключает мониторинг и отзывает учётные данные. Forkop/Prokop/Podkop на устройстве
                 остаются без изменений.
               </p>
               <div className="row">
@@ -3035,7 +3035,7 @@ export function RouterDetailPage({ id }: { id: string }) {
             Это действие необратимо.
           </p>
           <p className="muted-text">
-            На самом роутере Forkop/Prokop и RoutX не удаляются. Агент получит отказ и перестанет
+            На самом роутере Forkop/Prokop/Podkop и RoutX не удаляются. Агент получит отказ и перестанет
             передавать данные.
           </p>
           <Field label={`Для подтверждения введите имя «${router.name}»`}>

@@ -94,7 +94,7 @@ export async function getRouterForMutation(
   if (router.status === 'conflict' || router.product === 'conflict') {
     throw conflict(
       'router_conflict',
-      'На роутере одновременно обнаружены Forkop и Prokop. Изменения запрещены до устранения конфликта.',
+      'На роутере обнаружено несколько продуктов (Forkop/Prokop/Podkop). Изменения запрещены до устранения конфликта.',
     );
   }
   if (router.status === 'unsupported') {

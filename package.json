@@ -2,7 +2,7 @@
   "name": "routx",
   "version": "0.1.0",
   "private": true,
-  "description": "Централизованное управление роутерами OpenWrt с Forkop/Prokop",
+  "description": "Централизованное управление роутерами OpenWrt с Forkop/Prokop/Podkop",
   "workspaces": [
     "server",
     "web"

@@ -100,6 +100,7 @@ export async function registerRouterRuleRoutes(
       connections: await loadConnections(pool, router.id, masterKey),
       extras,
       source: 'cache',
+      product: router.product,
     });
 
     return {

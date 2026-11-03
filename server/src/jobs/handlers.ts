@@ -1460,6 +1460,11 @@ export async function listConnections(ctx: HandlerContext, job: JobRow): Promise
  */
 export async function readRules(ctx: HandlerContext, job: JobRow): Promise<Json> {
   const routerId = requireRouter(job);
+  const productRow = await ctx.pool.query<{ product: string }>(
+    'select product from routers where id = $1',
+    [routerId],
+  );
+  const product = productRow.rows[0]?.product ?? 'unknown';
   const raw = await runCommand(ctx, job, 'read_rules', {}, 90_000);
 
   // read_rules отдаёт секции, подписки и локальные списки, но не health/service.
@@ -1511,6 +1516,7 @@ export async function readRules(ctx: HandlerContext, job: JobRow): Promise<Json>
     connections,
     extras,
     source: 'live',
+    product,
   });
 
   // GET /rules собирает ручные записи из list_extras, без обращения к агенту.

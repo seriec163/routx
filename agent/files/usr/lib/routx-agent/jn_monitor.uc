@@ -44,8 +44,13 @@ function enabled_sections(product) {
 			continue;
 		if (util.as_string(sect.enabled) == "0")
 			continue;
-		if (!OUTBOUND_ACTIONS[util.as_string(sect.action)])
+		if (product == "podkop") {
+			let kind = util.as_string(sect.connection_type);
+			if (kind != "proxy" && kind != "vpn")
+				continue;
+		} else if (!OUTBOUND_ACTIONS[util.as_string(sect.action)]) {
 			continue;
+		}
 		let name = util.as_string(sect[".name"]);
 		names[name == "" ? sname : name] = true;
 	}
@@ -463,6 +468,25 @@ function probe(product, force) {
 
 	// Роутер доступен уже потому, что агент выполнил эту команду.
 	// health_status даёт состояние службы, а не только признак ответа.
+	if (product == "podkop") {
+		let status = cli(product, [ "get_status" ], 15);
+		let sb = cli(product, [ "get_sing_box_status" ], 15);
+		let running = sb.ok && int(sb.value.running) == 1;
+		let enabled = status.ok && int(status.value.enabled) == 1;
+		if (!running) {
+			result.service_state = enabled ? "stopped but enabled" : "stopped & disabled";
+			result.health = "failed";
+		} else if (!enabled) {
+			result.service_state = "running but disabled";
+			result.health = "degraded";
+		} else if (sb.ok && int(sb.value.dns_configured) != 1) {
+			result.service_state = "running, DNS not configured";
+			result.health = "degraded";
+		} else {
+			result.service_state = "running & enabled";
+			result.health = "ok";
+		}
+	} else {
 	let health = cli(product, [ "get_health_status" ], 20);
 	if (health.ok) {
 		result.service_state = util.as_string(health.value.overall);
@@ -487,6 +511,7 @@ function probe(product, force) {
 	else if (result.health == "") {
 		result.service_state = "unknown";
 		result.health = "unknown";
+	}
 	}
 
 	let proxy = probe_proxy(product, force);

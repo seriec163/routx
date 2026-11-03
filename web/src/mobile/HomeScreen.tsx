@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { api, errorMessage } from '../lib/api';
+import { PRODUCT_LABEL } from '../lib/format';
 import { waitForJob } from '../lib/jobs';
 import type { Job, MonitoringItem, RuleConnectionView, RulesResponse } from '../lib/types';
 import { useApi } from '../lib/useApi';
@@ -304,7 +305,7 @@ export function HomeScreen() {
           <div className="m-date">{date}</div>
           {selected ? (
             <button type="button" className="m-link" onClick={() => navigate('/app/routers')}>
-              {selected.product === 'prokop' ? 'Prokop' : 'Forkop'}
+              {PRODUCT_LABEL[selected.product] ?? selected.product}
               {selected.product_version ? ` ${selected.product_version}` : ''}
               {selected.sing_box_version ? ` · sing-box ${selected.sing_box_version}` : ''}
             </button>
@@ -574,7 +575,7 @@ export function HomeScreen() {
                 <StatusDot item={router} />
                 <span className="m-pick-name">{router.name}</span>
                 <span className="m-pick-meta">
-                  {router.product === 'prokop' ? 'Prokop' : 'Forkop'}
+                  {PRODUCT_LABEL[router.product] ?? router.product}
                   {router.latency_ms != null ? ` · ${Math.round(router.latency_ms)} мс` : ''}
                 </span>
               </button>
