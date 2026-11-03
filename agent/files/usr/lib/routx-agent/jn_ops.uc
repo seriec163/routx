@@ -1111,6 +1111,59 @@ function apply_podkop_connections(section, links, args) {
 	};
 }
 
+function cleanup_json_outbounds(product) {
+	if (product != "forkop" && product != "tachyon")
+		return { ok: true, removed: 0 };
+	let cursor = uci.cursor();
+	let all = cursor.get_all(product);
+	if (type(all) != "object")
+		return { ok: true, removed: 0 };
+	let json_sources = {};
+	for (let sname in all) {
+		let sect = all[sname];
+		if (type(sect) != "object" || sect[".type"] != "outbound_source")
+			continue;
+		if (util.as_string(sect.source_type) == "outbound_json")
+			json_sources[sname] = true;
+	}
+	let removed = 0;
+	for (let sname in all) {
+		let sect = all[sname];
+		if (type(sect) != "object" || sect[".type"] != "section")
+			continue;
+		let refs = sect.outbound_source_refs;
+		if (type(refs) != "array")
+			refs = refs == null ? [] : [ refs ];
+		let keep = [];
+		for (let ref in refs) {
+			let value = util.as_string(ref);
+			if (value == "" || json_sources[value] === true)
+				continue;
+			push(keep, value);
+		}
+		if (length(keep) != length(refs)) {
+			cursor.delete(product, sname, "outbound_source_refs");
+			if (length(keep) > 0)
+				cursor.set(product, sname, "outbound_source_refs", keep);
+		}
+		if (sect.outbound_jsons != null) {
+			cursor.delete(product, sname, "outbound_jsons");
+			removed++;
+		}
+		if (sect.outbound_json != null) {
+			cursor.delete(product, sname, "outbound_json");
+			removed++;
+		}
+	}
+	for (let sname in json_sources) {
+		cursor.delete(product, sname);
+		removed++;
+	}
+	if (removed > 0)
+		cursor.commit(product);
+	return { ok: true, removed: removed };
+}
+
 function apply_connections(product, args) {
 	if (product != "forkop" && product != "prokop" && product != "podkop" && product != "tachyon")
 		return { ok: false, error: "неизвестный продукт" };
@@ -1286,4 +1339,4 @@ function apply_connections(product, args) {
 	};
 }
 
-return { precheck, verify, service_action, reload, apply_uci, apply_connections, list_connections, manage_connection, set_podkop_outbound, select_proxy, read_rules };
+return { precheck, verify, service_action, reload, apply_uci, apply_connections, cleanup_json_outbounds, list_connections, manage_connection, set_podkop_outbound, select_proxy, read_rules };

@@ -667,26 +667,18 @@ export function HomeScreen() {
                     </button>
                   ) : null}
                   {connection.synthetic ? (
-                    <>
+                    selected?.product === 'podkop' ||
+                    selected?.product === 'forkop' ||
+                    selected?.product === 'tachyon' ? (
                       <button
                         type="button"
                         className="m-mini"
-                        onClick={() => openOutbound(connection)}
+                        onClick={() => openSubscription(connection.section)}
                         disabled={!selected || selected.status !== 'online'}
                       >
-                        Изменить JSON
+                        Подписка
                       </button>
-                      {selected?.product === 'podkop' ? (
-                        <button
-                          type="button"
-                          className="m-mini"
-                          onClick={() => openSubscription(connection.section)}
-                          disabled={!selected || selected.status !== 'online'}
-                        >
-                          Подписка
-                        </button>
-                      ) : null}
-                    </>
+                    ) : null
                   ) : (
                     <button
                       type="button"

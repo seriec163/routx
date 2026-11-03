@@ -945,7 +945,6 @@ function RuleCard(props: {
                   disabled={props.disabled}
                   onReplace={() => props.onReplace(connection)}
                   onDelete={() => props.onDelete(connection)}
-                  onConfigure={connection.synthetic ? props.onEdit : undefined}
                   onSubscribe={
                     connection.synthetic ? () => props.onManageSubscription?.() : undefined
                   }
@@ -989,7 +988,6 @@ function ConnectionRow(props: {
   onReplace: () => void;
   onDelete: () => void;
   onExpand?: () => void;
-  onConfigure?: () => void;
   onSubscribe?: () => void;
 }) {
   const { connection } = props;
@@ -1014,11 +1012,6 @@ function ConnectionRow(props: {
         </span>
       </div>
       <div className="row-actions">
-        {props.onConfigure ? (
-          <Button size="sm" variant="ghost" onClick={props.onConfigure} disabled={props.disabled}>
-            Изменить JSON
-          </Button>
-        ) : null}
         {props.onSubscribe ? (
           <Button size="sm" variant="ghost" onClick={props.onSubscribe} disabled={props.disabled}>
             Подписка
@@ -1507,7 +1500,9 @@ function RuleEditorModal(props: {
             <option value="url">Одна ссылка (url)</option>
             <option value="selector">Список selector</option>
             <option value="urltest">Список urltest</option>
-            <option value="outbound">JSON outbound (из LuCI)</option>
+            {proxyConfigType === 'outbound' ? (
+              <option value="outbound">JSON outbound (устарело, выберите selector)</option>
+            ) : null}
           </Select>
         </Field>
       ) : null}

@@ -106,6 +106,9 @@ function handle_command(cmd) {
 				return { status: "failed", error: { code: "unsupported_product_switch", message: "Переключение на " + target + " пока не поддерживается" } };
 			let command = "wget -O /tmp/tachyon-setup.sh https://raw.githubusercontent.com/Dushnilin/tachyon/main/install.sh && sh /tmp/tachyon-setup.sh -y --tachyon-core";
 			let res = runner.run([ "sh", "-c", command ], 1800);
+			let cleanup = ops.cleanup_json_outbounds("tachyon");
+			if (cleanup.ok && cleanup.removed > 0)
+				runner.run_product("tachyon", [ "reload" ], 120);
 			let detected = platform.detect_product();
 			if (detected != "tachyon" && !res.ok)
 				return { status: "failed", error: { code: "product_switch_failed", message: runner.error_text(res) } };

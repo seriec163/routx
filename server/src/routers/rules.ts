@@ -358,6 +358,19 @@ export async function registerRouterRuleRoutes(
 
     const router = await getRouterForMutation(pool, auth, params.id);
     assertOnline(router);
+    if (
+      router.product === 'podkop' ||
+      router.product === 'forkop' ||
+      router.product === 'tachyon' ||
+      router.product === 'prokop' ||
+      router.product === 'unknown' ||
+      router.product === 'conflict'
+    ) {
+      throw badRequest(
+        'json_outbound_disabled',
+        'Добавление подключений через JSON отключено. Используйте подписку или отдельные VLESS-ссылки.',
+      );
+    }
     if (router.product !== 'podkop') {
       throw badRequest('podkop_required', 'Outbound JSON доступен только для Podkop');
     }

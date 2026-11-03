@@ -378,9 +378,12 @@ export async function normalizeTemplateLists<
   const fallbackDomains: string[] = [];
   const fallbackSubnets: string[] = [];
   for (const [name, options] of Object.entries(payload.sections)) {
-    const value = options.community_lists;
+    const base: Record<string, unknown> = { ...options };
+    delete base.outbound_jsons;
+    delete base.outbound_json;
+    const value = base.community_lists;
     if (value === undefined) {
-      sections[name] = options;
+      sections[name] = base;
       continue;
     }
     const source = Array.isArray(value) ? value.map(String) : value == null ? [] : [String(value)];
@@ -388,7 +391,7 @@ export async function normalizeTemplateLists<
     for (const item of resolved.domains) if (!fallbackDomains.includes(item)) fallbackDomains.push(item);
     for (const item of resolved.subnets) if (!fallbackSubnets.includes(item)) fallbackSubnets.push(item);
     const next: Record<string, unknown> = {
-      ...options,
+      ...base,
       community_lists: resolved.native.length > 0 ? resolved.native : null,
     };
     if (resolved.ruleSets.length > 0) {
@@ -398,6 +401,11 @@ export async function normalizeTemplateLists<
   }
 
   let resources = payload.resources;
+  if (resources) {
+    resources = { ...resources };
+    delete resources.outbound_jsons;
+    delete resources.outbound_json;
+  }
   if (resources && resources.community_lists !== undefined) {
     const value = resources.community_lists;
     const source = Array.isArray(value) ? value.map(String) : value == null ? [] : [String(value)];

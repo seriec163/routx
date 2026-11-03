@@ -834,8 +834,11 @@ export async function registerRouterConnectionRoutes(
 
       const router = await getRouterForMutation(pool, auth, params.id);
       assertOnline(router);
-      if (router.product !== 'podkop') {
-        throw badRequest('podkop_required', 'Импорт подписок доступен только для Podkop');
+      if (router.product !== 'podkop' && router.product !== 'forkop' && router.product !== 'tachyon') {
+        throw badRequest(
+          'product_subscription_unsupported',
+          'Импорт подписок доступен для Podkop, Forkop и Tachyon',
+        );
       }
 
       let sourceUrl = body.url ?? '';
@@ -1030,8 +1033,11 @@ export async function registerRouterConnectionRoutes(
 
       const router = await getRouterForMutation(pool, auth, params.id);
       assertOnline(router);
-      if (router.product !== 'podkop') {
-        throw badRequest('podkop_required', 'Подписки Podkop доступны только для Podkop');
+      if (router.product !== 'podkop' && router.product !== 'forkop' && router.product !== 'tachyon') {
+        throw badRequest(
+          'product_subscription_unsupported',
+          'Подписки RoutX доступны для Podkop, Forkop и Tachyon',
+        );
       }
 
       let sourceUrl = body.url ?? '';
