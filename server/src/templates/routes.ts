@@ -473,9 +473,11 @@ export async function registerTemplateRoutes(app: FastifyInstance, ctx: RouteCon
 
   app.get('/api/v1/settings/routing-catalog', async (request) => {
     requireUser(request);
-    const { ROUTING_ACTIONS, ROUTING_SERVICES } = await import('../domain/routing.js');
+    const { ROUTING_ACTIONS, ROUTING_SERVICES, FORKOP2_SERVICES } = await import(
+      '../domain/routing.js'
+    );
     return {
-      services: ROUTING_SERVICES,
+      services: [...ROUTING_SERVICES, ...FORKOP2_SERVICES],
       actions: ROUTING_ACTIONS,
     };
   });

@@ -5,6 +5,10 @@
  * приводим списки к тому набору, который понимает установленный продукт.
  */
 
+import { ROUTING_SERVICES } from './routing.js';
+
+const LEGACY_SERVICE_IDS = new Set(ROUTING_SERVICES.map((item) => item.id));
+
 const FORKOP2_LISTS = new Set([
   'ru_blocked_all',
   'ru_blocked_rkn',
@@ -103,11 +107,25 @@ export function normalizeCommunityLists(
   product: string | null | undefined,
   version: string | null | undefined,
 ): NormalizedLists {
-  if (!isForkop2(product, version)) {
-    return { lists: [...lists], dropped: [] };
-  }
   const result: string[] = [];
   const dropped: string[] = [];
+  if (!isForkop2(product, version)) {
+    for (const raw of lists) {
+      const id = String(raw).trim();
+      if (id === '') continue;
+      if (LEGACY_SERVICE_IDS.has(id)) {
+        if (!result.includes(id)) result.push(id);
+        continue;
+      }
+      const mapped = FORKOP2_TO_LEGACY[id];
+      if (!mapped) {
+        dropped.push(id);
+        continue;
+      }
+      if (!result.includes(mapped)) result.push(mapped);
+    }
+    return { lists: result, dropped };
+  }
   for (const raw of lists) {
     const id = String(raw).trim();
     if (id === '') continue;
