@@ -1229,9 +1229,10 @@ function apply_connections(product, args) {
 	for (let raw in (args.subscriptions || [])) {
 		let name = util.as_string(raw.name);
 		let url = trim(util.as_string(raw.url));
+		let label = trim(util.as_string(raw.label));
 		if (match(name, SECTION_RE) == null || match(url, SUBSCRIPTION_RE) == null)
 			return { ok: false, error: "invalid_subscription" };
-		push(subscriptions, { name: name, url: url });
+		push(subscriptions, { name: name, url: url, label: label.slice(0, 120) });
 		if (length(subscriptions) > 100)
 			return { ok: false, error: "too_many_subscriptions" };
 	}
@@ -1339,6 +1340,7 @@ function apply_connections(product, args) {
 		}
 		cursor.set(product, sub.name, "subscription_url");
 		cursor.set(product, sub.name, "section", section);
+		cursor.set(product, sub.name, "name", sub.label != "" ? sub.label : sub.name);
 		cursor.set(product, sub.name, "url", sub.url);
 		cursor.set(product, sub.name, "subscription_update_enabled", "1");
 		cursor.set(product, sub.name, "subscription_update_interval", "1h");

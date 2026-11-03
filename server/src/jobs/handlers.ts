@@ -1519,7 +1519,7 @@ export async function applyRouterConnections(ctx: HandlerContext, job: JobRow): 
 
   const bySection = new Map<
     string,
-    { links: string[]; subscriptions: Array<{ name: string; url: string }> }
+    { links: string[]; subscriptions: Array<{ name: string; url: string; label?: string }> }
   >();
   for (const row of result.rows) {
     if (requestedSection && row.section !== requestedSection) continue;
@@ -1533,6 +1533,7 @@ export async function applyRouterConnections(ctx: HandlerContext, job: JobRow): 
       group.subscriptions.push({
         name: `rc_sub_${row.id.replace(/-/g, '').slice(0, 12)}`,
         url: value,
+        label: row.label,
       });
     }
     bySection.set(section, group);
@@ -1635,6 +1636,7 @@ export async function applyRouterConnections(ctx: HandlerContext, job: JobRow): 
 
     await setJobPhase(ctx, job.id, 'reload', 70);
     await runCommand(ctx, job, 'reload', {}, 300_000);
+    await runCommand(ctx, job, 'service_action', { action: 'start' }, 180_000);
     await setJobPhase(ctx, job.id, 'verify', 85);
     const raw = await runCommand(ctx, job, 'read_state', {}, 60_000);
     const current = await saveState(ctx.pool, routerId, raw, 'connections');
