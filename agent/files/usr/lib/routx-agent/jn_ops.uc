@@ -81,7 +81,60 @@ function service_action(product, action) {
 	return { ok: true, action: action };
 }
 
+function podkop_config_path() {
+	let cursor = uci.cursor();
+	let path = util.as_string(cursor.get("podkop", "settings", "config_path"));
+	return path == "" ? "/etc/sing-box/config.json" : path;
+}
+
+function podkop_has_enabled_section() {
+	let cursor = uci.cursor();
+	let all = cursor.get_all("podkop");
+	if (type(all) != "object")
+		return false;
+	for (let sname in all) {
+		let sect = all[sname];
+		if (type(sect) != "object" || sect[".type"] != "section")
+			continue;
+		if (util.as_string(sect.enabled) == "0")
+			continue;
+		let kind = util.as_string(sect.connection_type);
+		if (kind == "proxy" || kind == "vpn")
+			return true;
+	}
+	return false;
+}
+
+// Проверка результата reload для Podkop: конфиг sing-box должен проходить
+// `sing-box check`, а служба — реально работать. Иначе сервер откатит снимок.
+function podkop_reload_check() {
+	let path = podkop_config_path();
+	if (util.file_exists(path)) {
+		let check = run.run([ "sing-box", "check", "-c", path ], 60);
+		if (!check.ok)
+			return { ok: false, error: "sing_box_check_failed: " + run.error_text(check) };
+	} else if (podkop_has_enabled_section()) {
+		return { ok: false, error: "sing_box_config_missing: " + path };
+	}
+	if (podkop_has_enabled_section()) {
+		let status = run.run_product("podkop", [ "get_sing_box_status" ], 20);
+		if (!status.ok)
+			return { ok: false, error: "sing_box_status_failed: " + run.error_text(status) };
+		let parsed = util.json_parse(status.stdout);
+		if (type(parsed) != "object" || int(parsed.running) != 1)
+			return { ok: false, error: "sing_box_not_running" };
+	}
+	return { ok: true };
+}
+
 function reload(product) {
+	if (product == "podkop") {
+		let res = run.run_product("podkop", ["reload"], 120);
+		if (!res.ok)
+			return { ok: false, error: run.error_text(res) };
+		return podkop_reload_check();
+	}
+
 	// Для Prokop/Forkop сначала используем штатный CLI: init-скрипт может
 	// запускать reload асинхронно и оставлять lock, из-за чего второй вызов
 	// получает «existing» и ненулевой код.
@@ -95,7 +148,7 @@ function reload(product) {
 }
 
 function apply_uci(product, items, base_state_hash, create_sections, local_lists) {
-	if (product != "forkop" && product != "prokop")
+	if (product != "forkop" && product != "prokop" && product != "podkop")
 		return { ok: false, error: "неизвестный продукт" };
 
 	let current = state.read_state(product);
@@ -148,9 +201,13 @@ function apply_uci(product, items, base_state_hash, create_sections, local_lists
 		if (util.as_string(value) == "0")
 			disabling[m[1]] = true;
 	}
+	// Podkop допускает конфигурацию без активных секций, остальным продуктам
+	// нельзя оставить ноль включённых правил.
+	if (product != "podkop") {
 	for (let section in disabling) {
 		if (!has_other_enabled_section(product, cursor, section))
 			return last_enabled_error();
+	}
 	}
 
 	let applied = [];
@@ -322,8 +379,92 @@ function list_connections(product, args) {
 	return { ok: true, section: section, subscriptions: subscriptions, links: links };
 }
 
+function podkop_proxy_mode(cursor, section) {
+	let mode = util.as_string(cursor.get("podkop", section, "proxy_config_type"));
+	if (mode == "selector" || mode == "urltest")
+		return mode;
+	if (cursor.get("podkop", section, "urltest_proxy_links") != null)
+		return "urltest";
+	if (cursor.get("podkop", section, "selector_proxy_links") != null)
+		return "selector";
+	return "url";
+}
+
+function podkop_proxy_option(mode) {
+	if (mode == "urltest")
+		return "urltest_proxy_links";
+	if (mode == "selector")
+		return "selector_proxy_links";
+	return "proxy_string";
+}
+
+function podkop_proxy_links(cursor, section, mode) {
+	if (mode == "url") {
+		let raw = util.as_string(cursor.get("podkop", section, "proxy_string"));
+		return raw == "" ? [] : [ raw ];
+	}
+	let raw = cursor.get("podkop", section, podkop_proxy_option(mode));
+	if (type(raw) != "array")
+		return raw == null ? [] : [ util.as_string(raw) ];
+	return raw;
+}
+
+function podkop_write_links(cursor, section, mode, links) {
+	cursor.delete("podkop", section, "proxy_string");
+	cursor.delete("podkop", section, "selector_proxy_links");
+	cursor.delete("podkop", section, "urltest_proxy_links");
+	let option = podkop_proxy_option(mode);
+	if (length(links) == 0)
+		return;
+	if (mode == "url")
+		cursor.set("podkop", section, option, links[0]);
+	else
+		cursor.set("podkop", section, option, links);
+}
+
+function manage_podkop_connection(section, action, kind, value, args) {
+	if (kind != "link")
+		return { ok: false, error: "podkop_subscriptions_unsupported" };
+	let cursor = uci.cursor();
+	if (cursor.get("podkop", section) != "section")
+		return { ok: false, error: "section_missing" };
+	let mode = podkop_proxy_mode(cursor, section);
+	let links = podkop_proxy_links(cursor, section, mode);
+	let hash = util.as_string(args.hash);
+	if (match(hash, /^[a-f0-9]{64}$/) == null)
+		return { ok: false, error: "invalid_hash" };
+	let found = -1;
+	for (let i = 0; i < length(links); i++)
+		if (util.sha256_hex(util.as_string(links[i])) == hash) {
+			found = i;
+			break;
+		}
+	if (found < 0)
+		return { ok: false, error: "link_missing" };
+
+	let next = [];
+	for (let i = 0; i < length(links); i++) {
+		if (i == found) {
+			if (action != "delete")
+				push(next, value);
+		} else {
+			push(next, links[i]);
+		}
+	}
+	podkop_write_links(cursor, section, mode, next);
+
+	let disabled = false;
+	if (action == "delete" && length(next) == 0) {
+		cursor.set("podkop", section, "enabled", "0");
+		disabled = true;
+	}
+	if (cursor.commit("podkop") == null)
+		return { ok: false, error: "uci commit failed" };
+	return { ok: true, section: section, action: action, kind: kind, disabled: disabled };
+}
+
 function manage_connection(product, args) {
-	if (product != "forkop" && product != "prokop")
+	if (product != "forkop" && product != "prokop" && product != "podkop")
 		return { ok: false, error: "неизвестный продукт" };
 	let section = util.as_string(args.section);
 	if (match(section, SECTION_RE) == null)
@@ -344,6 +485,9 @@ function manage_connection(product, args) {
 			return { ok: false, error: "invalid_link" };
 		}
 	}
+
+	if (product == "podkop")
+		return manage_podkop_connection(section, action, kind, value, args);
 
 	let cursor = uci.cursor();
 	if (cursor.get(product, section) != "section")
@@ -490,8 +634,63 @@ function read_rules(product) {
 	};
 }
 
+function apply_podkop_connections(section, links, args) {
+	let cursor = uci.cursor();
+	let exists = cursor.get("podkop", section);
+	if (exists == null)
+		return { ok: false, error: "section_missing" };
+	if (exists != "section")
+		return { ok: false, error: "section_type_mismatch" };
+
+	let mode = util.as_string(args.proxy_config_type);
+	if (mode != "url" && mode != "selector" && mode != "urltest")
+		mode = podkop_proxy_mode(cursor, section);
+
+	let link_state = load_link_state();
+	let previous = {};
+	for (let hash in managed_link_hashes(link_state, "podkop", section))
+		previous[util.as_string(hash)] = true;
+
+	let preserved = [];
+	for (let raw in podkop_proxy_links(cursor, section, mode)) {
+		let value = trim(util.as_string(raw));
+		if (value == "")
+			continue;
+		if (previous[util.sha256_hex(value)])
+			continue;
+		push(preserved, value);
+	}
+	let merged = util.dedupe(preserved);
+	for (let value in links)
+		push(merged, value);
+	merged = util.dedupe(merged);
+
+	// Podkop в режиме url хранит одну ссылку. Несколько ссылок требуют
+	// selector/urltest — переключаем режим автоматически.
+	if (mode == "url" && length(merged) > 1)
+		mode = "selector";
+
+	podkop_write_links(cursor, section, mode, merged);
+	cursor.set("podkop", section, "proxy_config_type", mode);
+	if (length(merged) > 0)
+		cursor.set("podkop", section, "enabled", "1");
+
+	let hashes = [];
+	for (let value in links)
+		push(hashes, util.sha256_hex(value));
+	link_state["podkop:" + section] = hashes;
+	save_link_state(link_state);
+
+	if (cursor.commit("podkop") == null)
+		return { ok: false, error: "uci commit failed" };
+	return {
+		ok: true, section: section, links: length(merged), subscriptions: 0,
+		created: exists == null ? 1 : 0, mode: mode
+	};
+}
+
 function apply_connections(product, args) {
-	if (product != "forkop" && product != "prokop")
+	if (product != "forkop" && product != "prokop" && product != "podkop")
 		return { ok: false, error: "неизвестный продукт" };
 	args = type(args) == "object" ? args : {};
 
@@ -509,6 +708,9 @@ function apply_connections(product, args) {
 			return { ok: false, error: "too_many_links" };
 	}
 	links = util.dedupe(links);
+
+	if (product == "podkop")
+		return apply_podkop_connections(section, links, args);
 
 	let subscriptions = [];
 	for (let raw in (args.subscriptions || [])) {

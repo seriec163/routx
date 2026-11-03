@@ -28,6 +28,7 @@ import {
   type AgentSection,
   type StoredConnection,
 } from '../domain/rules.js';
+import { computePodkopPlan, podkopSectionInputSchema } from '../domain/podkop.js';
 
 export class JobFailure extends Error {
   readonly code: string;
@@ -439,6 +440,74 @@ export async function diffCustom(ctx: HandlerContext, job: JobRow): Promise<Json
     diff_hash: hash,
     base_state_hash: baseHash,
     desired_hash: desiredHash,
+    counts,
+    total: items.length,
+    section_map: {},
+    warnings: [],
+  };
+}
+
+/**
+ * Diff одной секции Podkop. План строится только по явно переданным полям,
+ * поэтому остальные секции и опции Podkop не затрагиваются.
+ */
+export async function diffPodkop(ctx: HandlerContext, job: JobRow): Promise<Json> {
+  const routerId = requireRouter(job);
+  const payload = podkopSectionInputSchema.parse(job.payload.payload);
+  const current = await readState(ctx, job);
+  await setJobPhase(ctx, job.id, 'plan', 60);
+  const plan = computePodkopPlan(payload, current);
+  const items = plan.items;
+  const hash = diffHash(items);
+  const baseHash = stateHash(current);
+
+  const runId = uuidv7();
+  await ctx.pool.query(
+    `insert into apply_runs
+       (id, router_id, template_id, revision, diff, diff_hash, base_state_hash, desired_hash,
+        local_lists, section_map, create_sections, status, requested_by)
+     values ($1,$2,null,null,$3::jsonb,$4,$5,$6,$7::jsonb,'{}'::jsonb,$8::jsonb,'awaiting_confirmation',$9)`,
+    [
+      runId,
+      routerId,
+      JSON.stringify(items),
+      hash,
+      baseHash,
+      plan.desiredHash,
+      JSON.stringify([]),
+      JSON.stringify(plan.createSections),
+      job.requested_by,
+    ],
+  );
+
+  let seq = 1;
+  for (const item of items) {
+    await ctx.pool.query(
+      `insert into apply_items (apply_run_id, seq, op, path, value_before, value_after)
+       values ($1,$2,$3,$4,$5::jsonb,$6::jsonb)`,
+      [
+        runId,
+        seq++,
+        item.op,
+        item.path,
+        item.before === null ? null : JSON.stringify(item.before),
+        item.after === null ? null : JSON.stringify(item.after),
+      ],
+    );
+  }
+
+  const counts = {
+    add: items.filter((item) => item.op === 'add').length,
+    change: items.filter((item) => item.op === 'change').length,
+    delete: items.filter((item) => item.op === 'delete').length,
+  };
+
+  await setJobPhase(ctx, job.id, 'done', 100);
+  return {
+    apply_run_id: runId,
+    diff_hash: hash,
+    base_state_hash: baseHash,
+    desired_hash: plan.desiredHash,
     counts,
     total: items.length,
     section_map: {},
@@ -1273,8 +1342,8 @@ export async function reconcile(ctx: HandlerContext, job: JobRow): Promise<Json>
 
 export async function applyRouterConnections(ctx: HandlerContext, job: JobRow): Promise<Json> {
   const routerId = requireRouter(job);
-  const routerResult = await ctx.pool.query<{ managed_section: string | null }>(
-    'select managed_section from routers where id = $1',
+  const routerResult = await ctx.pool.query<{ managed_section: string | null; product: string }>(
+    'select managed_section, product from routers where id = $1',
     [routerId],
   );
   const router = routerResult.rows[0];
@@ -1307,7 +1376,7 @@ export async function applyRouterConnections(ctx: HandlerContext, job: JobRow): 
     const value = decryptSecret(row.secret_enc, ctx.masterKey);
     if (row.kind === 'vless') {
       group.links.push(value);
-    } else {
+    } else if (router.product !== 'podkop') {
       group.subscriptions.push({
         name: `rc_sub_${row.id.replace(/-/g, '').slice(0, 12)}`,
         url: value,
@@ -1324,6 +1393,13 @@ export async function applyRouterConnections(ctx: HandlerContext, job: JobRow): 
     [routerId],
   );
   const managed = stateResult.rows[0]?.managed ?? {};
+  if (router.product === 'podkop') {
+    for (const section of [...bySection.keys()]) {
+      if (managed[`section.${section}.connection_type`] === undefined) {
+        bySection.delete(section);
+      }
+    }
+  }
   const sectionOption = (section: string, option: string): string => {
     const value = managed[`section.${section}.${option}`];
     return typeof value === 'string' ? value : '';
@@ -1733,6 +1809,7 @@ export const HANDLERS: Record<string, JobHandler> = {
   refresh_state: refreshState,
   diff: diffTemplate,
   diff_custom: diffCustom,
+  diff_podkop: diffPodkop,
   apply: applyRun,
   read_rules: readRules,
   monitor: monitorProbe,

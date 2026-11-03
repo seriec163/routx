@@ -75,6 +75,26 @@ export const SECTION_OPTIONS = new Set([
   'outbound_detour_enabled',
   'outbound_detour_section',
   'sort_by_latency',
+  // Podkop: тип секции и параметры прокси/маршрутизации.
+  'connection_type',
+  'proxy_config_type',
+  'interface',
+  'user_domain_list_type',
+  'user_domains',
+  'user_domains_text',
+  'user_subnet_list_type',
+  'user_subnets',
+  'user_subnets_text',
+  'local_domain_lists',
+  'local_subnet_lists',
+  'enable_udp_over_tcp',
+  'urltest_check_interval',
+  'urltest_tolerance',
+  'urltest_testing_url',
+  'mixed_proxy_enabled',
+  'mixed_proxy_port',
+  'domain_resolver_enabled',
+  'resolve_real_ip_for_routing',
 ]);
 
 export const SECTION_LIST_OPTIONS = new Set([
@@ -89,6 +109,11 @@ export const SECTION_LIST_OPTIONS = new Set([
   'domain_ip_lists',
   'remote_domain_lists',
   'remote_subnet_lists',
+  // Podkop: списки доменов, подсетей и правил.
+  'user_domains',
+  'user_subnets',
+  'local_domain_lists',
+  'local_subnet_lists',
 ]);
 
 /**
@@ -155,7 +180,11 @@ export const SUBSCRIPTION_OPTIONS = new Set([
 export const FORBIDDEN_TYPES = new Set(['server']);
 export const SECRET_OPTIONS = new Set([
   'selector_proxy_links',
+  'urltest_proxy_links',
+  'urltest_fallback_links',
+  'proxy_string',
   'outbound_jsons',
+  'outbound_json',
   'url',
 ]);
 export const SECRET_OPTION_PATTERN =

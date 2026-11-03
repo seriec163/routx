@@ -4,7 +4,7 @@ import { z } from 'zod';
 import { audit } from '../audit.js';
 import { requireUser } from '../auth/service.js';
 import { decryptSecret } from '../lib/crypto.js';
-import { conflict } from '../lib/errors.js';
+import { conflict, badRequest } from '../lib/errors.js';
 import { enqueueJob, jobJson } from '../jobs/queue.js';
 import { getRouter, getRouterForMutation, assertOnline } from './service.js';
 import {
@@ -34,6 +34,9 @@ const ruleBodySchema = z
     manual_domains: z.array(z.string().max(512)).max(5000).default([]),
     manual_ips: z.array(z.string().max(64)).max(5000).default([]),
     settings: z.record(z.string(), uciValueSchema).default({}),
+    connection_type: z.enum(['proxy', 'vpn', 'block', 'exclusion']).optional(),
+    proxy_config_type: z.enum(['url', 'selector', 'urltest']).optional(),
+    podkop_options: z.record(z.string(), uciValueSchema).default({}),
     reason: z.string().max(200).optional(),
   })
   .strict();
@@ -142,6 +145,55 @@ export async function registerRouterRuleRoutes(
       const body = ruleBodySchema.parse(request.body);
       const router = await getRouterForMutation(pool, auth, params.id);
       assertOnline(router);
+
+      if (router.product === 'podkop') {
+        const connectionType = body.connection_type;
+        if (!connectionType) {
+          throw badRequest('connection_type_required', 'Укажите тип секции Podkop');
+        }
+        const payload = {
+          section: body.section,
+          label: body.label,
+          create: body.create,
+          enabled: body.enabled,
+          connection_type: connectionType,
+          proxy_config_type: body.proxy_config_type,
+          community_lists: Array.isArray(body.resources.community_lists)
+            ? body.resources.community_lists.map(String)
+            : body.resources.community_lists == null
+              ? []
+              : [String(body.resources.community_lists)],
+          manual_domains: body.manual_domains,
+          manual_ips: body.manual_ips,
+          options: body.podkop_options,
+        };
+        const job = await enqueueJob(pool, {
+          type: 'diff_podkop',
+          routerId: router.id,
+          requestedBy: auth.userId,
+          timeoutSeconds: 120,
+          payload: { payload, reason: body.reason ?? null },
+        });
+        await audit(pool, {
+          actorId: auth.userId,
+          actorRole: auth.role,
+          action: 'router.podkop_section_diff',
+          targetType: 'router',
+          targetId: router.id,
+          routerId: router.id,
+          result: 'ok',
+          ip: request.ip,
+          userAgent: request.headers['user-agent'],
+          metadata: {
+            section: body.section,
+            connection_type: connectionType,
+            create: body.create,
+            job_id: job.id,
+          },
+        });
+        reply.code(202);
+        return { job: jobJson(job) };
+      }
 
       // Prokop не может собрать конфигурацию, если не осталось ни одной
       // включённой секции. Не даём выключить последнее включённое правило.

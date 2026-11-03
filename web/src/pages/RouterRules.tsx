@@ -153,6 +153,9 @@ interface RuleBody {
   manual_domains: string[];
   manual_ips: string[];
   settings: Record<string, string | string[] | null>;
+  connection_type?: 'proxy' | 'vpn' | 'block' | 'exclusion';
+  proxy_config_type?: 'url' | 'selector' | 'urltest';
+  podkop_options?: Record<string, string | string[] | null>;
 }
 
 interface DiffRequest {
@@ -199,7 +202,7 @@ export function RouterRulesPanel(props: {
   const liveLoaded = useRef(false);
 
   const online = props.router.status === 'online';
-  const readonly = props.router.product === 'podkop';
+  const isPodkop = props.router.product === 'podkop';
   const actions = catalog.data?.actions?.length ? catalog.data.actions : ACTION_FALLBACK;
   const services = catalog.data?.services ?? [];
 
@@ -473,7 +476,7 @@ export function RouterRulesPanel(props: {
             >
               Прочитать
             </Button>
-            <Button size="sm" onClick={openCreate} disabled={!online || readonly}>
+            <Button size="sm" onClick={openCreate} disabled={!online}>
               Добавить правило
             </Button>
           </div>
@@ -497,10 +500,11 @@ export function RouterRulesPanel(props: {
           </InfoBanner>
         ) : null}
 
-        {readonly ? (
-          <InfoBanner tone="warn">
-            Podkop: здесь показаны секции и подключения роутера. Редактирование секций Podkop
-            через RoutX пока не поддерживается — настройте их в LuCI → Службы → Podkop.
+        {isPodkop ? (
+          <InfoBanner>
+            Podkop: изменения проверяются через <strong>sing-box check</strong> и перезапуск
+            Podkop. Если конфигурация не проходит проверку, RoutX автоматически откатит
+            <code>/etc/config/podkop</code> и вернёт рабочий sing-box.
           </InfoBanner>
         ) : null}
 
@@ -525,7 +529,7 @@ export function RouterRulesPanel(props: {
               Правил пока нет. Добавьте первое правило: вставьте ссылку на подписку или VLESS,
               выберите ресурс (например, YouTube) и действие.
             </Empty>
-            <Button onClick={openCreate} disabled={!online || readonly}>
+            <Button onClick={openCreate} disabled={!online}>
               Добавить правило
             </Button>
           </div>
@@ -545,7 +549,7 @@ export function RouterRulesPanel(props: {
                 }
                 onDelete={(connection) => requestDelete(rule, connection)}
                 onToggle={() => requestToggle(rule)}
-                disabled={!online || readonly}
+                disabled={!online}
               />
             ))}
           </div>
@@ -567,6 +571,7 @@ export function RouterRulesPanel(props: {
           services={services}
           templates={templates.data?.items ?? []}
           routerId={props.routerId}
+          product={props.router.product}
           existingSections={rules.map((rule) => rule.section)}
           onClose={() => setEditor(null)}
           onSubmit={submitRule}
@@ -591,6 +596,7 @@ export function RouterRulesPanel(props: {
       {connectionTarget ? (
         <ConnectionModal
           routerId={props.routerId}
+          product={props.router.product}
           rule={connectionTarget.rule}
           connection={connectionTarget.connection}
           onClose={() => setConnectionTarget(null)}
@@ -820,14 +826,29 @@ function RuleEditorModal(props: {
   services: RoutingService[];
   templates: TemplateListItem[];
   routerId: string;
+  product: string;
   existingSections: string[];
   onClose: () => void;
   onSubmit: (body: RuleBody, pending: PendingConnection[]) => void;
 }) {
   const toast = useToast();
   const initial = props.rule;
+  const isPodkop = props.product === 'podkop';
   const [label, setLabel] = useState(initial?.label ?? '');
   const [action, setAction] = useState(initial?.action ?? 'connection');
+  const [connectionType, setConnectionType] = useState(
+    String(
+      initial?.resources.connection_type ??
+        (initial?.action === 'block'
+          ? 'block'
+          : initial?.action === 'bypass'
+            ? 'exclusion'
+            : 'proxy'),
+    ),
+  );
+  const [proxyConfigType, setProxyConfigType] = useState(
+    String(initial?.resources.proxy_config_type ?? 'url'),
+  );
   const [enabled, setEnabled] = useState(initial?.enabled ?? true);
   const [selectedServices, setSelectedServices] = useState<string[]>(
     asStringList(initial?.resources.community_lists),
@@ -877,7 +898,9 @@ function RuleEditorModal(props: {
   const [vlessValue, setVlessValue] = useState('');
   const [error, setError] = useState<string | null>(null);
 
-  const canConnect = CONNECTION_ACTIONS.has(action);
+  const canConnect = isPodkop
+    ? connectionType === 'proxy' || connectionType === 'vpn'
+    : CONNECTION_ACTIONS.has(action);
   const existingSources =
     (props.rule?.subscriptions.length ?? 0) + (props.rule?.links.length ?? 0);
 
@@ -1067,14 +1090,23 @@ function RuleEditorModal(props: {
       fail('Для действия «Через VPN» добавьте подписку или VLESS-ссылку');
       return;
     }
-    const resources: Record<string, string | string[] | null> = {
-      ...extraResources,
-      community_lists: selectedServices,
-      rule_set: lines(ruleSets),
-      remote_domain_lists: lines(domainLists),
-      remote_subnet_lists: lines(subnetLists),
-      domain: domainText.trim() === '' ? null : domainText,
-    };
+    const resources: Record<string, string | string[] | null> = isPodkop
+      ? { community_lists: selectedServices }
+      : {
+          ...extraResources,
+          community_lists: selectedServices,
+          rule_set: lines(ruleSets),
+          remote_domain_lists: lines(domainLists),
+          remote_subnet_lists: lines(subnetLists),
+          domain: domainText.trim() === '' ? null : domainText,
+        };
+    const actionForSubmit = isPodkop
+      ? connectionType === 'block'
+        ? 'block'
+        : connectionType === 'exclusion'
+          ? 'bypass'
+          : 'connection'
+      : action;
     let section = props.rule?.section ?? newSectionName(trimmed);
     if (!props.rule) {
       let attempt = 0;
@@ -1087,13 +1119,18 @@ function RuleEditorModal(props: {
       {
         section,
         label: trimmed,
-        action,
+        action: actionForSubmit,
         enabled,
         create: props.mode === 'create',
         resources,
         manual_domains: lines(manualDomains),
         manual_ips: lines(manualIps),
-        settings: templateSettings,
+        settings: isPodkop ? {} : templateSettings,
+        connection_type: isPodkop ? (connectionType as RuleBody['connection_type']) : undefined,
+        proxy_config_type: isPodkop
+          ? (proxyConfigType as RuleBody['proxy_config_type'])
+          : undefined,
+        podkop_options: isPodkop ? {} : undefined,
       },
       canConnect ? effectivePending : [],
     );
@@ -1114,8 +1151,9 @@ function RuleEditorModal(props: {
       }
     >
       <p className="page-sub">
-        Правило — это секция на роутере. Название видно в панели и в LuCI Prokop. Имя UCI
-        создаётся автоматически и не требует внимания.
+        {isPodkop
+          ? 'Секция Podkop: тип, домены, списки и подключение. Изменения проверяются и перезапускают sing-box с автоматическим откатом при ошибке.'
+          : 'Правило — это секция на роутере. Название видно в панели и в LuCI Prokop. Имя UCI создаётся автоматически и не требует внимания.'}
       </p>
       <p className="muted-text small" style={{ marginTop: -6 }}>
         Сохранение в два шага: сначала «Проверить и сохранить» — откроется список изменений,
@@ -1128,33 +1166,59 @@ function RuleEditorModal(props: {
         <Field label="Название правила" hint="Например: YouTube, Работа, Игры">
           <TextInput value={label} onChange={setLabel} placeholder="YouTube" required />
         </Field>
-        <Field label="Действие" hint="Что делать с трафиком этой секции">
-          <Select value={action} onChange={setAction}>
-            {props.actions.map((item) => (
-              <option key={item.id} value={item.id}>
-                {item.label}
-              </option>
-            ))}
-          </Select>
-        </Field>
+        {isPodkop ? (
+          <Field label="Тип секции Podkop" hint="Куда направлять трафик этой секции">
+            <Select value={connectionType} onChange={setConnectionType}>
+              <option value="proxy">Прокси</option>
+              <option value="vpn">VPN</option>
+              <option value="block">Блокировать</option>
+              <option value="exclusion">Исключить из маршрутизации</option>
+            </Select>
+          </Field>
+        ) : (
+          <Field label="Действие" hint="Что делать с трафиком этой секции">
+            <Select value={action} onChange={setAction}>
+              {props.actions.map((item) => (
+                <option key={item.id} value={item.id}>
+                  {item.label}
+                </option>
+              ))}
+            </Select>
+          </Field>
+        )}
       </div>
 
-      <Field
-        label="Заполнить из шаблона"
-        hint="Шаблон — это готовый набор действия, ресурсов и настроек. Имя секции в нём не хранится."
-      >
-        <div className="row">
-          <Select value={templateId} onChange={(value) => void applyTemplate(value)}>
-            <option value="">Не использовать</option>
-            {props.templates.map((template) => (
-              <option key={template.id} value={template.id}>
-                {template.name} (ред. {template.current_revision})
-              </option>
-            ))}
+      {isPodkop && canConnect ? (
+        <Field
+          label="Режим прокси"
+          hint="url — одна ссылка, selector — выбор вручную, urltest — автовыбор по задержке"
+        >
+          <Select value={proxyConfigType} onChange={setProxyConfigType}>
+            <option value="url">Одна ссылка (url)</option>
+            <option value="selector">Список selector</option>
+            <option value="urltest">Список urltest</option>
           </Select>
-          {templateBusy ? <Spinner label="Загружаем шаблон…" /> : null}
-        </div>
-      </Field>
+        </Field>
+      ) : null}
+
+      {!isPodkop ? (
+        <Field
+          label="Заполнить из шаблона"
+          hint="Шаблон — это готовый набор действия, ресурсов и настроек. Имя секции в нём не хранится."
+        >
+          <div className="row">
+            <Select value={templateId} onChange={(value) => void applyTemplate(value)}>
+              <option value="">Не использовать</option>
+              {props.templates.map((template) => (
+                <option key={template.id} value={template.id}>
+                  {template.name} (ред. {template.current_revision})
+                </option>
+              ))}
+            </Select>
+            {templateBusy ? <Spinner label="Загружаем шаблон…" /> : null}
+          </div>
+        </Field>
+      ) : null}
 
       <Field label="Ресурсы" hint="Выберите сервисы, чей трафик попадёт в это правило.">
         <div className="chip-grid">
@@ -1177,8 +1241,12 @@ function RuleEditorModal(props: {
 
       <div className="grid-2">
         <Field
-          label="Свои домены"
-          hint="По одному на строку. Домен = он и все поддомены."
+          label={isPodkop ? 'Домены секции' : 'Свои домены'}
+          hint={
+            isPodkop
+              ? 'По одному на строку. Для proxy/vpn — что направлять в туннель, для exclusion — что исключить.'
+              : 'По одному на строку. Домен = он и все поддомены.'
+          }
         >
           <textarea
             className="input code-area"
@@ -1188,18 +1256,20 @@ function RuleEditorModal(props: {
             placeholder={'example.com\nyoutube.com'}
           />
         </Field>
-        <Field
-          label="Точные домены, keyword и regex"
-          hint="full:api.example.com, keyword:freebuff, regex:\\.ai$"
-        >
-          <textarea
-            className="input code-area"
-            rows={5}
-            value={domainText}
-            onChange={(event) => setDomainText(event.target.value)}
-            placeholder={'full:api.example.com\nkeyword:freebuff\nregex:\\.ai$'}
-          />
-        </Field>
+        {!isPodkop ? (
+          <Field
+            label="Точные домены, keyword и regex"
+            hint="full:api.example.com, keyword:freebuff, regex:\\.ai$"
+          >
+            <textarea
+              className="input code-area"
+              rows={5}
+              value={domainText}
+              onChange={(event) => setDomainText(event.target.value)}
+              placeholder={'full:api.example.com\nkeyword:freebuff\nregex:\\.ai$'}
+            />
+          </Field>
+        ) : null}
       </div>
       <Field label="Свои IP и подсети" hint="IPv4/IPv6, можно с префиксом. По одному на строку.">
         <textarea
@@ -1211,33 +1281,35 @@ function RuleEditorModal(props: {
         />
       </Field>
 
-      <details className="advanced">
-        <summary>Дополнительные списки</summary>
-        <Field label="URL-списки rule_set (.srs/.json)" hint="По одной ссылке на строку.">
-          <textarea
-            className="input code-area"
-            rows={3}
-            value={ruleSets}
-            onChange={(event) => setRuleSets(event.target.value)}
-          />
-        </Field>
-        <Field label="URL-списки доменов (.lst)">
-          <textarea
-            className="input code-area"
-            rows={2}
-            value={domainLists}
-            onChange={(event) => setDomainLists(event.target.value)}
-          />
-        </Field>
-        <Field label="URL-списки подсетей (.lst)">
-          <textarea
-            className="input code-area"
-            rows={2}
-            value={subnetLists}
-            onChange={(event) => setSubnetLists(event.target.value)}
-          />
-        </Field>
-      </details>
+      {!isPodkop ? (
+        <details className="advanced">
+          <summary>Дополнительные списки</summary>
+          <Field label="URL-списки rule_set (.srs/.json)" hint="По одной ссылке на строку.">
+            <textarea
+              className="input code-area"
+              rows={3}
+              value={ruleSets}
+              onChange={(event) => setRuleSets(event.target.value)}
+            />
+          </Field>
+          <Field label="URL-списки доменов (.lst)">
+            <textarea
+              className="input code-area"
+              rows={2}
+              value={domainLists}
+              onChange={(event) => setDomainLists(event.target.value)}
+            />
+          </Field>
+          <Field label="URL-списки подсетей (.lst)">
+            <textarea
+              className="input code-area"
+              rows={2}
+              value={subnetLists}
+              onChange={(event) => setSubnetLists(event.target.value)}
+            />
+          </Field>
+        </details>
+      ) : null}
 
       <Switch
         checked={enabled}
@@ -1250,21 +1322,23 @@ function RuleEditorModal(props: {
         <div className="rule-connection-box">
           <h3>Источники подключения</h3>
           <p className="muted-text small">
-            Вставьте URL подписки или VLESS-ссылки. Если сразу нажать «Проверить и сохранить»,
-            вставленные значения добавятся автоматически. Кнопки ниже нужны, чтобы добавить
-            несколько источников заранее.
+            {isPodkop
+              ? 'Вставьте VLESS/ss/hysteria2-ссылку. Если сразу нажать «Проверить и сохранить», ссылка добавится автоматически. Несколько ссылок требуют режима selector или urltest.'
+              : 'Вставьте URL подписки или VLESS-ссылки. Если сразу нажать «Проверить и сохранить», вставленные значения добавятся автоматически. Кнопки ниже нужны, чтобы добавить несколько источников заранее.'}
           </p>
 
-          <Field label="Подписка из каталога" hint="Необязательно, если вставляете URL вручную.">
-            <Select value={catalogId} onChange={setCatalogId}>
-              <option value="">Не выбирать</option>
-              {catalog.map((item) => (
-                <option key={item.id} value={item.id}>
-                  {item.name} · {item.masked}
-                </option>
-              ))}
-            </Select>
-          </Field>
+          {!isPodkop ? (
+            <Field label="Подписка из каталога" hint="Необязательно, если вставляете URL вручную.">
+              <Select value={catalogId} onChange={setCatalogId}>
+                <option value="">Не выбирать</option>
+                {catalog.map((item) => (
+                  <option key={item.id} value={item.id}>
+                    {item.name} · {item.masked}
+                  </option>
+                ))}
+              </Select>
+            </Field>
+          ) : null}
 
           <Field label="Название подключения" hint="Необязательно">
             <TextInput
@@ -1275,16 +1349,18 @@ function RuleEditorModal(props: {
           </Field>
 
           <div className="grid-2">
-            <Field label="URL подписки">
-              <TextInput
-                value={connectionValue}
-                onChange={setConnectionValue}
-                placeholder="https://…"
-              />
-              <Button size="sm" variant="subtle" onClick={addSubscription}>
-                Добавить подписку
-              </Button>
-            </Field>
+            {!isPodkop ? (
+              <Field label="URL подписки">
+                <TextInput
+                  value={connectionValue}
+                  onChange={setConnectionValue}
+                  placeholder="https://…"
+                />
+                <Button size="sm" variant="subtle" onClick={addSubscription}>
+                  Добавить подписку
+                </Button>
+              </Field>
+            ) : null}
             <Field label="VLESS-ссылки" hint="По одной на строку.">
               <textarea
                 className="input code-area"
@@ -1325,8 +1401,9 @@ function RuleEditorModal(props: {
 
       {props.mode === 'edit' && !canConnect ? (
         <InfoBanner>
-          Подключения доступны только для действия «Через VPN-подключение». Для обхода, блокировки
-          или DNS-правила источник не нужен.
+          {isPodkop
+            ? 'Подключение доступно только для типа «Прокси» или «VPN». Для блокировки и исключения источник не нужен.'
+            : 'Подключения доступны только для действия «Через VPN-подключение». Для обхода, блокировки или DNS-правила источник не нужен.'}
         </InfoBanner>
       ) : null}
     </Modal>
@@ -1549,6 +1626,7 @@ function RuleDiffModal(props: {
 
 function ConnectionModal(props: {
   routerId: string;
+  product: string;
   rule: RuleView;
   connection: RuleConnectionView | null;
   onClose: () => void;
@@ -1556,8 +1634,9 @@ function ConnectionModal(props: {
 }) {
   const toast = useToast();
   const editing = props.connection;
+  const isPodkop = props.product === 'podkop';
   const [kind, setKind] = useState<'subscription' | 'vless'>(
-    editing?.kind === 'link' ? 'vless' : 'subscription',
+    isPodkop ? 'vless' : editing?.kind === 'link' ? 'vless' : 'subscription',
   );
   const [label, setLabel] = useState(editing?.label ?? '');
   const [value, setValue] = useState('');
@@ -1663,7 +1742,7 @@ function ConnectionModal(props: {
     >
       {error ? <ErrorBanner message={error} /> : null}
       {busy || job ? <JobProgress job={job} label="Применяем подключение" /> : null}
-      {!editing ? (
+      {!editing && !isPodkop ? (
         <Field label="Тип">
           <Select value={kind} onChange={(next) => setKind(next as 'subscription' | 'vless')}>
             <option value="subscription">Подписка (URL)</option>
@@ -1678,7 +1757,7 @@ function ConnectionModal(props: {
           placeholder={kind === 'subscription' ? 'Подписка' : 'VLESS'}
         />
       </Field>
-      {!editing && kind === 'subscription' ? (
+      {!editing && kind === 'subscription' && !isPodkop ? (
         <Field label="Подписка из каталога" hint="Или вставьте URL ниже.">
           <Select value={catalogId} onChange={setCatalogId}>
             <option value="">Не выбирать</option>

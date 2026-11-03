@@ -82,13 +82,13 @@ function snapshot_create(product, reason) {
 		};
 	}
 
-	if (product == "forkop") {
-		let src = "/etc/config/forkop";
+	if (product == "forkop" || product == "podkop") {
+		let src = "/etc/config/" + product;
 		if (!util.file_exists(src))
-			return { ok: false, error: "не найден /etc/config/forkop" };
+			return { ok: false, error: "не найден " + src };
 		let data = util.read_file(src, "");
 		if (data == "")
-			return { ok: false, error: "пустой /etc/config/forkop" };
+			return { ok: false, error: "пустой " + src };
 		let dst = util.SNAPSHOT_DIR + "/" + id;
 		if (fs.writefile(dst, data) == null)
 			return { ok: false, error: "не удалось сохранить снапшот" };
@@ -100,7 +100,7 @@ function snapshot_create(product, reason) {
 			reason: reason == "apply" ? "before-apply" : util.as_string(reason),
 			sha256: util.file_sha256(dst),
 			size_bytes: util.file_size(dst),
-			product_version: platform.product_version("forkop"),
+			product_version: platform.product_version(product),
 			created_at: now
 		};
 		util.write_atomic(util.SNAPSHOT_DIR + "/" + id + ".meta.json", util.json_string(meta) + "\n", 0600);
@@ -121,7 +121,7 @@ function snapshot_list(product) {
 			return { ok: true, items: [] };
 		return { ok: true, items: parsed };
 	}
-	if (product == "forkop") {
+	if (product == "forkop" || product == "podkop") {
 		return { ok: true, items: list_local() };
 	}
 	return { ok: true, items: [] };
@@ -146,17 +146,18 @@ function snapshot_restore(product, snapshot_ref, kind) {
 		return { ok: false, error: parsed.reason || "ошибка восстановления", status: status };
 	}
 
-	if (product == "forkop") {
+	if (product == "forkop" || product == "podkop") {
 		let src = util.SNAPSHOT_DIR + "/" + util.as_string(snapshot_ref);
 		if (!util.file_exists(src))
 			return { ok: false, error: "локальный снапшот не найден" };
-		snapshot_create("forkop", "pre-restore");
+		snapshot_create(product, "pre-restore");
 		let data = util.read_file(src, "");
 		if (data == "")
 			return { ok: false, error: "пустой снапшот" };
-		if (fs.writefile("/etc/config/forkop", data) == null)
-			return { ok: false, error: "не удалось заменить /etc/config/forkop" };
-		fs.chmod("/etc/config/forkop", 0600);
+		let dst = "/etc/config/" + product;
+		if (fs.writefile(dst, data) == null)
+			return { ok: false, error: "не удалось заменить " + dst };
+		fs.chmod(dst, 0600);
 		return { ok: true, status: "success" };
 	}
 

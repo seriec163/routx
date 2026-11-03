@@ -8,6 +8,7 @@ export type JobType =
   | 'refresh_state'
   | 'diff'
   | 'diff_custom'
+  | 'diff_podkop'
   | 'apply'
   | 'read_rules'
   | 'monitor'

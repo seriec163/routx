@@ -35,6 +35,7 @@ function podkop_value(value) {
 // несекретные опции секций и настроек. proxy_string/urltest_proxy_links/
 // selector_proxy_links/outbound_json никогда не попадают в состояние.
 const PODKOP_SECTION_OPTIONS = {
+	enabled: true,
 	connection_type: true, proxy_config_type: true, interface: true,
 	community_lists: true, user_domain_list_type: true, user_domains: true,
 	user_domains_text: true, user_subnet_list_type: true, user_subnets: true,

@@ -34,14 +34,24 @@ const SECTION_OPTIONS = set_of([
 	"rule_set_with_subnets", "fully_routed_ips", "excluded_source_ip_cidr",
 	"domain", "domain_suffix", "domain_keyword", "domain_regex",
 	"domain_ip_lists", "remote_domain_lists", "remote_subnet_lists",
-	"outbound_detour_enabled", "outbound_detour_section", "sort_by_latency"
+	"outbound_detour_enabled", "outbound_detour_section", "sort_by_latency",
+	// Podkop: тип секции и параметры прокси/маршрутизации.
+	"connection_type", "proxy_config_type", "interface",
+	"user_domain_list_type", "user_domains", "user_domains_text",
+	"user_subnet_list_type", "user_subnets", "user_subnets_text",
+	"local_domain_lists", "local_subnet_lists",
+	"enable_udp_over_tcp", "urltest_check_interval", "urltest_tolerance",
+	"urltest_testing_url", "mixed_proxy_enabled", "mixed_proxy_port",
+	"domain_resolver_enabled", "resolve_real_ip_for_routing"
 ]);
 
 const SECTION_LIST_OPTIONS = set_of([
 	"community_lists", "rule_set", "rule_set_with_subnets", "fully_routed_ips",
 	"excluded_source_ip_cidr", "domain_suffix", "domain_keyword",
 	"domain_regex", "domain_ip_lists", "remote_domain_lists",
-	"remote_subnet_lists"
+	"remote_subnet_lists",
+	// Podkop: списки доменов, подсетей и правил.
+	"user_domains", "user_subnets", "local_domain_lists", "local_subnet_lists"
 ]);
 
 const URLTEST_OPTIONS = set_of([
@@ -74,7 +84,8 @@ const SUBSCRIPTION_OPTIONS = set_of([
 const FORBIDDEN_TYPES = set_of(["server"]);
 
 const SECRET_OPTIONS = set_of([
-	"selector_proxy_links", "outbound_jsons", "url"
+	"selector_proxy_links", "urltest_proxy_links", "urltest_fallback_links",
+	"proxy_string", "outbound_jsons", "outbound_json", "url"
 ]);
 
 const SECRET_PATTERN = /(selector_proxy|outbound_json|private[_-]?key|password|passwd|secret|token|api[_-]?key|subscription.*url|^url$|auth)/i;
@@ -178,7 +189,7 @@ function normalize_value(value, is_list) {
 					push(out, text);
 			}
 		}
-		out = slice(out, 0, 200);
+		out = slice(out, 0, 5000);
 		return { ok: true, value: length(out) == 0 ? null : out };
 	}
 
