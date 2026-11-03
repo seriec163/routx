@@ -54,6 +54,9 @@ function enabled_sections(product) {
 		}
 		let name = util.as_string(sect[".name"]);
 		names[name == "" ? sname : name] = true;
+		let label = trim(util.as_string(sect.label));
+		if (label != "")
+			names[label] = true;
 	}
 	return names;
 }
@@ -84,6 +87,9 @@ function pick_group(proxies, sections) {
 	for (let tag, proxy in proxies) {
 		if (!is_group(proxy))
 			continue;
+		// Forkop 2.x называет группу секции её label; старые версии — <section>-out.
+		if (sections[tag] === true)
+			return tag;
 		if (length(tag) <= 4 || substr(tag, length(tag) - 4) != "-out")
 			continue;
 		let section = substr(tag, 0, length(tag) - 4);
@@ -157,11 +163,22 @@ function active_delays(product, group, members, force) {
 // gga -> gga-out. Пользователь видит label (router_control), поэтому в
 // человекочитаемых сообщениях показываем label, а не внутренний тег.
 function group_display(product, group) {
+	let cursor = uci.cursor();
+	// Forkop 2.x: тег группы — это label секции.
+	let all = cursor.get_all(product);
+	if (type(all) == "object") {
+		for (let sname in all) {
+			let sect = all[sname];
+			if (type(sect) != "object" || sect[".type"] != "section")
+				continue;
+			if (trim(util.as_string(sect.label)) == group)
+				return group;
+		}
+	}
 	let name = group;
 	let dash = rindex(group, "-");
 	if (dash > 0) {
 		let candidate = substr(group, 0, dash);
-		let cursor = uci.cursor();
 		if (cursor.get(product, candidate) == "section") {
 			let label = util.as_string(cursor.get(product, candidate, "label"));
 			if (label != "")
@@ -169,7 +186,6 @@ function group_display(product, group) {
 			return candidate;
 		}
 	}
-	let cursor = uci.cursor();
 	if (cursor.get(product, group) == "section") {
 		let label = util.as_string(cursor.get(product, group, "label"));
 		if (label != "")

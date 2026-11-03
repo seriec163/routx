@@ -22,6 +22,9 @@ interface RouteContext {
 }
 
 const SECTION_RE = /^[A-Za-z0-9_.-]{1,64}$/;
+// Теги Forkop 2.x — это человекочитаемые label и имена серверов:
+// пробелы, кириллица, эмодзи и слэш допустимы.
+const PROXY_TAG_RE = /^[^\u0000-\u001f\u007f]{1,200}$/;
 
 const ruleBodySchema = z
   .object({
@@ -279,8 +282,8 @@ export async function registerRouterRuleRoutes(
     const params = z.object({ id: z.string().uuid() }).parse(request.params);
     const body = z
       .object({
-        group: z.string().regex(SECTION_RE),
-        tag: z.string().regex(SECTION_RE),
+        group: z.string().trim().regex(PROXY_TAG_RE),
+        tag: z.string().trim().regex(PROXY_TAG_RE),
       })
       .strict()
       .parse(request.body);

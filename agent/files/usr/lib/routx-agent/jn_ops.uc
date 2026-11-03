@@ -736,10 +736,25 @@ function enrich_links(product, section, links, proxies) {
 			mode = "url";
 	}
 	let group_tag = section + "-out";
+	if (product_api.is_forkop_v2(product)) {
+		let cursor = uci.cursor();
+		let label = trim(util.as_string(cursor.get(product, section, "label")));
+		group_tag = label != "" ? label : section;
+	}
 	let group = proxies[group_tag];
 	for (let i = 0; i < length(links); i++) {
 		let link = links[i];
-		let tag = mode == "url" || mode == "outbound" ? group_tag : section + "-" + (i + 1) + "-out";
+		let tag;
+		if (product_api.is_forkop_v2(product)) {
+			let child = trim(util.as_string(link.label));
+			if (child == "")
+				child = trim(util.as_string(link.host));
+			if (child == "")
+				child = "" + (i + 1);
+			tag = group_tag + "/" + child;
+		} else {
+			tag = mode == "url" || mode == "outbound" ? group_tag : section + "-" + (i + 1) + "-out";
+		}
 		let info = proxies[tag];
 		let delay = proxy_last_delay(info);
 		link.proxy_tag = tag;
@@ -763,7 +778,8 @@ function enrich_links(product, section, links, proxies) {
 function select_proxy(product, args) {
 	let group = util.as_string(args.group);
 	let tag = util.as_string(args.tag);
-	if (match(group, SECTION_RE) == null || match(tag, SECTION_RE) == null)
+	if (group == "" || tag == "" || length(group) > 200 || length(tag) > 200 ||
+		match(group, /[\u0000-\u001f\u007f]/) != null || match(tag, /[\u0000-\u001f\u007f]/) != null)
 		return { ok: false, error: "invalid_proxy_tag" };
 	if (product != "forkop" && product != "prokop" && product != "podkop")
 		return { ok: false, error: "неизвестный продукт" };
