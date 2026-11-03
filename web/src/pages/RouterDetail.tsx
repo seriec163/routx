@@ -125,6 +125,23 @@ function serviceText(value: unknown): string {
   return '—';
 }
 
+interface ProductCatalogItem {
+  product: 'tachyon' | 'forkop' | 'podkop';
+  label: string;
+  repo: string;
+  current_version: string | null;
+  latest_version: string | null;
+  update_available: boolean;
+  releases: Array<{
+    version: string;
+    tag: string;
+    name: string;
+    published_at: string | null;
+    prerelease: boolean;
+  }>;
+  error: string | null;
+}
+
 interface ProductServiceInfo {
   present: boolean;
   running: boolean | null;
@@ -566,6 +583,12 @@ export function RouterDetailPage({ id }: { id: string }) {
   const [activeJob, setActiveJob] = useState<Job | null>(null);
   const [activeJobLabel, setActiveJobLabel] = useState('');
   const [productSwitchBusy, setProductSwitchBusy] = useState(false);
+  const [productOpen, setProductOpen] = useState(false);
+  const [productItems, setProductItems] = useState<ProductCatalogItem[]>([]);
+  const [productVersions, setProductVersions] = useState<Record<string, string>>({});
+  const [productError, setProductError] = useState<string | null>(null);
+  const [productJob, setProductJob] = useState<Job | null>(null);
+  const [productLoading, setProductLoading] = useState(false);
   const [restoreRouterBusy, setRestoreRouterBusy] = useState(false);
   const [purgeOpen, setPurgeOpen] = useState(false);
   const [purgeName, setPurgeName] = useState('');
@@ -1129,26 +1152,59 @@ export function RouterDetailPage({ id }: { id: string }) {
     return null;
   }
 
-  async function switchToTachyon(): Promise<void> {
+  async function openProductManager(): Promise<void> {
+    setProductOpen(true);
+    setProductLoading(true);
+    setProductError(null);
+    setProductJob(null);
+    try {
+      const response = await api<{ items: ProductCatalogItem[] }>(
+        `/api/v1/routers/${id}/product-catalog`,
+      );
+      setProductItems(response.items);
+      const defaults: Record<string, string> = {};
+      for (const item of response.items) {
+        defaults[item.product] = item.latest_version ?? item.releases[0]?.version ?? '';
+      }
+      setProductVersions(defaults);
+    } catch (caught) {
+      setProductError(errorMessage(caught));
+    } finally {
+      setProductLoading(false);
+    }
+  }
+
+  async function installProduct(item: ProductCatalogItem): Promise<void> {
+    const version = productVersions[item.product] ?? item.latest_version ?? '';
+    const same = router?.product === item.product;
+    const action = same ? 'Переустановить' : 'Установить';
     if (
       !window.confirm(
-        'Установить Tachyon с ядром tachyon-core? Официальный установщик удалит пакеты Podkop/Forkop/Prokop, сохранив их конфигурацию для миграции. Это может занять несколько минут.',
+        `${action} ${item.label}${version ? ` ${version}` : ''}? Текущий продукт будет удалён, настройки RoutX и подписки будут перенесены. Это может занять несколько минут.`,
       )
     ) {
       return;
     }
     setProductSwitchBusy(true);
+    setProductError(null);
+    setProductJob(null);
     setActiveJob(null);
-    setActiveJobLabel('Устанавливаем Tachyon');
+    setActiveJobLabel(`Установка ${item.label}`);
     try {
+      if (!router) throw new Error('Роутер не загружен');
       const started = await api<{ job: Job }>(`/api/v1/routers/${id}/product-switch`, {
         method: 'POST',
-        body: { product: 'tachyon' },
+        body: {
+          product: item.product,
+          ...(item.product === 'tachyon' && version ? { version } : {}),
+        },
       });
+      setProductJob(started.job);
       setActiveJob(started.job);
       let done: Job | null = null;
-      for (let attempt = 0; attempt < 1200; attempt += 1) {
+      for (let attempt = 0; attempt < 1300; attempt += 1) {
         const response = await api<{ job: Job }>(`/api/v1/jobs/${started.job.id}`);
+        setProductJob(response.job);
         setActiveJob(response.job);
         if (response.job.status !== 'queued' && response.job.status !== 'running') {
           done = response.job;
@@ -1157,12 +1213,13 @@ export function RouterDetailPage({ id }: { id: string }) {
         await new Promise((resolve) => window.setTimeout(resolve, 1500));
       }
       if (!done || done.status !== 'success') {
-        throw new Error(done?.error?.message ?? 'Установка Tachyon не завершилась');
+        throw new Error(done?.error?.message ?? 'Смена продукта не завершилась');
       }
-      toast.success('Tachyon установлен');
+      toast.success(`${item.label} установлен`);
+      setProductOpen(false);
       await detail.reload();
     } catch (caught) {
-      toast.error(errorMessage(caught));
+      setProductError(errorMessage(caught));
     } finally {
       setProductSwitchBusy(false);
       setActiveJob(null);
@@ -1513,14 +1570,14 @@ export function RouterDetailPage({ id }: { id: string }) {
         }
         actions={
           <>
-            {isAdmin && online && router.product !== 'tachyon' ? (
+            {isAdmin && online ? (
               <Button
                 variant="ghost"
-                onClick={() => void switchToTachyon()}
+                onClick={() => void openProductManager()}
                 busy={productSwitchBusy}
                 disabled={!canMutate || productSwitchBusy}
               >
-                Установить Tachyon
+                Пакет продукта
               </Button>
             ) : null}
             <Button variant="ghost" onClick={() => void refreshState()} busy={busy} disabled={!online}>
@@ -3058,6 +3115,90 @@ export function RouterDetailPage({ id }: { id: string }) {
               На роутере ещё нет прочитанных секций. Нажмите «Прочитать состояние» и повторите.
             </InfoBanner>
           ) : null}
+        </Modal>
+      ) : null}
+
+      {productOpen ? (
+        <Modal
+          title="Пакет продукта"
+          onClose={() => setProductOpen(false)}
+          footer={
+            <Button variant="ghost" onClick={() => setProductOpen(false)} disabled={productSwitchBusy}>
+              Закрыть
+            </Button>
+          }
+        >
+          {productError ? <ErrorBanner message={productError} /> : null}
+          <p className="page-sub">
+            Смена продукта удаляет текущий пакет и ставит выбранный. Подписки и подключения RoutX
+            переносятся автоматически; перед установкой создаётся резервная копия конфигурации.
+          </p>
+          {productLoading ? <Spinner label="Проверяем версии…" /> : null}
+          {productItems.map((item) => {
+            const same = router.product === item.product;
+            const selected = productVersions[item.product] ?? item.latest_version ?? '';
+            return (
+              <div
+                key={item.product}
+                style={{
+                  border: '1px solid var(--line, rgba(120,90,120,.16))',
+                  borderRadius: 12,
+                  padding: 14,
+                  marginBottom: 12,
+                }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+                  <strong>{item.label}</strong>
+                  {same ? <StatusBadge status="success" label="установлен" /> : null}
+                  {item.update_available ? (
+                    <StatusBadge status="warning" label={`есть ${item.latest_version}`} />
+                  ) : null}
+                  <span className="muted-text small">{item.repo}</span>
+                </div>
+                <p className="muted-text small" style={{ margin: '8px 0 4px' }}>
+                  Установлено: {same ? item.current_version ?? router.product_version ?? '—' : '—'} ·
+                  Последняя: {item.latest_version ?? '—'}
+                </p>
+                {item.product === 'tachyon' ? (
+                  <Field label="Версия Tachyon">
+                    <Select
+                      value={selected}
+                      onChange={(value) =>
+                        setProductVersions((current) => ({ ...current, [item.product]: value }))
+                      }
+                    >
+                      {(item.releases.length > 0 ? item.releases : [{ version: selected, tag: selected, name: '', published_at: null, prerelease: false }]).map(
+                        (release) => (
+                          <option key={release.version} value={release.version}>
+                            {release.version}
+                            {release.prerelease ? ' · beta' : ''}
+                          </option>
+                        ),
+                      )}
+                    </Select>
+                  </Field>
+                ) : (
+                  <p className="muted-text small">
+                    Официальный установщик {item.label} ставит последнюю версию.
+                  </p>
+                )}
+                {item.error ? <p className="muted-text small">GitHub: {item.error}</p> : null}
+                <Button
+                  size="sm"
+                  onClick={() => void installProduct(item)}
+                  busy={productSwitchBusy}
+                  disabled={productSwitchBusy || (same && !item.update_available && item.product !== 'tachyon')}
+                >
+                  {same
+                    ? item.update_available
+                      ? `Обновить до ${item.latest_version ?? ''}`
+                      : 'Переустановить'
+                    : `Установить ${item.label}`}
+                </Button>
+              </div>
+            );
+          })}
+          {activeJob ? <JobProgress job={activeJob} label={activeJobLabel || 'Установка продукта'} /> : null}
         </Modal>
       ) : null}
 

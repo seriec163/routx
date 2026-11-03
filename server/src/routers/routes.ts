@@ -10,6 +10,7 @@ import { enqueueJob, jobJson } from '../jobs/queue.js';
 import { assertOnline, getRouter, getRouterForMutation, routerJson } from './service.js';
 import { createBindingToken, rotateRouterCredential } from './binding.js';
 import { loadSettings } from '../settings.js';
+import { productCatalog, type ProductId } from '../domain/product-catalog.js';
 import {
   applySectionMap,
   CONNECTION_ACTIONS,
@@ -1006,6 +1007,17 @@ export async function registerRouterRoutes(app: FastifyInstance, ctx: RouteConte
     return { job: jobJson(job) };
   });
 
+  app.get('/api/v1/routers/:id/product-catalog', async (request) => {
+    const auth = requireUser(request);
+    const params = z.object({ id: z.string().uuid() }).parse(request.params);
+    const router = await getRouter(pool, auth, params.id);
+    const current =
+      router.product === 'tachyon' || router.product === 'forkop' || router.product === 'podkop'
+        ? { [router.product as ProductId]: router.product_version }
+        : {};
+    return { items: await productCatalog(current) };
+  });
+
   // Смена продукта на роутере. Пока поддерживается установка Tachyon
   // поверх Podkop/Forkop/Prokop: официальный установщик сам удаляет
   // конфликтующие пакеты, сохраняя их конфиги для миграции.
@@ -1018,12 +1030,19 @@ export async function registerRouterRoutes(app: FastifyInstance, ctx: RouteConte
         throw forbidden('superadmin_required', 'Смена продукта доступна только администратору');
       }
       const params = z.object({ id: z.string().uuid() }).parse(request.params);
-      const body = z.object({ product: z.enum(['tachyon']) }).strict().parse(request.body);
+      const body = z
+        .object({
+          product: z.enum(['tachyon', 'forkop', 'podkop']),
+          version: z
+            .string()
+            .trim()
+            .regex(/^\d+(\.\d+){2,3}$/)
+            .optional(),
+        })
+        .strict()
+        .parse(request.body);
       const router = await getRouterForMutation(pool, auth, params.id);
       assertOnline(router);
-      if (router.product === body.product) {
-        throw badRequest('product_already_installed', 'Этот продукт уже установлен');
-      }
 
       const job = await enqueueJob(pool, {
         type: 'product_switch',
@@ -1031,8 +1050,8 @@ export async function registerRouterRoutes(app: FastifyInstance, ctx: RouteConte
         requestedBy: auth.userId,
         timeoutSeconds: 1900,
         maxAttempts: 1,
-        idempotencyKey: `product_switch:${router.id}:${body.product}:${Date.now()}`,
-        payload: { product: body.product },
+        idempotencyKey: `product_switch:${router.id}:${body.product}:${body.version ?? 'latest'}:${Date.now()}`,
+        payload: { product: body.product, version: body.version ?? null },
       });
 
       await audit(pool, {
@@ -1045,7 +1064,12 @@ export async function registerRouterRoutes(app: FastifyInstance, ctx: RouteConte
         result: 'ok',
         ip: request.ip,
         userAgent: request.headers['user-agent'],
-        metadata: { from: router.product, to: body.product, job_id: job.id },
+        metadata: {
+          from: router.product,
+          to: body.product,
+          version: body.version ?? null,
+          job_id: job.id,
+        },
       });
 
       reply.code(202);

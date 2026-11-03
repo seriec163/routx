@@ -1164,6 +1164,44 @@ function cleanup_json_outbounds(product) {
 	return { ok: true, removed: removed };
 }
 
+function restore_section_options(product, args) {
+	if (product != "forkop" && product != "prokop" && product != "podkop" && product != "tachyon")
+		return { ok: false, error: "неизвестный продукт" };
+	let section = util.as_string(args.section);
+	if (match(section, SECTION_RE) == null)
+		return { ok: false, error: "invalid_section" };
+	let options = type(args.options) == "object" ? args.options : {};
+	let cursor = uci.cursor();
+	if (cursor.get(product, section) == null)
+		cursor.set(product, section, "section");
+	let restored = [];
+	let allowed = [
+		"community_lists", "rule_set", "rule_set_with_subnets", "domain",
+		"domain_suffix", "domain_keyword", "domain_regex", "user_domains",
+		"user_domains_text", "user_subnets", "user_subnets_text",
+		"local_domain_lists", "local_subnet_lists", "fully_routed_ips"
+	];
+	for (let key in allowed) {
+		if (options[key] == null)
+			continue;
+		cursor.set(product, section, key, options[key]);
+		push(restored, key);
+	}
+	cursor.set(product, section, "enabled", "1");
+	if (product == "podkop") {
+		cursor.set(product, section, "connection_type", "proxy");
+		cursor.set(product, section, "proxy_config_type", "selector");
+	} else {
+		cursor.set(product, section, "action", "connection");
+	}
+	if (cursor.commit(product) == null)
+		return { ok: false, error: "uci commit failed" };
+	let reload_res = reload(product);
+	if (!reload_res.ok)
+		return { ok: false, error: reload_res.error };
+	return { ok: true, section: section, restored: restored };
+}
+
 function apply_connections(product, args) {
 	if (product != "forkop" && product != "prokop" && product != "podkop" && product != "tachyon")
 		return { ok: false, error: "неизвестный продукт" };
@@ -1339,4 +1377,4 @@ function apply_connections(product, args) {
 	};
 }
 
-return { precheck, verify, service_action, reload, apply_uci, apply_connections, cleanup_json_outbounds, list_connections, manage_connection, set_podkop_outbound, select_proxy, read_rules };
+return { precheck, verify, service_action, reload, apply_uci, apply_connections, cleanup_json_outbounds, restore_section_options, list_connections, manage_connection, set_podkop_outbound, select_proxy, read_rules };

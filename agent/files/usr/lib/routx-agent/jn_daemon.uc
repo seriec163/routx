@@ -75,6 +75,11 @@ function handle_command(cmd) {
 			if (!res.ok) return { status: "failed", error: { code: res.code || "apply_failed", message: res.error } };
 			return { status: "success", result: res };
 		}
+		if (op == "restore_section_options") {
+			let res = ops.restore_section_options(product, args);
+			if (!res.ok) return { status: "failed", error: { code: "restore_options_failed", message: res.error } };
+			return { status: "success", result: res };
+		}
 		if (op == "apply_connections") {
 			let res = ops.apply_connections(product, args);
 			if (!res.ok) return { status: "failed", error: { code: "connections_failed", message: res.error } };
@@ -102,24 +107,44 @@ function handle_command(cmd) {
 		}
 		if (op == "product_switch") {
 			let target = util.as_string(args.product);
-			if (target != "tachyon")
+			let version = util.as_string(args.version);
+			if (target != "tachyon" && target != "forkop" && target != "podkop")
 				return { status: "failed", error: { code: "unsupported_product_switch", message: "Переключение на " + target + " пока не поддерживается" } };
-			let command = "wget -O /tmp/tachyon-setup.sh https://raw.githubusercontent.com/Dushnilin/tachyon/main/install.sh && sh /tmp/tachyon-setup.sh -y --tachyon-core";
+			if (version != "" && match(version, /^[0-9]+([.][0-9]+){2,3}$/) == null)
+				return { status: "failed", error: { code: "invalid_product_version", message: "Некорректная версия продукта" } };
+			let current = platform.detect_product();
+			let command = "";
+			if (target == "tachyon") {
+				command = "wget -O /tmp/tachyon-setup.sh https://raw.githubusercontent.com/Dushnilin/tachyon/main/install.sh && sh /tmp/tachyon-setup.sh -y --tachyon-core";
+				if (version != "")
+					command += " --tag " + version;
+			} else {
+				if (current == "tachyon")
+					command += "wget -O /tmp/tachyon-uninstall.sh https://raw.githubusercontent.com/Dushnilin/tachyon/main/uninstall.sh && sh /tmp/tachyon-uninstall.sh -y; ";
+				if (target == "podkop") {
+					command += "PODKOP_INSTALLER=\"$(wget -qO- https://raw.githubusercontent.com/itdoginfo/podkop/main/install.sh)\" && echo n | sh -c \"$PODKOP_INSTALLER\"";
+				} else {
+					command += "wget -qO- https://raw.githubusercontent.com/ushan0v/forkop/main/install.sh | sh -s";
+				}
+			}
 			let res = runner.run([ "sh", "-c", command ], 1800);
-			let cleanup = ops.cleanup_json_outbounds("tachyon");
-			if (cleanup.ok && cleanup.removed > 0)
-				runner.run_product("tachyon", [ "reload" ], 120);
+			if (target == "tachyon") {
+				let cleanup = ops.cleanup_json_outbounds("tachyon");
+				if (cleanup.ok && cleanup.removed > 0)
+					runner.run_product("tachyon", [ "reload" ], 120);
+			}
 			let detected = platform.detect_product();
-			if (detected != "tachyon" && !res.ok)
+			if (detected != target && !res.ok)
 				return { status: "failed", error: { code: "product_switch_failed", message: runner.error_text(res) } };
-			if (detected != "tachyon")
-				return { status: "failed", error: { code: "product_switch_verify_failed", message: "после установки Tachyon не обнаружен" } };
-			let version = platform.product_version("tachyon");
+			if (detected != target)
+				return { status: "failed", error: { code: "product_switch_verify_failed", message: "после установки " + target + " не обнаружен" } };
+			let detected_version = platform.product_version(target);
 			runner.run([ "sh", "-c", "(sleep 3; /etc/init.d/routx-agent restart) >/dev/null 2>&1 &" ], 5);
 			return { status: "success", result: {
 				product: detected,
 				requested: target,
-				version: version,
+				version: detected_version,
+				requested_version: version,
 				install_output: util.truncate_text(util.mask_secrets(runner.error_text(res)), 2000)
 			} };
 		}

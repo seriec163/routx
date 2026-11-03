@@ -21,7 +21,7 @@ import {
 import type { PlatformSettings } from '../settings.js';
 import { normalizeTemplateLists } from '../domain/community-lists.js';
 import { createCommand, waitForCommand } from '../agent/service.js';
-import { isCancelRequested } from './queue.js';
+import { enqueueJob, isCancelRequested } from './queue.js';
 import type { JobRow } from './queue.js';
 import { notifyRouterOwner } from '../notifications.js';
 import {
@@ -1537,7 +1537,7 @@ export async function applyRouterConnections(ctx: HandlerContext, job: JobRow): 
     }
     bySection.set(section, group);
   }
-  if (router.product === 'tachyon') {
+  if (router.product !== 'podkop') {
     for (const group of bySection.values()) {
       if (group.subscriptions.length > 0) group.links = [];
     }
@@ -1977,30 +1977,97 @@ export async function dnsBenchmark(ctx: HandlerContext, job: JobRow): Promise<Js
 
 export async function productSwitch(ctx: HandlerContext, job: JobRow): Promise<Json> {
   const routerId = requireRouter(job);
-  const requested = asString(job.payload.product);
-  if (requested !== 'tachyon') {
+  const requested = asString(job.payload.product) ?? '';
+  const version = asString(job.payload.version) || null;
+  if (!['tachyon', 'forkop', 'podkop'].includes(requested)) {
     throw new JobFailure(
       'unsupported_product_switch',
       `Переключение на ${requested || 'неизвестный продукт'} пока не поддерживается`,
     );
   }
+  const routerRow = await ctx.pool.query<{ managed_section: string | null }>(
+    'select managed_section from routers where id = $1',
+    [routerId],
+  );
+  const section = routerRow.rows[0]?.managed_section || 'main';
+  const stateRow = await ctx.pool.query<{ managed: Record<string, unknown> | null }>(
+    'select managed from router_state where router_id = $1',
+    [routerId],
+  );
+  const managed = stateRow.rows[0]?.managed ?? {};
+  const restoreOptions: Record<string, unknown> = {};
+  for (const key of [
+    'community_lists',
+    'rule_set',
+    'rule_set_with_subnets',
+    'domain',
+    'domain_suffix',
+    'domain_keyword',
+    'domain_regex',
+    'user_domains',
+    'user_domains_text',
+    'user_subnets',
+    'user_subnets_text',
+    'local_domain_lists',
+    'local_subnet_lists',
+    'fully_routed_ips',
+  ]) {
+    const value = managed[`section.${section}.${key}`];
+    if (value !== undefined && value !== null) restoreOptions[key] = value;
+  }
   await setJobPhase(ctx, job.id, 'product_switch', 10);
-  const raw = await runCommand(ctx, job, 'product_switch', { product: requested }, 1_800_000);
+  const raw = await runCommand(
+    ctx,
+    job,
+    'product_switch',
+    { product: requested, version },
+    1_800_000,
+  );
   const product = asString(raw.product) || requested;
-  const version = asString(raw.version) || null;
+  const productVersion = asString(raw.version) || null;
   await ctx.pool.query(
     `update routers
         set product = $2, product_version = $3, last_error = null,
             status = case when $2 = 'conflict' then 'conflict' else 'online' end,
             updated_at = now()
       where id = $1`,
-    [routerId, product, version],
+    [routerId, product, productVersion],
   );
+
+  let restoreWarning: string | null = null;
+  if (Object.keys(restoreOptions).length > 0) {
+    try {
+      await runCommand(
+        ctx,
+        job,
+        'restore_section_options',
+        { section, options: restoreOptions },
+        180_000,
+      );
+    } catch (error) {
+      restoreWarning =
+        error instanceof Error ? error.message : 'не удалось перенести настройки секции';
+    }
+  }
+
+  // После смены продукта возвращаем подключения RoutX уже в формате нового
+  // продукта: подписку для Forkop/Tachyon, импортированные ссылки для Podkop.
+  const restoreJob = await enqueueJob(ctx.pool, {
+    type: 'connections_apply',
+    routerId,
+    requestedBy: job.requested_by,
+    timeoutSeconds: 600,
+    payload: { reason: 'product_switch_restore', section },
+  });
+
   return {
     product,
-    version,
+    version: productVersion,
     requested,
+    requested_version: version,
     install_output: asString(raw.install_output) || null,
+    restore_job_id: restoreJob.id,
+    restore_warning: restoreWarning,
   };
 }
 
