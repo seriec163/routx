@@ -863,7 +863,7 @@ function select_proxy(product, args) {
 	let group = util.as_string(args.group);
 	let tag = util.as_string(args.tag);
 	if (group == "" || tag == "" || length(group) > 200 || length(tag) > 200 ||
-		match(group, /[\u0000-\u001f\u007f]/) != null || match(tag, /[\u0000-\u001f\u007f]/) != null)
+		match(group, /[\n\r]/) != null || match(tag, /[\n\r]/) != null)
 		return { ok: false, error: "invalid_proxy_tag" };
 	if (product != "forkop" && product != "prokop" && product != "podkop")
 		return { ok: false, error: "неизвестный продукт" };
