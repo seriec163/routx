@@ -28,6 +28,15 @@ export interface ParsedSubscription {
   skipped: number;
 }
 
+export function isUnsupportedPodkopLink(link: string): boolean {
+  const withoutFragment = link.split('#')[0] ?? '';
+  const query = withoutFragment.split('?')[1];
+  if (!query) return false;
+  const params = new URLSearchParams(query);
+  const type = (params.get('type') ?? '').toLowerCase();
+  return type === 'httpupgrade' || type === 'xhttp' || type === 'splithttp';
+}
+
 function decodeBody(input: string): string {
   const text = input.replace(/^\uFEFF/, '').trim();
   if (text.includes('://')) return text;
@@ -75,6 +84,10 @@ export function parseSubscriptionBody(body: string): ParsedSubscription {
     }
     const scheme = line.slice(0, line.indexOf('://')).toLowerCase();
     if (!SUPPORTED_SCHEMES.has(scheme)) {
+      skipped++;
+      continue;
+    }
+    if (isUnsupportedPodkopLink(line)) {
       skipped++;
       continue;
     }

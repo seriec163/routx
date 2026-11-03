@@ -7,7 +7,7 @@ import { decryptSecret, encryptSecret } from '../lib/crypto.js';
 import { badRequest, conflict, notFound } from '../lib/errors.js';
 import { uuidv7 } from '../lib/ids.js';
 import { enqueueJob, jobJson } from '../jobs/queue.js';
-import { fetchSubscription } from '../domain/subscription.js';
+import { fetchSubscription, isUnsupportedPodkopLink } from '../domain/subscription.js';
 import { assertOnline, getRouter, getRouterForMutation } from './service.js';
 import { loadAccessibleSubscription } from '../subscriptions/service.js';
 import {
@@ -645,17 +645,29 @@ export async function registerRouterConnectionRoutes(
 
       const parsed = await fetchSubscription(sourceUrl);
 
-      const existing = await pool.query<{ secret_enc: string; label: string }>(
-        `select secret_enc, label from router_connections
+      const existing = await pool.query<{ id: string; secret_enc: string; label: string }>(
+        `select id, secret_enc, label from router_connections
           where router_id = $1 and section = $2`,
         [router.id, section],
       );
-      const existingLinks = new Set(
-        existing.rows
-          .filter((row) => row.secret_enc)
-          .map((row) => decryptSecret(row.secret_enc, masterKey)),
-      );
-      const existingLabels = new Set(existing.rows.map((row) => row.label));
+      const existingLinks = new Set<string>();
+      const existingLabels = new Set<string>();
+      const unsupportedIds: string[] = [];
+      for (const row of existing.rows) {
+        const value = decryptSecret(row.secret_enc, masterKey);
+        if (isUnsupportedPodkopLink(value)) {
+          unsupportedIds.push(row.id);
+          continue;
+        }
+        existingLinks.add(value);
+        existingLabels.add(row.label);
+      }
+      if (unsupportedIds.length > 0) {
+        await pool.query(
+          'delete from router_connections where router_id = $1 and id = any($2::uuid[])',
+          [router.id, unsupportedIds],
+        );
+      }
       const usedLabels = new Set(existingLabels);
       const fresh: Array<{ link: string; label: string }> = [];
       let duplicateLinks = 0;
