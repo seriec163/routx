@@ -19,6 +19,7 @@ const DEFAULTS = {
 	probe_interval: "900",
 	verify_tls: "1",
 	ca_file: "",
+	server_ip: "",
 	heavy_probe_every: "10"
 };
 

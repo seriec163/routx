@@ -4,8 +4,89 @@
 
 const fs = require("fs");
 const util = require("jn_util");
+const run = require("jn_run");
 
 const HTTP_DIR = util.RUN_DIR + "/http";
+
+// Podkop перехватывает системный DNS и может вернуть FakeIP (198.18.0.0/15)
+// для домена панели. Агенту нужен настоящий IP, иначе связь с RoutX зависит
+// от VPN. Резолвим напрямую через публичные DNS и передаём curl --resolve.
+const DNS_SERVERS = [ "77.88.8.8", "1.1.1.1", "8.8.8.8" ];
+const DNS_TTL = 600;
+let dns_cache = { host: "", ip: "", at: 0 };
+
+function server_host(value) {
+	let text = util.as_string(value);
+	let pos = index(text, "://");
+	if (pos >= 0)
+		text = substr(text, pos + 3);
+	let end = length(text);
+	for (let ch in [ "/", "?", "#" ]) {
+		let p = index(text, ch);
+		if (p >= 0 && p < end)
+			end = p;
+	}
+	text = substr(text, 0, end);
+	if (substr(text, 0, 1) == "[") {
+		let close = index(text, "]");
+		return close > 1 ? substr(text, 1, close - 1) : "";
+	}
+	let colon = rindex(text, ":");
+	if (colon >= 0)
+		text = substr(text, 0, colon);
+	return text;
+}
+
+function server_port(value) {
+	let text = util.as_string(value);
+	if (substr(text, 0, 6) == "https://")
+		return "443";
+	if (substr(text, 0, 5) == "http://")
+		return "80";
+	return "443";
+}
+
+function is_ip(value) {
+	return match(value, /^[0-9]{1,3}(\.[0-9]{1,3}){3}$/) != null ||
+		index(value, ":") > 0;
+}
+
+function resolve_direct(host) {
+	if (host == "" || is_ip(host))
+		return "";
+	let now = clock()[0];
+	if (dns_cache.host == host && now - dns_cache.at < DNS_TTL)
+		return dns_cache.ip;
+	for (let server in DNS_SERVERS) {
+		let res = run.run([ "nslookup", host, server ], 10);
+		if (!res.ok)
+			continue;
+		for (let line in split(res.stdout, "\n")) {
+			let m = match(line, /Address:?\s*([0-9]{1,3}(\.[0-9]{1,3}){3})\s*$/);
+			if (m == null)
+				continue;
+			let ip = m[1];
+			if (ip == server)
+				continue;
+			dns_cache = { host: host, ip: ip, at: now };
+			return ip;
+		}
+	}
+	return "";
+}
+
+function resolve_option(cfg) {
+	let host = server_host(cfg.server);
+	let ip = util.as_string(cfg.server_ip);
+	if (ip == "")
+		ip = resolve_direct(host);
+	if (ip == "" || host == "")
+		return "";
+	let port = server_port(cfg.server);
+	if (index(ip, ":") > 0)
+		ip = "[" + ip + "]";
+	return host + ":" + port + ":" + ip;
+}
 
 // curl config разбирает строку в кавычках с escape-последовательностями.
 function curl_quote(value) {
@@ -65,6 +146,9 @@ function request(cfg, method, path, body, options) {
 
 	let lines = [];
 	push(lines, "url = " + curl_quote(endpoint(cfg, path)));
+	let resolve = resolve_option(cfg);
+	if (resolve != "")
+		push(lines, "resolve = " + curl_quote(resolve));
 	push(lines, "request = " + curl_quote(method));
 	push(lines, "header = " + curl_quote(opts.accept == null ? "Accept: application/json" : opts.accept));
 	push(lines, "output = " + curl_quote(resp_path));
