@@ -9,6 +9,7 @@ export type JobType =
   | 'diff'
   | 'diff_custom'
   | 'diff_podkop'
+  | 'podkop_outbound'
   | 'apply'
   | 'read_rules'
   | 'monitor'

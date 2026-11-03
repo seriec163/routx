@@ -53,7 +53,12 @@
 * **User Subnet List Type** — так же: `user_subnets`, `user_subnets_text`
   или `disabled`;
 * подключения `url`, `selector`, `urltest`;
-* готовый `outbound_json` — RoutX его сохраняет и не перезаписывает ссылками.
+* готовый `outbound_json` — RoutX сохраняет его и не перезаписывает
+  ссылками; в режиме `outbound` можно вставить новый JSON целиком
+  (текущее значение скрыто). Замена проверяется через `sing-box check`,
+  при ошибке конфиг откатывается;
+* низкоуровневые параметры: UDP over TCP, mixed proxy, domain resolver,
+  resolve real IP, интервал/допуск/URL urltest, порт mixed proxy.
 
 После сохранения RoutX делает снимок `/etc/config/podkop`, записывает
 изменения, выполняет `podkop reload`, проверяет `sing-box check` и запуск

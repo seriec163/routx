@@ -180,6 +180,7 @@ interface RuleBody {
   user_domains_text?: string;
   user_subnet_list_type?: 'disabled' | 'dynamic' | 'text';
   user_subnets_text?: string;
+  outbound_json?: string;
   podkop_options?: Record<string, string | string[] | null>;
 }
 
@@ -475,8 +476,25 @@ export function RouterRulesPanel(props: {
     }
   }
 
+  async function applyPodkopOutbound(section: string, outboundJson: string): Promise<void> {
+    const response = await api<{ job: Job }>(
+      `/api/v1/routers/${props.routerId}/podkop/outbound`,
+      { method: 'PUT', body: { section, outbound_json: outboundJson } },
+    );
+    const job = await waitForJob(response.job, 300_000);
+    if (job.status !== 'success') {
+      throw new Error(job.error?.message ?? 'Не удалось сохранить outbound JSON');
+    }
+  }
+
   function submitRule(body: RuleBody, pending: PendingConnection[]): void {
     const userEnabled = body.enabled;
+    const hasOutbound =
+      props.router.product === 'podkop' && Boolean(body.outbound_json?.trim());
+    if (hasOutbound && pending.length > 0) {
+      toast.error('Outbound JSON несовместим с добавлением ссылок в этой же форме');
+      return;
+    }
     const existingRule = rules.find((rule) => rule.section === body.section);
     const existingSources = existingRule
       ? existingRule.subscriptions.length + existingRule.links.length
@@ -485,29 +503,52 @@ export function RouterRulesPanel(props: {
       CONNECTION_ACTIONS.has(body.action) &&
       pending.length > 0 &&
       existingSources === 0;
-    const diffBody = bootstrap ? { ...body, enabled: false } : body;
+    const diffBody = hasOutbound
+      ? {
+          ...body,
+          enabled: bootstrap ? false : body.enabled,
+          outbound_json: undefined,
+          proxy_config_type: undefined,
+        }
+      : bootstrap
+        ? { ...body, enabled: false }
+        : body;
+    const afterApply =
+      pending.length > 0 || hasOutbound
+        ? async () => {
+            if (pending.length > 0) {
+              await addPendingConnections(body.section, pending);
+            }
+            if (hasOutbound) {
+              await applyPodkopOutbound(body.section, body.outbound_json!.trim());
+            }
+            // apply_connections/outbound включают секцию, когда появился источник.
+            // Если пользователь создавал правило выключенным — возвращаем 0.
+            if (!userEnabled) {
+              await applyRuleBody({
+                ...body,
+                create: false,
+                enabled: false,
+                outbound_json: undefined,
+                proxy_config_type: undefined,
+              });
+            }
+            toast.success(
+              hasOutbound
+                ? 'Outbound JSON сохранён'
+                : pending.length === 1
+                  ? 'Подключение добавлено'
+                  : `Добавлено подключений: ${pending.length}`,
+            );
+          }
+        : undefined;
     setEditor(null);
     setDiffRequest({
       title: body.create ? `Создать правило «${body.label}»` : `Изменить правило «${body.label}»`,
       body: diffBody,
       bootstrap,
       finalEnabled: userEnabled,
-      afterApply:
-        pending.length > 0
-          ? async () => {
-              await addPendingConnections(body.section, pending);
-              // apply_connections включает секцию, когда появился источник.
-              // Если пользователь создавал правило выключенным — возвращаем 0.
-              if (!userEnabled) {
-                await applyRuleBody({ ...body, create: false, enabled: false });
-              }
-              toast.success(
-                pending.length === 1
-                  ? 'Подключение добавлено'
-                  : `Добавлено подключений: ${pending.length}`,
-              );
-            }
-          : undefined,
+      afterApply,
     });
   }
 
@@ -937,6 +978,7 @@ function RuleEditorModal(props: {
   const [podkopOptions, setPodkopOptions] = useState<Record<string, string | string[] | null>>(
     () => pickPodkopOptions(initial?.resources),
   );
+  const [outboundJson, setOutboundJson] = useState('');
   const [ruleSets, setRuleSets] = useState(lines(asText(initial?.resources.rule_set)).join('\n'));
   const [domainLists, setDomainLists] = useState(
     lines(asText(initial?.resources.remote_domain_lists)).join('\n'),
@@ -1138,6 +1180,23 @@ function RuleEditorModal(props: {
     toast.error(message);
   }
 
+  function podkopOption(key: string): string {
+    return asText(podkopOptions[key]);
+  }
+
+  function updatePodkopOption(key: string, value: string): void {
+    setPodkopOptions((current) => {
+      const next = { ...current };
+      if (value === '') delete next[key];
+      else next[key] = value;
+      return next;
+    });
+  }
+
+  function togglePodkopOption(key: string, value: boolean): void {
+    updatePodkopOption(key, value ? '1' : '0');
+  }
+
   function submit(): void {
     const trimmed = label.trim();
     if (trimmed === '') {
@@ -1248,6 +1307,8 @@ function RuleEditorModal(props: {
           : undefined,
         user_subnets_text:
           isPodkop && subnetListType === 'text' ? subnetTextList : undefined,
+        outbound_json:
+          isPodkop && outboundJson.trim() !== '' ? outboundJson.trim() : undefined,
         podkop_options: isPodkop ? podkopOptions : undefined,
       },
       canConnect ? effectivePending : [],
@@ -1481,6 +1542,86 @@ function RuleEditorModal(props: {
           </Field>
         </>
       )}
+
+      {isPodkop ? (
+        <details className="advanced">
+          <summary>Podkop: JSON outbound и параметры</summary>
+          {proxyConfigType === 'outbound' ? (
+            props.mode === 'edit' ? (
+              <Field
+                label="Новый outbound JSON"
+                hint="Текущее значение скрыто. Вставьте объект целиком, чтобы заменить outbound. После сохранения RoutX проверит JSON, выполнит reload и откатит конфиг при ошибке."
+              >
+                <textarea
+                  className="input code-area"
+                  rows={8}
+                  value={outboundJson}
+                  onChange={(event) => setOutboundJson(event.target.value)}
+                  placeholder={'{"type":"vless","server":"example.com","server_port":443,"uuid":"…"}'}
+                />
+              </Field>
+            ) : (
+              <InfoBanner tone="warn">
+                Outbound JSON задаётся после создания секции. Создайте её с обычной ссылкой,
+                затем откройте редактирование и замените на JSON.
+              </InfoBanner>
+            )
+          ) : null}
+
+          <div className="settings-grid">
+            <Switch
+              checked={podkopOption('enable_udp_over_tcp') === '1'}
+              onChange={(value) => togglePodkopOption('enable_udp_over_tcp', value)}
+              label="UDP over TCP"
+            />
+            <Switch
+              checked={podkopOption('mixed_proxy_enabled') === '1'}
+              onChange={(value) => togglePodkopOption('mixed_proxy_enabled', value)}
+              label="Mixed proxy"
+            />
+            <Switch
+              checked={podkopOption('domain_resolver_enabled') === '1'}
+              onChange={(value) => togglePodkopOption('domain_resolver_enabled', value)}
+              label="Domain resolver"
+            />
+            <Switch
+              checked={podkopOption('resolve_real_ip_for_routing') === '1'}
+              onChange={(value) => togglePodkopOption('resolve_real_ip_for_routing', value)}
+              label="Resolve real IP"
+            />
+          </div>
+          <div className="grid-2">
+            <Field label="Интервал urltest" hint="Например 3m или 180s">
+              <TextInput
+                value={podkopOption('urltest_check_interval')}
+                onChange={(value) => updatePodkopOption('urltest_check_interval', value)}
+                placeholder="3m"
+              />
+            </Field>
+            <Field label="Допуск urltest, мс">
+              <TextInput
+                value={podkopOption('urltest_tolerance')}
+                onChange={(value) => updatePodkopOption('urltest_tolerance', value)}
+                placeholder="50"
+              />
+            </Field>
+            <Field label="URL проверки urltest">
+              <TextInput
+                value={podkopOption('urltest_testing_url')}
+                onChange={(value) => updatePodkopOption('urltest_testing_url', value)}
+                placeholder="https://www.gstatic.com/generate_204"
+              />
+            </Field>
+            <Field label="Порт mixed proxy">
+              <TextInput
+                value={podkopOption('mixed_proxy_port')}
+                onChange={(value) => updatePodkopOption('mixed_proxy_port', value)}
+                placeholder="2080"
+              />
+            </Field>
+          </div>
+        </details>
+      ) : null}
 
       {!isPodkop ? (
         <details className="advanced">

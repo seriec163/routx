@@ -270,4 +270,72 @@ export async function registerRouterRuleRoutes(
       return { job: jobJson(job) };
     },
   );
+
+  app.put('/api/v1/routers/:id/podkop/outbound', async (request, reply) => {
+    const auth = requireUser(request);
+    const params = z.object({ id: z.string().uuid() }).parse(request.params);
+    const body = z
+      .object({
+        section: z.string().regex(SECTION_RE),
+        outbound_json: z.string().trim().min(2).max(65535),
+      })
+      .strict()
+      .parse(request.body);
+
+    const router = await getRouterForMutation(pool, auth, params.id);
+    assertOnline(router);
+    if (router.product !== 'podkop') {
+      throw badRequest('podkop_required', 'Outbound JSON доступен только для Podkop');
+    }
+
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(body.outbound_json);
+    } catch {
+      throw badRequest('invalid_outbound_json', 'Outbound JSON не является корректным JSON');
+    }
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      throw badRequest('invalid_outbound_json', 'Outbound JSON должен быть объектом');
+    }
+    const outbound = parsed as Record<string, unknown>;
+    if (typeof outbound.type !== 'string' || outbound.type.trim() === '') {
+      throw badRequest('invalid_outbound_json', 'В outbound JSON не указано поле type');
+    }
+    const forbidden = new Set(['direct', 'block', 'dns', 'selector', 'urltest']);
+    if (forbidden.has(outbound.type.toLowerCase())) {
+      throw badRequest(
+        'outbound_type_not_allowed',
+        `Тип outbound «${outbound.type}» нельзя использовать в этой секции`,
+      );
+    }
+
+    const job = await enqueueJob(pool, {
+      type: 'podkop_outbound',
+      routerId: router.id,
+      requestedBy: auth.userId,
+      timeoutSeconds: 300,
+      payload: { section: body.section, outbound_json: body.outbound_json },
+    });
+
+    await audit(pool, {
+      actorId: auth.userId,
+      actorRole: auth.role,
+      action: 'router.podkop_outbound',
+      targetType: 'router',
+      targetId: router.id,
+      routerId: router.id,
+      result: 'ok',
+      ip: request.ip,
+      userAgent: request.headers['user-agent'],
+      metadata: {
+        section: body.section,
+        type: outbound.type,
+        size: body.outbound_json.length,
+        job_id: job.id,
+      },
+    });
+
+    reply.code(202);
+    return { job: jobJson(job) };
+  });
 }

@@ -593,6 +593,35 @@ export async function diffPodkop(ctx: HandlerContext, job: JobRow): Promise<Json
   };
 }
 
+export async function podkopOutbound(ctx: HandlerContext, job: JobRow): Promise<Json> {
+  const routerId = requireRouter(job);
+  const section = asString(job.payload.section);
+  const outbound = asString(job.payload.outbound_json);
+  if (!section || !outbound) {
+    throw new JobFailure('invalid_payload', 'Не указана секция или outbound JSON');
+  }
+  await setJobPhase(ctx, job.id, 'apply', 30);
+  const result = await runCommand(
+    ctx,
+    job,
+    'set_podkop_outbound',
+    { section, outbound_json: outbound },
+    240_000,
+  );
+  await setJobPhase(ctx, job.id, 'verify', 80);
+  try {
+    const raw = await runCommand(ctx, job, 'read_state', {}, 60_000);
+    await saveState(ctx.pool, routerId, raw, 'podkop_outbound');
+  } catch {
+    // Конфиг уже применён; неудачное чтение не отменяет результат.
+  }
+  await ctx.pool.query('update routers set last_error = null, updated_at = now() where id = $1', [
+    routerId,
+  ]);
+  await setJobPhase(ctx, job.id, 'done', 100);
+  return result;
+}
+
 function expectedState(items: DiffItem[]): Map<string, UciValue> {
   const expected = new Map<string, UciValue>();
   for (const item of items) {
@@ -1888,6 +1917,7 @@ export const HANDLERS: Record<string, JobHandler> = {
   diff: diffTemplate,
   diff_custom: diffCustom,
   diff_podkop: diffPodkop,
+  podkop_outbound: podkopOutbound,
   apply: applyRun,
   read_rules: readRules,
   monitor: monitorProbe,

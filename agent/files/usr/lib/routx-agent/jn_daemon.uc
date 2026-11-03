@@ -90,6 +90,11 @@ function handle_command(cmd) {
 			if (!res.ok) return { status: "failed", error: { code: "manage_connection_failed", message: res.error } };
 			return { status: "success", result: res };
 		}
+		if (op == "set_podkop_outbound") {
+			let res = ops.set_podkop_outbound(product, args);
+			if (!res.ok) return { status: "failed", error: { code: "podkop_outbound_failed", message: res.error } };
+			return { status: "success", result: res };
+		}
 		if (op == "sb_check_update") {
 			let res = runner.run_product(product, [ "component_action", "sing_box", "check_update" ], 120);
 			let parsed = util.json_parse(res.stdout);

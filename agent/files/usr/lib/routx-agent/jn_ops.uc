@@ -642,6 +642,52 @@ function read_rules(product) {
 	};
 }
 
+function set_podkop_outbound(product, args) {
+	if (product != "podkop")
+		return { ok: false, error: "только для Podkop" };
+	let section = util.as_string(args.section);
+	if (match(section, SECTION_RE) == null)
+		return { ok: false, error: "invalid_section" };
+	let text = util.as_string(args.outbound_json);
+	if (length(text) > 65535)
+		return { ok: false, error: "outbound_json_too_large" };
+	let parsed = util.json_parse(text);
+	if (type(parsed) != "object" || type(parsed.type) != "string")
+		return { ok: false, error: "invalid_outbound_json" };
+	let kind = lc(util.as_string(parsed.type));
+	let forbidden = { direct: true, block: true, dns: true, selector: true, urltest: true };
+	if (forbidden[kind])
+		return { ok: false, error: "outbound_type_not_allowed:" + kind };
+
+	let cursor = uci.cursor();
+	if (cursor.get("podkop", section) != "section")
+		return { ok: false, error: "section_missing" };
+
+	let snaps = require("jn_snapshots");
+	let snap = snaps.snapshot_create("podkop", "apply");
+	if (!snap.ok)
+		return { ok: false, error: "snapshot_failed: " + snap.error };
+
+	cursor.set("podkop", section, "proxy_config_type", "outbound");
+	cursor.set("podkop", section, "outbound_json", text);
+	cursor.set("podkop", section, "enabled", "1");
+	cursor.delete("podkop", section, "proxy_string");
+	cursor.delete("podkop", section, "selector_proxy_links");
+	cursor.delete("podkop", section, "urltest_proxy_links");
+	if (cursor.commit("podkop") == null) {
+		snaps.snapshot_restore("podkop", snap.external_id, "local");
+		return { ok: false, error: "uci commit failed" };
+	}
+
+	let res = reload("podkop");
+	if (!res.ok) {
+		snaps.snapshot_restore("podkop", snap.external_id, "local");
+		reload("podkop");
+		return { ok: false, error: res.error };
+	}
+	return { ok: true, section: section, mode: "outbound" };
+}
+
 function apply_podkop_connections(section, links, args) {
 	let cursor = uci.cursor();
 	let exists = cursor.get("podkop", section);
@@ -877,4 +923,4 @@ function apply_connections(product, args) {
 	};
 }
 
-return { precheck, verify, service_action, reload, apply_uci, apply_connections, list_connections, manage_connection, read_rules };
+return { precheck, verify, service_action, reload, apply_uci, apply_connections, list_connections, manage_connection, set_podkop_outbound, read_rules };
