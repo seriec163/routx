@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { computePodkopPlan, podkopSectionInputSchema } from '../src/domain/podkop.js';
+import { computePodkopPlan, podkopSectionInputSchema, podkopTemplateInput } from '../src/domain/podkop.js';
+import { templatePayloadSchema } from '../src/domain/uci.js';
 
 function input(overrides: Record<string, unknown> = {}) {
   return podkopSectionInputSchema.parse({
@@ -49,7 +50,7 @@ describe('Podkop section plan', () => {
     const paths = new Map(plan.items.map((item) => [item.path, item.after]));
 
     expect(paths.get('section.youtube.user_domains')).toBeNull();
-    expect(paths.get('section.youtube.user_domain_list_type')).toBeNull();
+    expect(paths.get('section.youtube.user_domain_list_type')).toBe('disabled');
     expect(paths.has('section.youtube.mixed_proxy_enabled')).toBe(false);
     expect(paths.has('section.youtube.proxy_config_type')).toBe(false);
     expect(plan.createSections).toEqual([]);
@@ -62,5 +63,53 @@ describe('Podkop section plan', () => {
     expect(() =>
       computePodkopPlan(input({ community_lists: ['unknown-list'] }), {}),
     ).toThrow(/Неизвестный список/);
+  });
+
+  it('stores text lists in user_domains_text and user_subnets_text', () => {
+    const plan = computePodkopPlan(
+      input({
+        user_domain_list_type: 'text',
+        user_domains_text: 'example.com\nexample.net',
+        user_subnet_list_type: 'text',
+        user_subnets_text: '203.0.113.10, 203.0.113.11',
+        manual_domains: [],
+        manual_ips: [],
+      }),
+      {
+        'section.youtube.user_domains': ['old.example'],
+        'section.youtube.user_domain_list_type': 'dynamic',
+      },
+    );
+    const paths = new Map(plan.items.map((item) => [item.path, item.after]));
+    expect(paths.get('section.youtube.user_domains_text')).toBe(
+      'example.com\nexample.net',
+    );
+    expect(paths.get('section.youtube.user_domains')).toBeNull();
+    expect(paths.get('section.youtube.user_domain_list_type')).toBe('text');
+    expect(paths.get('section.youtube.user_subnets_text')).toBe(
+      '203.0.113.10, 203.0.113.11',
+    );
+    expect(paths.get('section.youtube.user_subnet_list_type')).toBe('text');
+  });
+
+  it('maps a shared template to a Podkop section', () => {
+    const payload = templatePayloadSchema.parse({
+      action: 'connection',
+      resources: { community_lists: ['youtube'] },
+      manual_domains: [],
+      manual_ips: [],
+      podkop: {
+        connection_type: 'vpn',
+        user_domain_list_type: 'text',
+        user_domains_text: 'example.com',
+        user_subnet_list_type: 'dynamic',
+      },
+    });
+    const converted = podkopTemplateInput(payload, 'main');
+    expect(converted.connection_type).toBe('vpn');
+    expect(converted.community_lists).toEqual(['youtube']);
+    expect(converted.user_domain_list_type).toBe('text');
+    expect(converted.user_domains_text).toBe('example.com');
+    expect(converted.user_subnet_list_type).toBe('dynamic');
   });
 });

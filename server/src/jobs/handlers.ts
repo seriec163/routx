@@ -28,7 +28,7 @@ import {
   type AgentSection,
   type StoredConnection,
 } from '../domain/rules.js';
-import { computePodkopPlan, podkopSectionInputSchema } from '../domain/podkop.js';
+import { computePodkopPlan, podkopSectionInputSchema, podkopTemplateInput } from '../domain/podkop.js';
 
 export class JobFailure extends Error {
   readonly code: string;
@@ -305,6 +305,84 @@ export async function diffTemplate(ctx: HandlerContext, job: JobRow): Promise<Js
   }
 
   const extras = await loadListExtras(ctx.pool, routerId);
+  const productRow = await ctx.pool.query<{ product: string; managed_section: string | null }>(
+    'select product, managed_section from routers where id = $1',
+    [routerId],
+  );
+  const product = productRow.rows[0]?.product ?? 'unknown';
+  const managedSection = productRow.rows[0]?.managed_section ?? 'main';
+
+  if (product === 'podkop') {
+    const sectionNames = new Set([
+      ...Object.keys(mapped.payload.sections),
+      ...mapped.payload.create_sections,
+    ]);
+    if (sectionNames.size > 1) {
+      throw new JobFailure(
+        'podkop_template_section_required',
+        'Шаблон Podkop должен содержать не более одной секции',
+      );
+    }
+    const section = sectionNames.size === 1 ? [...sectionNames][0]! : managedSection;
+    const poptions = podkopTemplateInput(mapped.payload, section);
+    const plan = computePodkopPlan(poptions, current);
+    const items = plan.items;
+    const hash = diffHash(items);
+    const baseHash = stateHash(current);
+    const runId = uuidv7();
+    await ctx.pool.query(
+      `insert into apply_runs
+         (id, router_id, template_id, revision, diff, diff_hash, base_state_hash, desired_hash,
+          local_lists, section_map, create_sections, status, requested_by)
+       values ($1,$2,$3,$4,$5::jsonb,$6,$7,$8,$9::jsonb,$10::jsonb,$11::jsonb,'awaiting_confirmation',$12)`,
+      [
+        runId,
+        routerId,
+        templateId,
+        revision,
+        JSON.stringify(items),
+        hash,
+        baseHash,
+        plan.desiredHash,
+        JSON.stringify([]),
+        JSON.stringify(mapped.sectionMap),
+        JSON.stringify(plan.createSections),
+        job.requested_by,
+      ],
+    );
+    let seq = 1;
+    for (const item of items) {
+      await ctx.pool.query(
+        `insert into apply_items (apply_run_id, seq, op, path, value_before, value_after)
+         values ($1,$2,$3,$4,$5::jsonb,$6::jsonb)`,
+        [
+          runId,
+          seq++,
+          item.op,
+          item.path,
+          item.before === null ? null : JSON.stringify(item.before),
+          item.after === null ? null : JSON.stringify(item.after),
+        ],
+      );
+    }
+    const counts = {
+      add: items.filter((item) => item.op === 'add').length,
+      change: items.filter((item) => item.op === 'change').length,
+      delete: items.filter((item) => item.op === 'delete').length,
+    };
+    await setJobPhase(ctx, job.id, 'done', 100);
+    return {
+      apply_run_id: runId,
+      diff_hash: hash,
+      base_state_hash: baseHash,
+      desired_hash: plan.desiredHash,
+      counts,
+      total: items.length,
+      section_map: mapped.sectionMap,
+      warnings: mapped.warnings,
+    };
+  }
+
   const plan = computePlan(mapped.payload, current, exclusions, extras);
   const items = plan.items;
   const hash = diffHash(items);

@@ -2,7 +2,12 @@ import { badRequest } from '../lib/errors.js';
 import { sha256Hex } from '../lib/crypto.js';
 import { z } from 'zod';
 import { ROUTING_SERVICE_IDS } from './routing.js';
-import { uciValueSchema, type DiffItem, type UciValue } from './uci.js';
+import {
+  uciValueSchema,
+  type DiffItem,
+  type TemplatePayload,
+  type UciValue,
+} from './uci.js';
 
 /**
  * Редактирование секций Podkop.
@@ -17,9 +22,11 @@ const NAME_RE = /^[A-Za-z0-9_.-]{1,64}$/;
 
 export const PODKOP_CONNECTION_TYPES = ['proxy', 'vpn', 'block', 'exclusion'] as const;
 export const PODKOP_PROXY_MODES = ['url', 'selector', 'urltest', 'outbound'] as const;
+export const PODKOP_LIST_TYPES = ['disabled', 'dynamic', 'text'] as const;
 
 export type PodkopConnectionType = (typeof PODKOP_CONNECTION_TYPES)[number];
 export type PodkopProxyMode = (typeof PODKOP_PROXY_MODES)[number];
+export type PodkopListType = (typeof PODKOP_LIST_TYPES)[number];
 
 export interface PodkopSectionInput {
   section: string;
@@ -29,6 +36,10 @@ export interface PodkopSectionInput {
   connection_type: PodkopConnectionType;
   proxy_config_type?: PodkopProxyMode;
   community_lists?: string[];
+  user_domain_list_type?: PodkopListType;
+  user_domains_text?: string;
+  user_subnet_list_type?: PodkopListType;
+  user_subnets_text?: string;
   manual_domains?: string[];
   manual_ips?: string[];
   options?: Record<string, UciValue>;
@@ -49,6 +60,10 @@ export const podkopSectionInputSchema = z
     connection_type: z.enum(PODKOP_CONNECTION_TYPES),
     proxy_config_type: z.enum(PODKOP_PROXY_MODES).optional(),
     community_lists: z.array(z.string().max(80)).max(200).default([]),
+    user_domain_list_type: z.enum(PODKOP_LIST_TYPES).optional(),
+    user_domains_text: z.string().max(200000).optional(),
+    user_subnet_list_type: z.enum(PODKOP_LIST_TYPES).optional(),
+    user_subnets_text: z.string().max(200000).optional(),
     manual_domains: z.array(z.string().max(512)).max(5000).default([]),
     manual_ips: z.array(z.string().max(64)).max(5000).default([]),
     options: z.record(z.string(), uciValueSchema).default({}),
@@ -95,6 +110,18 @@ function cleanLines(values: string[] | undefined): string[] {
     }
   }
   return output;
+}
+
+function cleanText(value: string | undefined): string {
+  const text = String(value ?? '')
+    .replace(/\r\n/g, '\n')
+    .replace(/\r/g, '\n')
+    .replace(/\0/g, '')
+    .trim();
+  if (text.length > 200000) {
+    throw badRequest('text_list_too_large', 'Текстовый список Podkop слишком большой');
+  }
+  return text;
 }
 
 function normalizeBoolean(value: UciValue, option: string): string {
@@ -165,8 +192,7 @@ function desiredValue(
 export function computePodkopPlan(
   input: PodkopSectionInput,
   current: Record<string, UciValue>,
-): PodkopPlan {
-  if (!NAME_RE.test(input.section)) {
+): PodkopPlan {  if (!NAME_RE.test(input.section)) {
     throw badRequest('invalid_section', `Некорректное имя секции <${input.section}>`);
   }
   if (!PODKOP_CONNECTION_TYPES.includes(input.connection_type)) {
@@ -204,18 +230,62 @@ export function computePodkopPlan(
     put('community_lists', ids.length > 0 ? ids : null);
   }
 
-  if (input.manual_domains !== undefined) {
-    const domains = cleanLines(input.manual_domains);
-    put('user_domains', domains.length > 0 ? domains : null);
-    put('user_domain_list_type', domains.length > 0 ? 'dynamic' : null);
-    put('user_domains_text', null);
+  if (
+    input.user_domain_list_type !== undefined ||
+    input.user_domains_text !== undefined ||
+    input.manual_domains !== undefined
+  ) {
+    const type =
+      input.user_domain_list_type ??
+      (cleanText(input.user_domains_text) !== ''
+        ? 'text'
+        : (input.manual_domains ?? []).some((line) => String(line).trim() !== '')
+          ? 'dynamic'
+          : 'disabled');
+    if (type === 'text') {
+      const text = cleanText(input.user_domains_text ?? (input.manual_domains ?? []).join('\n'));
+      put('user_domains_text', text === '' ? null : text);
+      put('user_domains', null);
+      put('user_domain_list_type', text === '' ? 'disabled' : 'text');
+    } else if (type === 'dynamic') {
+      const domains = cleanLines(input.manual_domains);
+      put('user_domains', domains.length > 0 ? domains : null);
+      put('user_domains_text', null);
+      put('user_domain_list_type', domains.length > 0 ? 'dynamic' : 'disabled');
+    } else {
+      put('user_domains', null);
+      put('user_domains_text', null);
+      put('user_domain_list_type', 'disabled');
+    }
   }
 
-  if (input.manual_ips !== undefined) {
-    const ips = cleanLines(input.manual_ips);
-    put('user_subnets', ips.length > 0 ? ips : null);
-    put('user_subnet_list_type', ips.length > 0 ? 'dynamic' : null);
-    put('user_subnets_text', null);
+  if (
+    input.user_subnet_list_type !== undefined ||
+    input.user_subnets_text !== undefined ||
+    input.manual_ips !== undefined
+  ) {
+    const type =
+      input.user_subnet_list_type ??
+      (cleanText(input.user_subnets_text) !== ''
+        ? 'text'
+        : (input.manual_ips ?? []).some((line) => String(line).trim() !== '')
+          ? 'dynamic'
+          : 'disabled');
+    if (type === 'text') {
+      const text = cleanText(input.user_subnets_text ?? (input.manual_ips ?? []).join('\n'));
+      put('user_subnets_text', text === '' ? null : text);
+      put('user_subnets', null);
+      put('user_subnet_list_type', text === '' ? 'disabled' : 'text');
+    } else if (type === 'dynamic') {
+      const ips = cleanLines(input.manual_ips);
+      put('user_subnets', ips.length > 0 ? ips : null);
+      put('user_subnets_text', null);
+      put('user_subnet_list_type', ips.length > 0 ? 'dynamic' : 'disabled');
+    } else {
+      put('user_subnets', null);
+      put('user_subnets_text', null);
+      put('user_subnet_list_type', 'disabled');
+    }
   }
 
   for (const [key, value] of normalizeOptions(input.options)) {
@@ -237,5 +307,93 @@ export function computePodkopPlan(
     items,
     createSections: input.create ? [input.section] : [],
     desiredHash,
+  };
+}
+
+/**
+ * Преобразует шаблон RoutX в Podkop-секцию. Шаблон остаётся общим:
+ * Prokop/Forkop используют action/resources/manual_*, а Podkop берёт
+ * блок `podkop` и маппит action в connection_type.
+ */
+export function podkopTemplateInput(
+  payload: TemplatePayload,
+  section: string,
+): PodkopSectionInput {
+  if (!NAME_RE.test(section)) {
+    throw badRequest('invalid_section', `Некорректное имя секции <${section}>`);
+  }
+  const options = payload.sections[section] ?? {};
+  const preset = payload.podkop ?? {};
+  const resources = payload.resources ?? {};
+  const manual = payload.manual_entries?.[section] ?? {
+    domains: payload.manual_domains ?? [],
+    ips: payload.manual_ips ?? [],
+  };
+  const action = String(options.action ?? payload.action ?? 'connection');
+  let mapped: PodkopConnectionType = 'proxy';
+  if (action === 'block') mapped = 'block';
+  else if (action === 'bypass') mapped = 'exclusion';
+  else if (action === 'vpn') mapped = 'vpn';
+  else if (action === 'dns') {
+    throw badRequest(
+      'podkop_dns_action_unsupported',
+      'Шаблон с действием DNS нельзя применить к Podkop: выберите proxy/vpn/block/exclusion',
+    );
+  }
+
+  const community = resources.community_lists;
+  const communityLists =
+    community === undefined
+      ? undefined
+      : (Array.isArray(community) ? community : [String(community)])
+          .map((item) => String(item).trim())
+          .filter(Boolean);
+
+  const domainText = preset.user_domains_text;
+  const domainType =
+    preset.user_domain_list_type ??
+    (typeof domainText === 'string' && domainText.trim() !== ''
+      ? 'text'
+      : manual.domains.length > 0
+        ? 'dynamic'
+        : undefined);
+  const subnetText = preset.user_subnets_text;
+  const subnetType =
+    preset.user_subnet_list_type ??
+    (typeof subnetText === 'string' && subnetText.trim() !== ''
+      ? 'text'
+      : manual.ips.length > 0
+        ? 'dynamic'
+        : undefined);
+
+  const optionValues: Record<string, UciValue> = { ...(preset.options ?? {}) };
+  for (const key of OPTION_KEYS) {
+    if (resources[key] !== undefined) optionValues[key] = resources[key]!;
+  }
+
+  return {
+    section,
+    create: payload.create_sections.includes(section),
+    enabled: String(options.enabled ?? '1') !== '0',
+    connection_type: preset.connection_type ?? mapped,
+    proxy_config_type: preset.proxy_config_type,
+    community_lists: communityLists,
+    user_domain_list_type: domainType,
+    user_domains_text:
+      domainType === 'text'
+        ? typeof domainText === 'string' && domainText !== ''
+          ? domainText
+          : manual.domains.join('\n')
+        : undefined,
+    user_subnet_list_type: subnetType,
+    user_subnets_text:
+      subnetType === 'text'
+        ? typeof subnetText === 'string' && subnetText !== ''
+          ? subnetText
+          : manual.ips.join('\n')
+        : undefined,
+    manual_domains: manual.domains,
+    manual_ips: manual.ips,
+    options: optionValues,
   };
 }

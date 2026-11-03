@@ -1,7 +1,7 @@
 # Правила, подключения и шаблоны
 
 Начиная с версии 1.1.9 панель работает не с «шаблонами секций», а с
-**правилами**. Правило — это одна секция Prokop/Forkop на роутере.
+**правилами**. Правило — это одна секция Prokop/Forkop/Podkop на роутере.
 
 ## Что видно на странице роутера
 
@@ -38,6 +38,33 @@
 значениями. Дальше сохраняете правило обычным способом.
 
 Подписки и VLESS-ссылки в шаблон не входят и шаблоном не перезаписываются.
+
+## Podkop
+
+Для Podkop правило — это секция с типом `proxy`, `vpn`, `block` или
+`exclusion`. В форме правила доступны:
+
+* **Community Lists** — те же сервисы из каталога, что у Prokop/Forkop;
+* **User Domain List Type**:
+  * `dynamic` — список UCI `user_domains`, по одному домену на строку;
+  * `text` — текстовый список `user_domains_text` (домены через запятую или
+    по одному на строку);
+  * `disabled` — не использовать;
+* **User Subnet List Type** — так же: `user_subnets`, `user_subnets_text`
+  или `disabled`;
+* подключения `url`, `selector`, `urltest`;
+* готовый `outbound_json` — RoutX его сохраняет и не перезаписывает ссылками.
+
+После сохранения RoutX делает снимок `/etc/config/podkop`, записывает
+изменения, выполняет `podkop reload`, проверяет `sing-box check` и запуск
+службы. При ошибке конфиг автоматически откатывается.
+
+Шаблон может содержать блок **Podkop** (`connection_type`,
+`proxy_config_type`, `user_domain_list_type`, `user_domains_text`,
+`user_subnet_list_type`, `user_subnets_text`). При применении к Podkop
+используется этот блок, а `action` маппится в тип секции:
+`connection → proxy`, `bypass → exclusion`, `block → block`. Для
+Prokop/Forkop блок Podkop игнорируется.
 
 ## Общий доступ к шаблонам
 

@@ -36,6 +36,10 @@ const ruleBodySchema = z
     settings: z.record(z.string(), uciValueSchema).default({}),
     connection_type: z.enum(['proxy', 'vpn', 'block', 'exclusion']).optional(),
     proxy_config_type: z.enum(['url', 'selector', 'urltest', 'outbound']).optional(),
+    user_domain_list_type: z.enum(['disabled', 'dynamic', 'text']).optional(),
+    user_domains_text: z.string().max(200000).optional(),
+    user_subnet_list_type: z.enum(['disabled', 'dynamic', 'text']).optional(),
+    user_subnets_text: z.string().max(200000).optional(),
     podkop_options: z.record(z.string(), uciValueSchema).default({}),
     reason: z.string().max(200).optional(),
   })
@@ -158,6 +162,10 @@ export async function registerRouterRuleRoutes(
           enabled: body.enabled,
           connection_type: connectionType,
           proxy_config_type: body.proxy_config_type,
+          user_domain_list_type: body.user_domain_list_type,
+          user_domains_text: body.user_domains_text,
+          user_subnet_list_type: body.user_subnet_list_type,
+          user_subnets_text: body.user_subnets_text,
           community_lists: Array.isArray(body.resources.community_lists)
             ? body.resources.community_lists.map(String)
             : body.resources.community_lists == null

@@ -211,13 +211,6 @@ export async function registerApplyRoutes(app: FastifyInstance, ctx: RouteContex
     const router = await getRouterForMutation(pool, auth, params.id);
     assertOnline(router);
 
-    if (router.product === 'podkop') {
-      throw conflict(
-        'podkop_template_unsupported',
-        'Шаблоны для Podkop пока не поддерживаются: отредактируйте секцию вручную на вкладке «Правила».',
-      );
-    }
-
     const template = await pool.query<{
       owner_id: string;
       current_revision: number;

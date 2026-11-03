@@ -826,6 +826,19 @@ export const uciValueSchema = z.union([
 
 const valueSchema = uciValueSchema;
 
+const podkopTemplateSchema = z
+  .object({
+    connection_type: z.enum(['proxy', 'vpn', 'block', 'exclusion']).optional(),
+    proxy_config_type: z.enum(['url', 'selector', 'urltest', 'outbound']).optional(),
+    user_domain_list_type: z.enum(['disabled', 'dynamic', 'text']).optional(),
+    user_domains_text: z.string().max(200000).optional().nullable(),
+    user_subnet_list_type: z.enum(['disabled', 'dynamic', 'text']).optional(),
+    user_subnets_text: z.string().max(200000).optional().nullable(),
+    options: z.record(z.string(), valueSchema).default({}),
+  })
+  .strict()
+  .default({ options: {} });
+
 export const templatePayloadSchema = z
   .object({
     // Новый формат (schema v2): шаблон — это набор настроек и действие,
@@ -836,6 +849,8 @@ export const templatePayloadSchema = z
     resources: z.record(z.string(), valueSchema).default({}),
     manual_domains: z.array(z.string().trim().min(1).max(512)).max(MAX_MANUAL_ENTRIES).default([]),
     manual_ips: z.array(z.string().trim().min(1).max(64)).max(MAX_MANUAL_ENTRIES).default([]),
+    // Podkop: тип секции, режим прокси и текстовые списки доменов/подсетей.
+    podkop: podkopTemplateSchema,
     // Старый формат (schema v1) остаётся для чтения уже сохранённых шаблонов.
     settings: z.record(z.string(), valueSchema).default({}),
     sections: z.record(z.string(), z.record(z.string(), valueSchema)).default({}),
@@ -885,6 +900,7 @@ export interface TemplatePreset {
   manual_domains: string[];
   manual_ips: string[];
   settings: Record<string, UciValue>;
+  podkop: z.infer<typeof podkopTemplateSchema>;
 }
 
 /** Поля, которые задаются отдельно и не должны попадать в resources. */
@@ -900,6 +916,7 @@ export function emptyTemplatePayload(): TemplatePayload {
     resources: {},
     manual_domains: [],
     manual_ips: [],
+    podkop: { options: {} },
     settings: {},
     sections: {},
     urltest: {},
@@ -947,11 +964,21 @@ export function validateTemplateResources(resources: Record<string, UciValue>): 
  * Старый шаблон с одной секцией читается как пресет этой секции.
  */
 export function presetFromPayload(payload: TemplatePayload): TemplatePreset {
+  const podkopValues = payload.podkop ?? { options: {} };
+  const hasPodkop =
+    Boolean(podkopValues.connection_type) ||
+    Boolean(podkopValues.proxy_config_type) ||
+    Boolean(podkopValues.user_domain_list_type) ||
+    Boolean(podkopValues.user_domains_text) ||
+    Boolean(podkopValues.user_subnet_list_type) ||
+    Boolean(podkopValues.user_subnets_text) ||
+    Object.keys(podkopValues.options ?? {}).length > 0;
   const hasNewFormat =
     Boolean(payload.action) ||
     Object.keys(payload.resources ?? {}).length > 0 ||
     payload.manual_domains.length > 0 ||
-    payload.manual_ips.length > 0;
+    payload.manual_ips.length > 0 ||
+    hasPodkop;
 
   if (hasNewFormat) {
     validateTemplateResources(payload.resources);
@@ -967,6 +994,7 @@ export function presetFromPayload(payload: TemplatePayload): TemplatePreset {
       manual_domains: payload.manual_domains.filter((line) => !isCommentLine(line)),
       manual_ips: payload.manual_ips.filter((line) => !isCommentLine(line)),
       settings: { ...payload.settings },
+      podkop: { ...payload.podkop },
     };
   }
 
@@ -979,6 +1007,7 @@ export function presetFromPayload(payload: TemplatePayload): TemplatePreset {
       manual_domains: [],
       manual_ips: [],
       settings: { ...payload.settings },
+      podkop: { ...payload.podkop },
     };
   }
 
@@ -1019,6 +1048,7 @@ export function presetFromPayload(payload: TemplatePayload): TemplatePreset {
     manual_domains: manual.domains.filter((line) => !isCommentLine(line)),
     manual_ips: manual.ips.filter((line) => !isCommentLine(line)),
     settings: { ...payload.settings },
+    podkop: { ...payload.podkop },
   };
 }
 
@@ -1041,6 +1071,7 @@ export function materializePresetForSection(
   return {
     ...emptyTemplatePayload(),
     settings: { ...preset.settings },
+    podkop: { ...preset.podkop },
     sections: {
       [section]: {
         ...preset.resources,

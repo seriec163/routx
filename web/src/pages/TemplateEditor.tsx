@@ -111,6 +111,12 @@ export function TemplateEditorPage({ id }: { id: string }) {
   const [domainText, setDomainText] = useState('');
   const [manualDomains, setManualDomains] = useState('');
   const [manualIps, setManualIps] = useState('');
+  const [podkopConnectionType, setPodkopConnectionType] = useState('');
+  const [podkopProxyMode, setPodkopProxyMode] = useState('');
+  const [podkopDomainType, setPodkopDomainType] = useState('');
+  const [podkopDomainsText, setPodkopDomainsText] = useState('');
+  const [podkopSubnetType, setPodkopSubnetType] = useState('');
+  const [podkopSubnetsText, setPodkopSubnetsText] = useState('');
   const [ruleSets, setRuleSets] = useState('');
   const [domainLists, setDomainLists] = useState('');
   const [subnetLists, setSubnetLists] = useState('');
@@ -138,6 +144,12 @@ export function TemplateEditorPage({ id }: { id: string }) {
       setDomainText(asText(preset.resources.domain));
       setManualDomains((preset.manual_domains ?? []).join('\n'));
       setManualIps((preset.manual_ips ?? []).join('\n'));
+      setPodkopConnectionType(preset.podkop?.connection_type ?? '');
+      setPodkopProxyMode(preset.podkop?.proxy_config_type ?? '');
+      setPodkopDomainType(preset.podkop?.user_domain_list_type ?? '');
+      setPodkopDomainsText(preset.podkop?.user_domains_text ?? '');
+      setPodkopSubnetType(preset.podkop?.user_subnet_list_type ?? '');
+      setPodkopSubnetsText(preset.podkop?.user_subnets_text ?? '');
       setRuleSets(lines(asText(preset.resources.rule_set)).join('\n'));
       setDomainLists(lines(asText(preset.resources.remote_domain_lists)).join('\n'));
       setSubnetLists(lines(asText(preset.resources.remote_subnet_lists)).join('\n'));
@@ -151,6 +163,12 @@ export function TemplateEditorPage({ id }: { id: string }) {
       setDomainText('');
       setManualDomains('');
       setManualIps('');
+      setPodkopConnectionType('');
+      setPodkopProxyMode('');
+      setPodkopDomainType('');
+      setPodkopDomainsText('');
+      setPodkopSubnetType('');
+      setPodkopSubnetsText('');
       setRuleSets('');
       setDomainLists('');
       setSubnetLists('');
@@ -162,6 +180,17 @@ export function TemplateEditorPage({ id }: { id: string }) {
 
   const actions = catalog.data?.actions?.length ? catalog.data.actions : ACTION_FALLBACK;
   const serviceList = catalog.data?.services ?? [];
+
+  function buildPodkopPreset(): Record<string, unknown> {
+    const preset: Record<string, unknown> = {};
+    if (podkopConnectionType) preset.connection_type = podkopConnectionType;
+    if (podkopProxyMode) preset.proxy_config_type = podkopProxyMode;
+    if (podkopDomainType) preset.user_domain_list_type = podkopDomainType;
+    if (podkopDomainType === 'text') preset.user_domains_text = podkopDomainsText;
+    if (podkopSubnetType) preset.user_subnet_list_type = podkopSubnetType;
+    if (podkopSubnetType === 'text') preset.user_subnets_text = podkopSubnetsText;
+    return preset;
+  }
 
   const settingsPreview = useMemo(() => {
     const payload = {
@@ -177,6 +206,7 @@ export function TemplateEditorPage({ id }: { id: string }) {
       },
       manual_domains: lines(manualDomains),
       manual_ips: lines(manualIps),
+      podkop: buildPodkopPreset(),
       settings,
       sections: {},
       urltest: {},
@@ -197,6 +227,12 @@ export function TemplateEditorPage({ id }: { id: string }) {
     subnetLists,
     manualDomains,
     manualIps,
+    podkopConnectionType,
+    podkopProxyMode,
+    podkopDomainType,
+    podkopDomainsText,
+    podkopSubnetType,
+    podkopSubnetsText,
     settings,
   ]);
 
@@ -244,6 +280,7 @@ export function TemplateEditorPage({ id }: { id: string }) {
       },
       manual_domains: lines(manualDomains),
       manual_ips: lines(manualIps),
+      podkop: buildPodkopPreset(),
       settings,
       sections: {},
       urltest: {},
@@ -484,6 +521,84 @@ export function TemplateEditorPage({ id }: { id: string }) {
               />
             </Field>
           </details>
+        </Panel>
+
+        <Panel
+          title="Podkop"
+          subtitle="Необязательно. Эти поля используются только при применении шаблона к Podkop; для Prokop/Forkop они игнорируются."
+        >
+          <div className="grid-2">
+            <Field
+              label="Тип секции Podkop"
+              hint="Авто — по действию: connection→proxy, bypass→exclusion, block→block."
+            >
+              <Select value={podkopConnectionType} onChange={setPodkopConnectionType}>
+                <option value="">Авто (по действию)</option>
+                <option value="proxy">Прокси</option>
+                <option value="vpn">VPN</option>
+                <option value="block">Блокировать</option>
+                <option value="exclusion">Исключить из маршрутизации</option>
+              </Select>
+            </Field>
+            <Field label="Режим прокси" hint="Пусто — не менять существующий режим.">
+              <Select value={podkopProxyMode} onChange={setPodkopProxyMode}>
+                <option value="">Не менять</option>
+                <option value="url">Одна ссылка (url)</option>
+                <option value="selector">Список selector</option>
+                <option value="urltest">Список urltest</option>
+                <option value="outbound">JSON outbound</option>
+              </Select>
+            </Field>
+            <Field label="Домены: способ задания">
+              <Select value={podkopDomainType} onChange={setPodkopDomainType}>
+                <option value="">Не задавать</option>
+                <option value="disabled">Не использовать</option>
+                <option value="dynamic">Список (dynamic)</option>
+                <option value="text">Текст (text list)</option>
+              </Select>
+            </Field>
+            <Field label="Подсети: способ задания">
+              <Select value={podkopSubnetType} onChange={setPodkopSubnetType}>
+                <option value="">Не задавать</option>
+                <option value="disabled">Не использовать</option>
+                <option value="dynamic">Список (dynamic)</option>
+                <option value="text">Текст (text list)</option>
+              </Select>
+            </Field>
+          </div>
+
+          {podkopDomainType === 'text' ? (
+            <Field
+              label="Домены текстом"
+              hint="Домены через запятую или по одному на строку. Сохраняется в user_domains_text."
+            >
+              <textarea
+                className="input code-area"
+                rows={6}
+                value={podkopDomainsText}
+                onChange={(event) => setPodkopDomainsText(event.target.value)}
+                placeholder={'example.com\nyoutube.com'}
+              />
+            </Field>
+          ) : null}
+          {podkopSubnetType === 'text' ? (
+            <Field
+              label="Подсети текстом"
+              hint="IPv4/IPv6 через запятую или по одному на строку. Сохраняется в user_subnets_text."
+            >
+              <textarea
+                className="input code-area"
+                rows={4}
+                value={podkopSubnetsText}
+                onChange={(event) => setPodkopSubnetsText(event.target.value)}
+                placeholder={'203.0.113.10\n2001:db8::/32'}
+              />
+            </Field>
+          ) : null}
+          <p className="muted-text small">
+            Для режима «Список (dynamic)» значения берутся из полей «Свои домены» и «Свои IP и
+            подсети» выше.
+          </p>
         </Panel>
 
         <Panel

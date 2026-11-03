@@ -112,12 +112,23 @@ export interface TemplateListItem {
   preset_resources?: number;
 }
 
+export interface PodkopTemplate {
+  connection_type?: 'proxy' | 'vpn' | 'block' | 'exclusion';
+  proxy_config_type?: 'url' | 'selector' | 'urltest' | 'outbound';
+  user_domain_list_type?: 'disabled' | 'dynamic' | 'text';
+  user_domains_text?: string | null;
+  user_subnet_list_type?: 'disabled' | 'dynamic' | 'text';
+  user_subnets_text?: string | null;
+  options?: Record<string, string | string[] | null>;
+}
+
 export interface TemplatePayload {
   action?: string;
   enabled?: string | string[] | null;
   resources?: Record<string, string | string[] | null>;
   manual_domains?: string[];
   manual_ips?: string[];
+  podkop?: PodkopTemplate;
   manual_entries_mode?: 'merge' | 'replace';
   settings: Record<string, string | string[] | null>;
   sections: Record<string, Record<string, string | string[] | null>>;
@@ -136,6 +147,7 @@ export interface TemplatePreset {
   manual_domains: string[];
   manual_ips: string[];
   settings: Record<string, string | string[] | null>;
+  podkop: PodkopTemplate;
 }
 
 export interface RouterConnection {

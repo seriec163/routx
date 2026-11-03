@@ -54,6 +54,27 @@ const ACTION_SHORT: Record<string, string> = {
 };
 
 const CONNECTION_ACTIONS = new Set(['connection', 'proxy', 'outbound', 'vpn']);
+
+const PODKOP_OPTION_KEYS = new Set([
+  'enable_udp_over_tcp',
+  'urltest_check_interval',
+  'urltest_tolerance',
+  'urltest_testing_url',
+  'mixed_proxy_enabled',
+  'mixed_proxy_port',
+  'domain_resolver_enabled',
+  'resolve_real_ip_for_routing',
+]);
+
+function pickPodkopOptions(
+  source: Record<string, string | string[] | null> | undefined,
+): Record<string, string | string[] | null> {
+  const output: Record<string, string | string[] | null> = {};
+  for (const [key, value] of Object.entries(source ?? {})) {
+    if (PODKOP_OPTION_KEYS.has(key)) output[key] = value;
+  }
+  return output;
+}
 const LINK_PREFIX_RE =
   /^(vless|vmess|trojan|ss|ssr|hysteria|hysteria2|hy2|tuic|anytls|socks|socks4|socks4a|socks5|socks5h):\/\//i;
 
@@ -155,6 +176,10 @@ interface RuleBody {
   settings: Record<string, string | string[] | null>;
   connection_type?: 'proxy' | 'vpn' | 'block' | 'exclusion';
   proxy_config_type?: 'url' | 'selector' | 'urltest' | 'outbound';
+  user_domain_list_type?: 'disabled' | 'dynamic' | 'text';
+  user_domains_text?: string;
+  user_subnet_list_type?: 'disabled' | 'dynamic' | 'text';
+  user_subnets_text?: string;
   podkop_options?: Record<string, string | string[] | null>;
 }
 
@@ -312,6 +337,28 @@ export function RouterRulesPanel(props: {
           props.router.product === 'podkop'
             ? ((rule.resources.proxy_config_type as RuleBody['proxy_config_type']) ?? 'url')
             : undefined,
+        user_domain_list_type:
+          props.router.product === 'podkop'
+            ? ((rule.resources.user_domain_list_type as RuleBody['user_domain_list_type']) ??
+              (rule.manual_domains.length > 0 ? 'dynamic' : 'disabled'))
+            : undefined,
+        user_domains_text:
+          props.router.product === 'podkop' &&
+          rule.resources.user_domain_list_type === 'text'
+            ? String(rule.resources.user_domains_text ?? '')
+            : undefined,
+        user_subnet_list_type:
+          props.router.product === 'podkop'
+            ? ((rule.resources.user_subnet_list_type as RuleBody['user_subnet_list_type']) ??
+              (rule.manual_ips.length > 0 ? 'dynamic' : 'disabled'))
+            : undefined,
+        user_subnets_text:
+          props.router.product === 'podkop' &&
+          rule.resources.user_subnet_list_type === 'text'
+            ? String(rule.resources.user_subnets_text ?? '')
+            : undefined,
+        podkop_options:
+          props.router.product === 'podkop' ? pickPodkopOptions(rule.resources) : undefined,
       },
     });
   }
@@ -869,6 +916,27 @@ function RuleEditorModal(props: {
   const [domainText, setDomainText] = useState(asText(initial?.resources.domain));
   const [manualDomains, setManualDomains] = useState((initial?.manual_domains ?? []).join('\n'));
   const [manualIps, setManualIps] = useState((initial?.manual_ips ?? []).join('\n'));
+  const [domainListType, setDomainListType] = useState(
+    String(
+      initial?.resources.user_domain_list_type ??
+        ((initial?.manual_domains?.length ?? 0) > 0 ? 'dynamic' : 'disabled'),
+    ),
+  );
+  const [domainTextList, setDomainTextList] = useState(
+    String(initial?.resources.user_domains_text ?? ''),
+  );
+  const [subnetListType, setSubnetListType] = useState(
+    String(
+      initial?.resources.user_subnet_list_type ??
+        ((initial?.manual_ips?.length ?? 0) > 0 ? 'dynamic' : 'disabled'),
+    ),
+  );
+  const [subnetTextList, setSubnetTextList] = useState(
+    String(initial?.resources.user_subnets_text ?? ''),
+  );
+  const [podkopOptions, setPodkopOptions] = useState<Record<string, string | string[] | null>>(
+    () => pickPodkopOptions(initial?.resources),
+  );
   const [ruleSets, setRuleSets] = useState(lines(asText(initial?.resources.rule_set)).join('\n'));
   const [domainLists, setDomainLists] = useState(
     lines(asText(initial?.resources.remote_domain_lists)).join('\n'),
@@ -936,6 +1004,25 @@ function RuleEditorModal(props: {
         throw new Error(response.template.preset_error ?? 'Шаблон не содержит настроек');
       }
       setAction(preset.action);
+      if (preset.podkop) {
+        if (preset.podkop.connection_type) setConnectionType(preset.podkop.connection_type);
+        if (preset.podkop.proxy_config_type) setProxyConfigType(preset.podkop.proxy_config_type);
+        if (preset.podkop.user_domain_list_type) {
+          setDomainListType(preset.podkop.user_domain_list_type);
+        }
+        if (preset.podkop.user_domains_text != null) {
+          setDomainTextList(preset.podkop.user_domains_text);
+        }
+        if (preset.podkop.user_subnet_list_type) {
+          setSubnetListType(preset.podkop.user_subnet_list_type);
+        }
+        if (preset.podkop.user_subnets_text != null) {
+          setSubnetTextList(preset.podkop.user_subnets_text);
+        }
+        if (preset.podkop.options) {
+          setPodkopOptions((current) => ({ ...current, ...preset.podkop.options }));
+        }
+      }
       if (Object.prototype.hasOwnProperty.call(preset.resources, 'community_lists')) {
         setSelectedServices(asStringList(preset.resources.community_lists));
       }
@@ -1136,14 +1223,32 @@ function RuleEditorModal(props: {
         enabled,
         create: props.mode === 'create',
         resources,
-        manual_domains: lines(manualDomains),
-        manual_ips: lines(manualIps),
+        manual_domains: isPodkop
+          ? domainListType === 'dynamic'
+            ? lines(manualDomains)
+            : []
+          : lines(manualDomains),
+        manual_ips: isPodkop
+          ? subnetListType === 'dynamic'
+            ? lines(manualIps)
+            : []
+          : lines(manualIps),
         settings: isPodkop ? {} : templateSettings,
         connection_type: isPodkop ? (connectionType as RuleBody['connection_type']) : undefined,
         proxy_config_type: isPodkop
           ? (proxyConfigType as RuleBody['proxy_config_type'])
           : undefined,
-        podkop_options: isPodkop ? {} : undefined,
+        user_domain_list_type: isPodkop
+          ? (domainListType as RuleBody['user_domain_list_type'])
+          : undefined,
+        user_domains_text:
+          isPodkop && domainListType === 'text' ? domainTextList : undefined,
+        user_subnet_list_type: isPodkop
+          ? (subnetListType as RuleBody['user_subnet_list_type'])
+          : undefined,
+        user_subnets_text:
+          isPodkop && subnetListType === 'text' ? subnetTextList : undefined,
+        podkop_options: isPodkop ? podkopOptions : undefined,
       },
       canConnect ? effectivePending : [],
     );
@@ -1222,24 +1327,22 @@ function RuleEditorModal(props: {
         </Field>
       ) : null}
 
-      {!isPodkop ? (
-        <Field
-          label="Заполнить из шаблона"
-          hint="Шаблон — это готовый набор действия, ресурсов и настроек. Имя секции в нём не хранится."
-        >
-          <div className="row">
-            <Select value={templateId} onChange={(value) => void applyTemplate(value)}>
-              <option value="">Не использовать</option>
-              {props.templates.map((template) => (
-                <option key={template.id} value={template.id}>
-                  {template.name} (ред. {template.current_revision})
-                </option>
-              ))}
-            </Select>
-            {templateBusy ? <Spinner label="Загружаем шаблон…" /> : null}
-          </div>
-        </Field>
-      ) : null}
+      <Field
+        label="Заполнить из шаблона"
+        hint="Шаблон — это готовый набор действия, ресурсов и настроек. Имя секции в нём не хранится."
+      >
+        <div className="row">
+          <Select value={templateId} onChange={(value) => void applyTemplate(value)}>
+            <option value="">Не использовать</option>
+            {props.templates.map((template) => (
+              <option key={template.id} value={template.id}>
+                {template.name} (ред. {template.current_revision})
+              </option>
+            ))}
+          </Select>
+          {templateBusy ? <Spinner label="Загружаем шаблон…" /> : null}
+        </div>
+      </Field>
 
       <Field label="Ресурсы" hint="Выберите сервисы, чей трафик попадёт в это правило.">
         <div className="chip-grid">
@@ -1260,47 +1363,124 @@ function RuleEditorModal(props: {
         </div>
       </Field>
 
-      <div className="grid-2">
-        <Field
-          label={isPodkop ? 'Домены секции' : 'Свои домены'}
-          hint={
-            isPodkop
-              ? 'По одному на строку. Для proxy/vpn — что направлять в туннель, для exclusion — что исключить.'
-              : 'По одному на строку. Домен = он и все поддомены.'
-          }
-        >
-          <textarea
-            className="input code-area"
-            rows={5}
-            value={manualDomains}
-            onChange={(event) => setManualDomains(event.target.value)}
-            placeholder={'example.com\nyoutube.com'}
-          />
-        </Field>
-        {!isPodkop ? (
-          <Field
-            label="Точные домены, keyword и regex"
-            hint="full:api.example.com, keyword:freebuff, regex:\\.ai$"
-          >
+      {isPodkop ? (
+        <>
+          <div className="grid-2">
+            <Field
+              label="Домены: способ задания"
+              hint="dynamic — список UCI, text — многострочный текст, disabled — не использовать"
+            >
+              <Select value={domainListType} onChange={setDomainListType}>
+                <option value="disabled">Не использовать</option>
+                <option value="dynamic">Список (dynamic)</option>
+                <option value="text">Текст (text list)</option>
+              </Select>
+            </Field>
+            <Field
+              label="Подсети: способ задания"
+              hint="dynamic — список UCI, text — многострочный текст, disabled — не использовать"
+            >
+              <Select value={subnetListType} onChange={setSubnetListType}>
+                <option value="disabled">Не использовать</option>
+                <option value="dynamic">Список (dynamic)</option>
+                <option value="text">Текст (text list)</option>
+              </Select>
+            </Field>
+          </div>
+          {domainListType === 'text' ? (
+            <Field
+              label="Домены текстом"
+              hint="Домены через запятую или по одному на строку. Podkop сохранит это в user_domains_text."
+            >
+              <textarea
+                className="input code-area"
+                rows={7}
+                value={domainTextList}
+                onChange={(event) => setDomainTextList(event.target.value)}
+                placeholder={'example.com\nyoutube.com'}
+              />
+            </Field>
+          ) : domainListType === 'dynamic' ? (
+            <Field
+              label="Домены списком"
+              hint="По одному на строку. Podkop сохранит это в user_domains."
+            >
+              <textarea
+                className="input code-area"
+                rows={7}
+                value={manualDomains}
+                onChange={(event) => setManualDomains(event.target.value)}
+                placeholder={'example.com\nyoutube.com'}
+              />
+            </Field>
+          ) : null}
+          {subnetListType === 'text' ? (
+            <Field
+              label="Подсети текстом"
+              hint="IPv4/IPv6 через запятую или по одному на строку. Podkop сохранит это в user_subnets_text."
+            >
+              <textarea
+                className="input code-area"
+                rows={5}
+                value={subnetTextList}
+                onChange={(event) => setSubnetTextList(event.target.value)}
+                placeholder={'203.0.113.10\n2001:db8::/32'}
+              />
+            </Field>
+          ) : subnetListType === 'dynamic' ? (
+            <Field
+              label="Подсети списком"
+              hint="IPv4/IPv6, можно с префиксом. По одному на строку. Podkop сохранит это в user_subnets."
+            >
+              <textarea
+                className="input code-area"
+                rows={5}
+                value={manualIps}
+                onChange={(event) => setManualIps(event.target.value)}
+                placeholder={'203.0.113.10\n2001:db8::/32'}
+              />
+            </Field>
+          ) : null}
+        </>
+      ) : (
+        <>
+          <div className="grid-2">
+            <Field
+              label="Свои домены"
+              hint="По одному на строку. Домен = он и все поддомены."
+            >
+              <textarea
+                className="input code-area"
+                rows={5}
+                value={manualDomains}
+                onChange={(event) => setManualDomains(event.target.value)}
+                placeholder={'example.com\nyoutube.com'}
+              />
+            </Field>
+            <Field
+              label="Точные домены, keyword и regex"
+              hint="full:api.example.com, keyword:freebuff, regex:\\.ai$"
+            >
+              <textarea
+                className="input code-area"
+                rows={5}
+                value={domainText}
+                onChange={(event) => setDomainText(event.target.value)}
+                placeholder={'full:api.example.com\nkeyword:freebuff\nregex:\\.ai$'}
+              />
+            </Field>
+          </div>
+          <Field label="Свои IP и подсети" hint="IPv4/IPv6, можно с префиксом. По одному на строку.">
             <textarea
               className="input code-area"
-              rows={5}
-              value={domainText}
-              onChange={(event) => setDomainText(event.target.value)}
-              placeholder={'full:api.example.com\nkeyword:freebuff\nregex:\\.ai$'}
+              rows={2}
+              value={manualIps}
+              onChange={(event) => setManualIps(event.target.value)}
+              placeholder={'203.0.113.10\n2001:db8::/32'}
             />
           </Field>
-        ) : null}
-      </div>
-      <Field label="Свои IP и подсети" hint="IPv4/IPv6, можно с префиксом. По одному на строку.">
-        <textarea
-          className="input code-area"
-          rows={2}
-          value={manualIps}
-          onChange={(event) => setManualIps(event.target.value)}
-          placeholder={'203.0.113.10\n2001:db8::/32'}
-        />
-      </Field>
+        </>
+      )}
 
       {!isPodkop ? (
         <details className="advanced">
