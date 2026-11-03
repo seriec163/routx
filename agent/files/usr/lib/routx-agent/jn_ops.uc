@@ -381,8 +381,10 @@ function list_connections(product, args) {
 
 function podkop_proxy_mode(cursor, section) {
 	let mode = util.as_string(cursor.get("podkop", section, "proxy_config_type"));
-	if (mode == "selector" || mode == "urltest")
+	if (mode == "selector" || mode == "urltest" || mode == "outbound")
 		return mode;
+	if (cursor.get("podkop", section, "outbound_json") != null)
+		return "outbound";
 	if (cursor.get("podkop", section, "urltest_proxy_links") != null)
 		return "urltest";
 	if (cursor.get("podkop", section, "selector_proxy_links") != null)
@@ -391,6 +393,8 @@ function podkop_proxy_mode(cursor, section) {
 }
 
 function podkop_proxy_option(mode) {
+	if (mode == "outbound")
+		return "outbound_json";
 	if (mode == "urltest")
 		return "urltest_proxy_links";
 	if (mode == "selector")
@@ -399,6 +403,8 @@ function podkop_proxy_option(mode) {
 }
 
 function podkop_proxy_links(cursor, section, mode) {
+	if (mode == "outbound")
+		return [];
 	if (mode == "url") {
 		let raw = util.as_string(cursor.get("podkop", section, "proxy_string"));
 		return raw == "" ? [] : [ raw ];
@@ -429,6 +435,8 @@ function manage_podkop_connection(section, action, kind, value, args) {
 	if (cursor.get("podkop", section) != "section")
 		return { ok: false, error: "section_missing" };
 	let mode = podkop_proxy_mode(cursor, section);
+	if (mode == "outbound")
+		return { ok: false, error: "podkop_outbound_managed_manually" };
 	let links = podkop_proxy_links(cursor, section, mode);
 	let hash = util.as_string(args.hash);
 	if (match(hash, /^[a-f0-9]{64}$/) == null)
@@ -645,6 +653,11 @@ function apply_podkop_connections(section, links, args) {
 	let mode = util.as_string(args.proxy_config_type);
 	if (mode != "url" && mode != "selector" && mode != "urltest")
 		mode = podkop_proxy_mode(cursor, section);
+	if (mode == "outbound") {
+		if (length(links) == 0)
+			return { ok: true, section: section, links: 0, subscriptions: 0, created: 0, mode: mode };
+		return { ok: false, error: "podkop_outbound_managed_manually" };
+	}
 
 	let link_state = load_link_state();
 	let previous = {};

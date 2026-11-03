@@ -154,7 +154,7 @@ interface RuleBody {
   manual_ips: string[];
   settings: Record<string, string | string[] | null>;
   connection_type?: 'proxy' | 'vpn' | 'block' | 'exclusion';
-  proxy_config_type?: 'url' | 'selector' | 'urltest';
+  proxy_config_type?: 'url' | 'selector' | 'urltest' | 'outbound';
   podkop_options?: Record<string, string | string[] | null>;
 }
 
@@ -299,6 +299,19 @@ export function RouterRulesPanel(props: {
         manual_domains: rule.manual_domains,
         manual_ips: rule.manual_ips,
         settings: {},
+        connection_type:
+          props.router.product === 'podkop'
+            ? ((rule.resources.connection_type as RuleBody['connection_type']) ??
+              (rule.action === 'block'
+                ? 'block'
+                : rule.action === 'bypass'
+                  ? 'exclusion'
+                  : 'proxy'))
+            : undefined,
+        proxy_config_type:
+          props.router.product === 'podkop'
+            ? ((rule.resources.proxy_config_type as RuleBody['proxy_config_type']) ?? 'url')
+            : undefined,
       },
     });
   }
@@ -899,7 +912,7 @@ function RuleEditorModal(props: {
   const [error, setError] = useState<string | null>(null);
 
   const canConnect = isPodkop
-    ? connectionType === 'proxy' || connectionType === 'vpn'
+    ? (connectionType === 'proxy' || connectionType === 'vpn') && proxyConfigType !== 'outbound'
     : CONNECTION_ACTIONS.has(action);
   const existingSources =
     (props.rule?.subscriptions.length ?? 0) + (props.rule?.links.length ?? 0);
@@ -1188,6 +1201,13 @@ function RuleEditorModal(props: {
         )}
       </div>
 
+      {isPodkop && proxyConfigType === 'outbound' ? (
+        <InfoBanner>
+          Секция использует готовый JSON outbound. Такой режим задаётся в LuCI; RoutX
+          сохраняет его и позволяет менять домены, списки и тип секции, но не подключение.
+        </InfoBanner>
+      ) : null}
+
       {isPodkop && canConnect ? (
         <Field
           label="Режим прокси"
@@ -1197,6 +1217,7 @@ function RuleEditorModal(props: {
             <option value="url">Одна ссылка (url)</option>
             <option value="selector">Список selector</option>
             <option value="urltest">Список urltest</option>
+            <option value="outbound">JSON outbound (из LuCI)</option>
           </Select>
         </Field>
       ) : null}

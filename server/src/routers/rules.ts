@@ -35,7 +35,7 @@ const ruleBodySchema = z
     manual_ips: z.array(z.string().max(64)).max(5000).default([]),
     settings: z.record(z.string(), uciValueSchema).default({}),
     connection_type: z.enum(['proxy', 'vpn', 'block', 'exclusion']).optional(),
-    proxy_config_type: z.enum(['url', 'selector', 'urltest']).optional(),
+    proxy_config_type: z.enum(['url', 'selector', 'urltest', 'outbound']).optional(),
     podkop_options: z.record(z.string(), uciValueSchema).default({}),
     reason: z.string().max(200).optional(),
   })

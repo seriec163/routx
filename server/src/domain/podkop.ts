@@ -16,7 +16,7 @@ import { uciValueSchema, type DiffItem, type UciValue } from './uci.js';
 const NAME_RE = /^[A-Za-z0-9_.-]{1,64}$/;
 
 export const PODKOP_CONNECTION_TYPES = ['proxy', 'vpn', 'block', 'exclusion'] as const;
-export const PODKOP_PROXY_MODES = ['url', 'selector', 'urltest'] as const;
+export const PODKOP_PROXY_MODES = ['url', 'selector', 'urltest', 'outbound'] as const;
 
 export type PodkopConnectionType = (typeof PODKOP_CONNECTION_TYPES)[number];
 export type PodkopProxyMode = (typeof PODKOP_PROXY_MODES)[number];
