@@ -1075,10 +1075,16 @@ export async function registerRouterConnectionRoutes(
         'select managed from router_state where router_id = $1',
         [router.id],
       );
-      if (state.rows[0]?.managed?.[`section.${body.section}.connection_type`] === undefined) {
+      if (
+        router.product === 'podkop' &&
+        state.rows[0]?.managed?.[`section.${body.section}.connection_type`] === undefined &&
+        !Object.keys(state.rows[0]?.managed ?? {}).some((path) =>
+          path.startsWith(`section.${body.section}.`),
+        )
+      ) {
         throw badRequest(
           'section_missing',
-          `Секция «${body.section}» не найдена в Podkop. Сначала прочитайте состояние.`,
+          `Секция «${body.section}» не найдена. Сначала прочитайте состояние.`,
         );
       }
 
