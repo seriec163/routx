@@ -6,6 +6,7 @@
  */
 
 import { ROUTING_SERVICES } from './routing.js';
+import { PODKOP_COMMUNITY_SERVICES } from './podkop.js';
 
 const LEGACY_SERVICE_IDS = new Set(ROUTING_SERVICES.map((item) => item.id));
 
@@ -185,14 +186,197 @@ export function displayCommunityLists(
   return result;
 }
 
-/** Копия payload с нормализованными community_lists во всех секциях. */
-export function normalizeTemplateLists<T extends { sections: Record<string, Record<string, unknown>> }>(
-  payload: T,
+const LIST_BASE = 'https://github.com/ushan0v/forkop-lists/releases/latest/download';
+const LIST_CACHE_TTL_MS = 6 * 60 * 60 * 1000;
+const MAX_FALLBACK_DOMAINS = 12000;
+const MAX_FALLBACK_SUBNETS = 3000;
+
+interface ListEntries {
+  domains: string[];
+  subnets: string[];
+}
+
+const listCache = new Map<string, { at: number; entries: ListEntries }>();
+
+function assetTargets(id: string): string[] {
+  if (FORKOP2_LISTS.has(id)) return [id];
+  return (LEGACY_TO_FORKOP2[id] ?? []).filter((target) => FORKOP2_LISTS.has(target));
+}
+
+function listUrl(asset: string): string {
+  return `${LIST_BASE}/${asset.replace(/_/g, '-')}.json`;
+}
+
+function extractEntries(value: unknown): ListEntries {
+  const domains: string[] = [];
+  const subnets: string[] = [];
+  const seen = new Set<string>();
+  const add = (target: string[], item: unknown): void => {
+    const text = String(item ?? '').trim();
+    if (text === '' || seen.has(text)) return;
+    seen.add(text);
+    target.push(text);
+  };
+  const rules =
+    value && typeof value === 'object' && Array.isArray((value as { rules?: unknown }).rules)
+      ? ((value as { rules: unknown[] }).rules ?? [])
+      : [];
+  for (const rule of rules) {
+    if (!rule || typeof rule !== 'object') continue;
+    const item = rule as Record<string, unknown>;
+    for (const [key, target] of [
+      ['domain', domains],
+      ['domain_suffix', domains],
+      ['domain_keyword', domains],
+      ['domain_regex', domains],
+      ['ip_cidr', subnets],
+      ['ip', subnets],
+    ] as const) {
+      const values = item[key];
+      if (!Array.isArray(values)) continue;
+      for (const entry of values) {
+        if (key === 'domain') add(target, `full:${String(entry).trim()}`);
+        else if (key === 'domain_keyword') add(target, `keyword:${String(entry).trim()}`);
+        else if (key === 'domain_regex') add(target, `regex:${String(entry).trim()}`);
+        else add(target, entry);
+      }
+    }
+    if (domains.length >= MAX_FALLBACK_DOMAINS && subnets.length >= MAX_FALLBACK_SUBNETS) break;
+  }
+  return {
+    domains: domains.slice(0, MAX_FALLBACK_DOMAINS),
+    subnets: subnets.slice(0, MAX_FALLBACK_SUBNETS),
+  };
+}
+
+async function fetchListEntries(asset: string): Promise<ListEntries> {
+  const cached = listCache.get(asset);
+  if (cached && Date.now() - cached.at < LIST_CACHE_TTL_MS) return cached.entries;
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 20_000);
+  try {
+    const response = await fetch(listUrl(asset), {
+      redirect: 'follow',
+      signal: controller.signal,
+      headers: {
+        'user-agent': 'RoutX/1.0 list fallback',
+        accept: 'application/json, */*',
+      },
+    });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const body = await response.json();
+    const entries = extractEntries(body);
+    listCache.set(asset, { at: Date.now(), entries });
+    return entries;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+export interface ListResolution {
+  native: string[];
+  ruleSets: string[];
+  domains: string[];
+  subnets: string[];
+  dropped: string[];
+}
+
+function nativeForId(
   product: string | null | undefined,
   version: string | null | undefined,
-): T {
-  if (!isForkop2(product, version)) return payload;
+  id: string,
+): boolean {
+  const mapped = normalizeCommunityLists([id], product, version).lists;
+  if (mapped.length === 0) return false;
+  if (product === 'podkop') return mapped.every((item) => PODKOP_COMMUNITY_SERVICES.has(item));
+  return true;
+}
+
+/**
+ * Универсальная замена встроенных списков:
+ * - продукт знает список — оставляем ID;
+ * - продукт умеет rule_set — добавляем URL списка;
+ * - Podkop не умеет URL — скачиваем JSON и переносим адреса в user_domains/user_subnets.
+ */
+export async function resolveCommunityLists(
+  lists: readonly string[],
+  product: string | null | undefined,
+  version: string | null | undefined,
+): Promise<ListResolution> {
+  const normalized = normalizeCommunityLists(lists, product, version);
+  const native =
+    product === 'podkop'
+      ? normalized.lists.filter((id) => PODKOP_COMMUNITY_SERVICES.has(id))
+      : [...normalized.lists];
+  const ruleSets: string[] = [];
+  const domains: string[] = [];
+  const subnets: string[] = [];
+  const dropped: string[] = [];
+  const assets = new Set<string>();
+  const isPodkop = product === 'podkop';
+
+  for (const raw of lists) {
+    const id = String(raw).trim();
+    if (id === '') continue;
+    if (nativeForId(product, version, id)) continue;
+
+    const targets = assetTargets(id);
+    if (targets.length === 0) {
+      if (!dropped.includes(id)) dropped.push(id);
+      continue;
+    }
+    for (const target of targets) assets.add(target);
+  }
+
+  for (const asset of assets) {
+    if (!isPodkop) {
+      const url = listUrl(asset);
+      if (!ruleSets.includes(url)) ruleSets.push(url);
+      continue;
+    }
+    try {
+      const entries = await fetchListEntries(asset);
+      for (const item of entries.domains) if (!domains.includes(item)) domains.push(item);
+      for (const item of entries.subnets) if (!subnets.includes(item)) subnets.push(item);
+    } catch {
+      if (!dropped.includes(asset)) dropped.push(asset);
+    }
+  }
+
+  return { native, ruleSets, domains, subnets, dropped };
+}
+
+function mergeListOption(existing: unknown, additions: string[]): string[] {
+  const values = Array.isArray(existing)
+    ? existing.map(String)
+    : existing == null
+      ? []
+      : [String(existing)];
+  for (const item of additions) if (!values.includes(item)) values.push(item);
+  return values;
+}
+
+function textLines(value: unknown): string[] {
+  return typeof value === 'string'
+    ? value
+        .split(/\r?\n/)
+        .map((line) => line.trim())
+        .filter(Boolean)
+    : [];
+}
+
+/** Копия payload с нормализованными community_lists во всех секциях. */
+export async function normalizeTemplateLists<
+  T extends {
+    sections: Record<string, Record<string, unknown>>;
+    podkop?: Record<string, unknown>;
+    resources?: Record<string, unknown>;
+  },
+>(payload: T, product: string | null | undefined, version: string | null | undefined): Promise<T> {
   const sections: Record<string, Record<string, unknown>> = {};
+  const fallbackDomains: string[] = [];
+  const fallbackSubnets: string[] = [];
   for (const [name, options] of Object.entries(payload.sections)) {
     const value = options.community_lists;
     if (value === undefined) {
@@ -200,11 +384,60 @@ export function normalizeTemplateLists<T extends { sections: Record<string, Reco
       continue;
     }
     const source = Array.isArray(value) ? value.map(String) : value == null ? [] : [String(value)];
-    const normalized = normalizeCommunityLists(source, product, version).lists;
-    sections[name] = {
+    const resolved = await resolveCommunityLists(source, product, version);
+    for (const item of resolved.domains) if (!fallbackDomains.includes(item)) fallbackDomains.push(item);
+    for (const item of resolved.subnets) if (!fallbackSubnets.includes(item)) fallbackSubnets.push(item);
+    const next: Record<string, unknown> = {
       ...options,
-      community_lists: normalized.length > 0 ? normalized : null,
+      community_lists: resolved.native.length > 0 ? resolved.native : null,
     };
+    if (resolved.ruleSets.length > 0) {
+      next.rule_set = mergeListOption(options.rule_set, resolved.ruleSets);
+    }
+    sections[name] = next;
   }
-  return { ...payload, sections };
+
+  let resources = payload.resources;
+  if (resources && resources.community_lists !== undefined) {
+    const value = resources.community_lists;
+    const source = Array.isArray(value) ? value.map(String) : value == null ? [] : [String(value)];
+    const resolved = await resolveCommunityLists(source, product, version);
+    for (const item of resolved.domains) if (!fallbackDomains.includes(item)) fallbackDomains.push(item);
+    for (const item of resolved.subnets) if (!fallbackSubnets.includes(item)) fallbackSubnets.push(item);
+    resources = {
+      ...resources,
+      community_lists: resolved.native.length > 0 ? resolved.native : null,
+    };
+    if (resolved.ruleSets.length > 0 && product !== 'podkop') {
+      resources.rule_set = mergeListOption(resources.rule_set, resolved.ruleSets);
+    }
+  }
+
+  const result: T = { ...payload, sections, ...(resources ? { resources } : {}) };
+  if (product === 'podkop' && (fallbackDomains.length > 0 || fallbackSubnets.length > 0)) {
+    const preset: Record<string, unknown> = { ...(payload.podkop ?? {}) };
+    const firstSection = Object.values(payload.sections)[0] ?? {};
+    if (fallbackDomains.length > 0) {
+      const existing = [
+        ...textLines(preset.user_domains_text),
+        ...textLines(firstSection.user_domains_text),
+        ...(Array.isArray(firstSection.user_domains) ? firstSection.user_domains.map(String) : []),
+      ];
+      const lines = [...new Set([...existing, ...fallbackDomains])];
+      preset.user_domains_text = lines.join('\n');
+      preset.user_domain_list_type = 'text';
+    }
+    if (fallbackSubnets.length > 0) {
+      const existing = [
+        ...textLines(preset.user_subnets_text),
+        ...textLines(firstSection.user_subnets_text),
+        ...(Array.isArray(firstSection.user_subnets) ? firstSection.user_subnets.map(String) : []),
+      ];
+      const lines = [...new Set([...existing, ...fallbackSubnets])];
+      preset.user_subnets_text = lines.join('\n');
+      preset.user_subnet_list_type = 'text';
+    }
+    result.podkop = preset;
+  }
+  return result;
 }

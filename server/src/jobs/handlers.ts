@@ -251,7 +251,7 @@ export async function recomputeDrift(
         ? assignment.exclusions.map(String)
         : [];
       const mapped = mapTemplateSections(payload, current);
-      const normalized = normalizeTemplateLists(mapped.payload, product, productVersion);
+      const normalized = await normalizeTemplateLists(mapped.payload, product, productVersion);
       const plan = computePlan(normalized, current, exclusions, extras);
       const drift = plan.items.length === 0 ? 'in_sync' : 'drift';
       result[assignment.template_id] = drift;
@@ -326,7 +326,7 @@ export async function diffTemplate(ctx: HandlerContext, job: JobRow): Promise<Js
   const managedSection = productRow.rows[0]?.managed_section ?? 'main';
   mapped = {
     ...mapped,
-    payload: normalizeTemplateLists(mapped.payload, product, productVersion),
+    payload: await normalizeTemplateLists(mapped.payload, product, productVersion),
   };
 
   if (product === 'podkop') {
@@ -484,7 +484,7 @@ export async function diffCustom(ctx: HandlerContext, job: JobRow): Promise<Json
     'select product, product_version from routers where id = $1',
     [routerId],
   );
-  const normalized = normalizeTemplateLists(
+  const normalized = await normalizeTemplateLists(
     payload,
     productRow.rows[0]?.product ?? 'unknown',
     productRow.rows[0]?.product_version ?? null,

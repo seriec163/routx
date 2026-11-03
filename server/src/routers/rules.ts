@@ -15,6 +15,7 @@ import {
   type UciValue,
 } from '../domain/uci.js';
 import { buildRuleViews, type AgentSection, type StoredConnection } from '../domain/rules.js';
+import { resolveCommunityLists } from '../domain/community-lists.js';
 
 interface RouteContext {
   pool: Pool;
@@ -25,6 +26,13 @@ const SECTION_RE = /^[A-Za-z0-9_.-]{1,64}$/;
 // Теги Forkop 2.x — это человекочитаемые label и имена серверов:
 // пробелы, кириллица, эмодзи и слэш допустимы.
 const PROXY_TAG_RE = /^[^\u0000-\u001f\u007f]{1,200}$/;
+
+function textLines(value: string | null | undefined): string[] {
+  return (value ?? '')
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+}
 
 const ruleBodySchema = z
   .object({
@@ -161,6 +169,30 @@ export async function registerRouterRuleRoutes(
         if (!connectionType) {
           throw badRequest('connection_type_required', 'Укажите тип секции Podkop');
         }
+        const communityLists = Array.isArray(body.resources.community_lists)
+          ? body.resources.community_lists.map(String)
+          : body.resources.community_lists == null
+            ? []
+            : [String(body.resources.community_lists)];
+        const fallback = await resolveCommunityLists(
+          communityLists,
+          'podkop',
+          router.product_version,
+        );
+        const domainLines = [
+          ...new Set([
+            ...textLines(body.user_domains_text),
+            ...(body.manual_domains ?? []),
+            ...fallback.domains,
+          ]),
+        ];
+        const subnetLines = [
+          ...new Set([
+            ...textLines(body.user_subnets_text),
+            ...(body.manual_ips ?? []),
+            ...fallback.subnets,
+          ]),
+        ];
         const payload = {
           section: body.section,
           label: body.label,
@@ -168,15 +200,15 @@ export async function registerRouterRuleRoutes(
           enabled: body.enabled,
           connection_type: connectionType,
           proxy_config_type: body.proxy_config_type,
-          user_domain_list_type: body.user_domain_list_type,
-          user_domains_text: body.user_domains_text,
-          user_subnet_list_type: body.user_subnet_list_type,
-          user_subnets_text: body.user_subnets_text,
-          community_lists: Array.isArray(body.resources.community_lists)
-            ? body.resources.community_lists.map(String)
-            : body.resources.community_lists == null
-              ? []
-              : [String(body.resources.community_lists)],
+          user_domain_list_type:
+            fallback.domains.length > 0 ? 'text' : body.user_domain_list_type,
+          user_domains_text:
+            fallback.domains.length > 0 ? domainLines.join('\n') : body.user_domains_text,
+          user_subnet_list_type:
+            fallback.subnets.length > 0 ? 'text' : body.user_subnet_list_type,
+          user_subnets_text:
+            fallback.subnets.length > 0 ? subnetLines.join('\n') : body.user_subnets_text,
+          community_lists: fallback.native,
           manual_domains: body.manual_domains,
           manual_ips: body.manual_ips,
           options: body.podkop_options,

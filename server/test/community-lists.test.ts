@@ -3,6 +3,7 @@ import {
   displayCommunityLists,
   isForkop2,
   normalizeCommunityLists,
+  resolveCommunityLists,
 } from '../src/domain/community-lists.js';
 import { isKnownRoutingService } from '../src/domain/routing.js';
 
@@ -54,6 +55,19 @@ describe('community lists', () => {
     expect(result.dropped).toEqual(['digitalocean', 'hetzner', 'ovh']);
     const newer = normalizeCommunityLists(['digitalocean', 'hetzner'], 'forkop', '2.1.0');
     expect(newer.lists).toEqual(['digitalocean', 'hetzner']);
+  });
+
+  it('adds a rule-set URL when Forkop 2.0.0 has no built-in list', async () => {
+    const result = await resolveCommunityLists(
+      ['facebook', 'digitalocean'],
+      'forkop',
+      '2.0.0',
+    );
+    expect(result.native).toEqual(['facebook']);
+    expect(result.ruleSets).toEqual([
+      'https://github.com/ushan0v/forkop-lists/releases/latest/download/digitalocean.json',
+    ]);
+    expect(result.dropped).toEqual([]);
   });
 
   it('detects Forkop 2.x by version', () => {
