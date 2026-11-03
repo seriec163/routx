@@ -82,7 +82,7 @@ function snapshot_create(product, reason) {
 		};
 	}
 
-	if (product == "forkop" || product == "podkop") {
+	if (product == "forkop" || product == "podkop" || product == "tachyon") {
 		let src = "/etc/config/" + product;
 		if (!util.file_exists(src))
 			return { ok: false, error: "не найден " + src };
@@ -121,7 +121,7 @@ function snapshot_list(product) {
 			return { ok: true, items: [] };
 		return { ok: true, items: parsed };
 	}
-	if (product == "forkop" || product == "podkop") {
+	if (product == "forkop" || product == "podkop" || product == "tachyon") {
 		return { ok: true, items: list_local() };
 	}
 	return { ok: true, items: [] };
@@ -146,7 +146,7 @@ function snapshot_restore(product, snapshot_ref, kind) {
 		return { ok: false, error: parsed.reason || "ошибка восстановления", status: status };
 	}
 
-	if (product == "forkop" || product == "podkop") {
+	if (product == "forkop" || product == "podkop" || product == "tachyon") {
 		let src = util.SNAPSHOT_DIR + "/" + util.as_string(snapshot_ref);
 		if (!util.file_exists(src))
 			return { ok: false, error: "локальный снапшот не найден" };

@@ -93,7 +93,7 @@ function read_state(product) {
 	if (product == "podkop")
 		return read_podkop_state(cursor);
 	let managed = {};
-	let config = product == "forkop" ? "forkop" : (product == "prokop" ? "prokop" : null);
+	let config = product == "forkop" ? "forkop" : (product == "prokop" ? "prokop" : (product == "tachyon" ? "tachyon" : null));
 	if (config == null)
 		return { managed: {}, state_hash: util.sha256_hex(util.canonical_json({})) };
 

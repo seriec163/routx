@@ -227,7 +227,9 @@ routx-agent status
   (`/proxies/.../exit`), а не из второго запуска sing-box;
 - **1.5.0+** — поддержка Tachyon: определение продукта, `tachyon-core`
   как ядро, Clash API, статус службы, списки и переключение
-  Podkop/Forkop/Prokop → Tachyon через официальный установщик.
+  Podkop/Forkop/Prokop → Tachyon через официальный установщик;
+- **1.5.1+** — Tachyon читается из `/etc/config/tachyon`, а агент
+  перезапускается после смены продукта, чтобы сразу определить Tachyon.
 
 ## Частые ошибки установки
 

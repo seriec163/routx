@@ -15,6 +15,7 @@ export const MUTATING_OPS = new Set([
   'snapshot_restore',
   'service_action',
   'sb_install',
+  'product_switch',
 ]);
 
 export const READ_OPS = new Set([
@@ -92,12 +93,13 @@ export async function createCommand(
     args?: Record<string, unknown>;
     settings: PlatformSettings;
     mutate?: boolean;
+    ttlSeconds?: number;
   },
 ): Promise<AgentCommand> {
   const mutate = input.mutate ?? MUTATING_OPS.has(input.op);
-  const ttl = mutate
+  const ttl = input.ttlSeconds ?? (mutate
     ? input.settings.agent.commandTtlMutateSeconds
-    : input.settings.agent.commandTtlReadSeconds;
+    : input.settings.agent.commandTtlReadSeconds);
 
   const result = await pool.query<AgentCommand>(
     `insert into agent_commands (id, router_id, job_id, op, args, expires_at)

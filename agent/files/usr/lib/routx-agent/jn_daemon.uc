@@ -112,6 +112,7 @@ function handle_command(cmd) {
 			if (detected != "tachyon")
 				return { status: "failed", error: { code: "product_switch_verify_failed", message: "после установки Tachyon не обнаружен" } };
 			let version = platform.product_version("tachyon");
+			runner.run([ "sh", "-c", "(sleep 3; /etc/init.d/routx-agent restart) >/dev/null 2>&1 &" ], 5);
 			return { status: "success", result: {
 				product: detected,
 				requested: target,

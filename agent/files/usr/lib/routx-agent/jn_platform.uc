@@ -295,7 +295,7 @@ function capability_view(product) {
 		proxy_health: true,
 		diagnostics: true,
 		service_actions: ["restart", "start", "stop", "enable", "disable"],
-		uci_allowlist: product == "forkop" || product == "prokop"
+		uci_allowlist: product == "forkop" || product == "prokop" || product == "tachyon"
 	};
 }
 

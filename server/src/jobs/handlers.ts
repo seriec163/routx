@@ -97,16 +97,18 @@ async function runCommand(
   timeoutMs?: number,
 ): Promise<Json> {
   const routerId = requireRouter(job);
+  const effectiveTimeout = timeoutMs ?? Math.max(15_000, job.timeout_seconds * 1000 - 5_000);
   const command = await createCommand(ctx.pool, {
     routerId,
     jobId: job.id,
     op,
     args,
     settings: ctx.settings,
+    ttlSeconds: Math.ceil(effectiveTimeout / 1000) + 120,
   });
 
   const outcome = await waitForCommand(ctx.pool, command.id, {
-    timeoutMs: timeoutMs ?? Math.max(15_000, job.timeout_seconds * 1000 - 5_000),
+    timeoutMs: effectiveTimeout,
     isCancelled: () => isCancelRequested(ctx.pool, job.id),
   });
 
