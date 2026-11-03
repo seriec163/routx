@@ -741,6 +741,11 @@ function set_podkop_outbound(product, args) {
 	return { ok: true, section: section, mode: "outbound" };
 }
 
+function podkop_link_supported(link) {
+	let res = run.run([ "sing-box", "tools", "decode-link", link ], 20);
+	return res.ok;
+}
+
 function apply_podkop_connections(section, links, args) {
 	let cursor = uci.cursor();
 	let exists = cursor.get("podkop", section);
@@ -748,6 +753,22 @@ function apply_podkop_connections(section, links, args) {
 		return { ok: false, error: "section_missing" };
 	if (exists != "section")
 		return { ok: false, error: "section_type_mismatch" };
+
+	let valid = [];
+	let skipped_links = [];
+	for (let value in links) {
+		if (podkop_link_supported(value))
+			push(valid, value);
+		else
+			push(skipped_links, connection_mask(value).host);
+	}
+	if (length(valid) == 0 && length(links) > 0) {
+		return {
+			ok: false,
+			error: "no_valid_links: " + join(", ", skipped_links)
+		};
+	}
+	links = valid;
 
 	let mode = util.as_string(args.proxy_config_type);
 	if (mode != "url" && mode != "selector" && mode != "urltest")
@@ -797,7 +818,7 @@ function apply_podkop_connections(section, links, args) {
 		return { ok: false, error: "uci commit failed" };
 	return {
 		ok: true, section: section, links: length(merged), subscriptions: 0,
-		created: exists == null ? 1 : 0, mode: mode
+		created: exists == null ? 1 : 0, mode: mode, skipped_links: skipped_links
 	};
 }
 
