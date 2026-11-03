@@ -497,38 +497,6 @@ export function RouterRulesPanel(props: {
     }
   }
 
-  async function expandSubscription(
-    section: string,
-    connection: RuleConnectionView,
-  ): Promise<void> {
-    if (!connection.id) return;
-    try {
-      const response = await api<{
-        imported: number;
-        total: number;
-        skipped: number;
-        job: Job | null;
-      }>(`/api/v1/routers/${props.routerId}/podkop/import-subscription`, {
-        method: 'POST',
-        body: { section, connection_id: connection.id },
-      });
-      if (response.job) {
-        const job = await waitForJob(response.job, 300_000);
-        if (job.status !== 'success') {
-          throw new Error(job.error?.message ?? 'Не удалось применить импортированные ссылки');
-        }
-      }
-      toast.success(
-        `Импортировано ссылок: ${response.imported}` +
-          (response.skipped > 0 ? `, пропущено: ${response.skipped}` : ''),
-      );
-      await readLive();
-      props.onChanged();
-    } catch (caught) {
-      toast.error(errorMessage(caught));
-    }
-  }
-
   async function selectProxy(
     section: string,
     connection: RuleConnectionView,
@@ -716,7 +684,6 @@ export function RouterRulesPanel(props: {
                   setConnectionTarget({ rule, connection })
                 }
                 onDelete={(connection) => requestDelete(rule, connection)}
-                onExpandSubscription={isPodkop ? expandSubscription : undefined}
                 onSelectProxy={selectProxy}
                 onManageSubscription={isPodkop ? () => setSubscriptionTarget(rule) : undefined}
                 onToggle={() => requestToggle(rule)}
@@ -847,7 +814,6 @@ function RuleCard(props: {
   onAddConnection: () => void;
   onReplace: (connection: RuleConnectionView) => void;
   onDelete: (connection: RuleConnectionView) => void;
-  onExpandSubscription?: (section: string, connection: RuleConnectionView) => void;
   onSelectProxy?: (section: string, connection: RuleConnectionView) => void;
   onManageSubscription?: () => void;
   onToggle: () => void;
@@ -970,11 +936,7 @@ function RuleCard(props: {
                   disabled={props.disabled}
                   onReplace={() => props.onReplace(connection)}
                   onDelete={() => props.onDelete(connection)}
-                  onExpand={
-                    props.onExpandSubscription
-                      ? () => props.onExpandSubscription!(rule.section, connection)
-                      : undefined
-                  }
+                  onExpand={props.onManageSubscription}
                 />
               ))}
               {rule.links.map((connection) => (
@@ -1056,7 +1018,7 @@ function ConnectionRow(props: {
         ) : null}
         {props.onExpand ? (
           <Button size="sm" variant="ghost" onClick={props.onExpand} disabled={props.disabled}>
-            Разобрать
+            {connection.kind === 'subscription' ? 'Изменить подписку' : 'Разобрать'}
           </Button>
         ) : null}
         {!connection.synthetic ? (
