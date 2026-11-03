@@ -1500,6 +1500,14 @@ export async function applyRouterConnections(ctx: HandlerContext, job: JobRow): 
     [routerId],
   );
   const managed = stateResult.rows[0]?.managed ?? {};
+  if (router.product === 'podkop' && requestedSection) {
+    if (managed[`section.${requestedSection}.connection_type`] === undefined) {
+      throw new JobFailure(
+        'section_missing',
+        `Секция «${requestedSection}» не найдена в Podkop. Укажите существующую секцию (например main).`,
+      );
+    }
+  }
   if (router.product === 'podkop') {
     for (const section of [...bySection.keys()]) {
       if (managed[`section.${section}.connection_type`] === undefined) {

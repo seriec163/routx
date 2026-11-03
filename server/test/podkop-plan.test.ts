@@ -112,4 +112,17 @@ describe('Podkop section plan', () => {
     expect(converted.user_domains_text).toBe('example.com');
     expect(converted.user_subnet_list_type).toBe('dynamic');
   });
+
+  it('uses text list for a Prokop-style template with comment lines', () => {
+    const payload = templatePayloadSchema.parse({
+      action: 'connection',
+      resources: { community_lists: ['youtube'] },
+      manual_domains: ['//Для Seedance / CapCut', 'api.capcut.com', 'keyword:freebuff'],
+      manual_ips: [],
+    });
+    const converted = podkopTemplateInput(payload, 'main');
+    expect(converted.user_domain_list_type).toBe('text');
+    expect(converted.user_domains_text).toContain('//Для Seedance / CapCut');
+    expect(converted.user_domains_text).toContain('api.capcut.com');
+  });
 });

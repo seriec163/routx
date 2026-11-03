@@ -464,6 +464,10 @@ export async function updateRouterFromProbe(
         model = coalesce($9, model),
         sing_box_version = coalesce($10, sing_box_version),
         sing_box_variant = coalesce($11, sing_box_variant),
+        managed_section = case
+          when $3 = 'podkop' and (managed_section is null or managed_section = '' or managed_section = 'router_control')
+            then 'main'
+          else managed_section end,
         status = case
           when $2::boolean then 'conflict'
           when $12 = 'unsupported' then 'unsupported'

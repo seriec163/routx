@@ -290,6 +290,12 @@ export async function registerRouterConnectionRoutes(
         .parse(request.body);
       const router = await getRouterForMutation(pool, auth, params.id);
       assertOnline(router);
+      if (router.product === 'podkop' && body.kind === 'subscription') {
+        throw badRequest(
+          'podkop_subscription_unsupported',
+          'Podkop поддерживает только прямые ссылки (vless/ss/hysteria2 и т. п.), подписки не поддерживаются',
+        );
+      }
 
       let value: string;
       let label: string;

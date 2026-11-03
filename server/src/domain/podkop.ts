@@ -355,7 +355,7 @@ export function podkopTemplateInput(
     (typeof domainText === 'string' && domainText.trim() !== ''
       ? 'text'
       : manual.domains.length > 0
-        ? 'dynamic'
+        ? 'text'
         : undefined);
   const subnetText = preset.user_subnets_text;
   const subnetType =
@@ -363,7 +363,7 @@ export function podkopTemplateInput(
     (typeof subnetText === 'string' && subnetText.trim() !== ''
       ? 'text'
       : manual.ips.length > 0
-        ? 'dynamic'
+        ? 'text'
         : undefined);
 
   const optionValues: Record<string, UciValue> = { ...(preset.options ?? {}) };
