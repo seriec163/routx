@@ -406,11 +406,12 @@ export function buildRuleViews(input: {
     // (активен JSON outbound), поэтому не засоряем список.
     const podkopOutbound =
       input.product === 'podkop' && asString(options.proxy_config_type) === 'outbound';
+    const liveAuthoritative = podkopOutbound || input.product === 'tachyon';
     const externalTails = new Set(
       agentSubscriptions.map((item) => item.tail).filter((tail) => tail !== ''),
     );
     for (const connection of storedSubscriptions) {
-      if (podkopOutbound) continue;
+      if (liveAuthoritative) continue;
       if (usedSubscriptionIds.has(connection.id)) continue;
       const mask = connectionMask(connection.value);
       if (mask.tail !== '' && externalTails.has(mask.tail)) {
@@ -435,7 +436,7 @@ export function buildRuleViews(input: {
       });
     }
     for (const connection of storedLinks) {
-      if (podkopOutbound) continue;
+      if (liveAuthoritative) continue;
       if (usedLinkIds.has(connection.id)) continue;
       const mask = connectionMask(connection.value);
       warnings.push(`Ссылка «${connection.label}» сохранена в RoutX, но не найдена на роутере.`);
