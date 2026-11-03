@@ -14,7 +14,7 @@ import {
   type RouterListExtras,
   type UciValue,
 } from '../domain/uci.js';
-import { buildRuleViews, type StoredConnection } from '../domain/rules.js';
+import { buildRuleViews, type AgentSection, type StoredConnection } from '../domain/rules.js';
 
 interface RouteContext {
   pool: Pool;
@@ -89,8 +89,9 @@ export async function registerRouterRuleRoutes(
 
     const state = await pool.query<{
       managed: Record<string, UciValue> | null;
+      sections: AgentSection[] | null;
       collected_at: Date | null;
-    }>('select managed, collected_at from router_state where router_id = $1', [router.id]);
+    }>('select managed, sections, collected_at from router_state where router_id = $1', [router.id]);
     const extrasResult = await pool.query<{ list_extras: unknown }>(
       'select list_extras from routers where id = $1',
       [router.id],
@@ -104,6 +105,7 @@ export async function registerRouterRuleRoutes(
 
     const rules = buildRuleViews({
       managed: state.rows[0]?.managed ?? {},
+      agentSections: Array.isArray(state.rows[0]?.sections) ? state.rows[0].sections : [],
       connections: await loadConnections(pool, router.id, masterKey),
       extras,
       source: 'cache',

@@ -58,6 +58,27 @@ export function HomeScreen() {
     );
   }, []);
 
+  useEffect(() => {
+    if (!selected || selected.status !== 'online') return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const started = await api<{ job: Job }>(
+          `/api/v1/routers/${selected.id}/rules/read`,
+          { method: 'POST' },
+        );
+        await waitForJob(started.job);
+        if (!cancelled) await rules.reload();
+      } catch {
+        // Кэш уже показан; ошибка live-чтения не блокирует экран.
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selected?.id]);
+
   const protocolChips = useMemo(() => {
     const chips = new Set<string>();
     for (const rule of rules.data?.rules ?? []) {

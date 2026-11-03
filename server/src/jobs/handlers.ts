@@ -147,15 +147,17 @@ async function saveState(
   source: string,
 ): Promise<Record<string, UciValue>> {  const managed = sanitizeAgentState(raw.managed ?? raw);
   const hash = stateHash(managed);
+  const sections = Array.isArray(raw.sections) ? raw.sections : null;
 
   await pool.query(
-    `insert into router_state (router_id, managed, state_hash, health, service, capabilities, collected_at, source)
-     values ($1,$2::jsonb,$3,$4::jsonb,$5::jsonb,$6::jsonb, now(), $7)
+    `insert into router_state (router_id, managed, state_hash, health, service, capabilities, sections, collected_at, source)
+     values ($1,$2::jsonb,$3,$4::jsonb,$5::jsonb,$6::jsonb,$7::jsonb, now(), $8)
      on conflict (router_id) do update
        set managed = excluded.managed, state_hash = excluded.state_hash,
            health = coalesce(excluded.health, router_state.health),
            service = coalesce(excluded.service, router_state.service),
            capabilities = coalesce(excluded.capabilities, router_state.capabilities),
+           sections = coalesce(excluded.sections, router_state.sections),
            collected_at = now(), source = excluded.source`,
     [
       routerId,
@@ -164,6 +166,7 @@ async function saveState(
       JSON.stringify(raw.health ?? null),
       JSON.stringify(raw.service ?? null),
       JSON.stringify(raw.capabilities ?? null),
+      sections == null ? null : JSON.stringify(sections),
       source,
     ],
   );
@@ -628,6 +631,12 @@ export async function proxySelect(ctx: HandlerContext, job: JobRow): Promise<Jso
   const tag = asString(job.payload.tag);
   if (!group || !tag) throw new JobFailure('invalid_payload', 'Не указана группа или прокси');
   const raw = await runCommand(ctx, job, 'select_proxy', { group, tag }, 60_000);
+  try {
+    const rules = await runCommand(ctx, job, 'read_rules', {}, 90_000);
+    await saveState(ctx.pool, routerId, rules, 'proxy_select');
+  } catch {
+    // Переключение уже выполнено; неудачное обновление статуса не отменяет его.
+  }
   await ctx.pool.query('update routers set last_error = null, updated_at = now() where id = $1', [
     routerId,
   ]);
@@ -1678,7 +1687,11 @@ export async function readRules(ctx: HandlerContext, job: JobRow): Promise<Json>
   >;
   try {
     const stateRaw = await runCommand(ctx, job, 'read_state', {}, 60_000);
-    managed = (await saveState(ctx.pool, routerId, stateRaw, 'read_rules')) as Record<
+    const merged = {
+      ...stateRaw,
+      sections: Array.isArray(raw.sections) ? raw.sections : stateRaw.sections,
+    };
+    managed = (await saveState(ctx.pool, routerId, merged, 'read_rules')) as Record<
       string,
       string | string[]
     >;
