@@ -133,6 +133,9 @@ npm run build
 Production-запуск, HTTPS через Caddy, полная диагностика и откат —
 [`docs/runbooks/phase-1.md`](docs/runbooks/phase-1.md).
 
+Если нужен **отдельный собственный сервер** (VPS, свой домен, своя база),
+пошаговая инструкция: [`docs/runbooks/self-hosting.md`](docs/runbooks/self-hosting.md).
+
 План этапов и критерии приёмки — [`ARCHITECTURE.md` §13](docs/architecture/ARCHITECTURE.md):
 
 1. ✅ каркас, миграции, `/healthz`, Compose;
