@@ -42,6 +42,7 @@ export interface AgentLink {
   active?: boolean;
   selectable?: boolean;
   synthetic?: boolean;
+  native?: boolean;
 }
 
 export interface AgentSection {
@@ -75,6 +76,7 @@ export interface RuleConnectionView {
   active?: boolean;
   selectable?: boolean;
   synthetic?: boolean;
+  native?: boolean;
 }
 
 export interface RuleView {
@@ -375,6 +377,7 @@ export function buildRuleViews(input: {
           active: item.active === true,
           selectable: item.selectable === true,
           synthetic: item.synthetic === true,
+          native: item.native === true,
         });
       }
     } else {

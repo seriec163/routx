@@ -1038,7 +1038,7 @@ function ConnectionRow(props: {
             {connection.kind === 'subscription' ? 'Изменить подписку' : 'Разобрать'}
           </Button>
         ) : null}
-        {!connection.synthetic ? (
+        {!connection.synthetic && !connection.native ? (
           <>
             <Button size="sm" variant="ghost" onClick={props.onReplace} disabled={props.disabled}>
               Заменить

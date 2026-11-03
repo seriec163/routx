@@ -184,6 +184,7 @@ export interface RuleConnectionView {
   active?: boolean;
   selectable?: boolean;
   synthetic?: boolean;
+  native?: boolean;
 }
 
 export interface RuleView {

@@ -791,7 +791,8 @@ function subscription_links(product, section, proxies, existing, subscriptions) 
 			delay_ms: delay,
 			alive: delay != null,
 			active: util.as_string(group.now) == member,
-			selectable: true
+			selectable: true,
+			native: true
 		});
 	}
 	return links;
