@@ -133,7 +133,20 @@ function set_group_proxy(product, group, tag) {
 	return { ok: true };
 }
 
+function proxy_exit_ip(product, tag, timeout_ms) {
+	if (!is_forkop_v2(product))
+		return { ok: false, error: "unsupported" };
+	let timeout = as_string(timeout_ms == null ? "5000" : timeout_ms);
+	let res = json_request(product, "GET",
+		"/proxies/" + encode(tag) + "/exit?timeout=" + encode(timeout), null, 30);
+	if (!res.ok)
+		return res;
+	let ipv4 = type(res.value.ipv4) == "object" ? as_string(res.value.ipv4.address) : "";
+	let ipv6 = type(res.value.ipv6) == "object" ? as_string(res.value.ipv6.address) : "";
+	return { ok: true, ip: ipv4 != "" ? ipv4 : ipv6 };
+}
+
 return {
 	DEFAULT_TARGET, is_forkop_v2, encode,
-	get_proxies, proxy_latency, group_latency, set_group_proxy
+	get_proxies, proxy_latency, group_latency, set_group_proxy, proxy_exit_ip
 };

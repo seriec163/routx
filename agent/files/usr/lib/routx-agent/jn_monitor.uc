@@ -376,7 +376,7 @@ function fetch_ip(tag) {
 
 // Публичный IP напрямую и через VPN. Конфиг sing-box копируется во временный
 // каталог 0700, потому что в нём есть секреты; после проверки он удаляется.
-function current_ips(force) {
+function current_ips(product, force) {
 	let now = util.now_epoch();
 	if (!force && ip_cache.at > 0 && now - ip_cache.at < IP_CHECK_TTL)
 		return ip_cache;
@@ -395,7 +395,22 @@ function current_ips(force) {
 	if (write_ipcheck_config(cfg)) {
 		if (direct_tag != "")
 			direct = fetch_ip(direct_tag);
-		if (vpn_tag != "")
+		// Forkop 2.x умеет отдавать exit-IP через Clash API. Это надёжнее,
+		// чем запуск второго sing-box: адрес точно соответствует выбранному серверу.
+		if (product_api.is_forkop_v2(product)) {
+			let proxies = product_api.get_proxies(product, 20);
+			if (proxies.ok && type(proxies.value.proxies) == "object") {
+				let group = pick_group(proxies.value.proxies, enabled_sections(product));
+				let info = group != "" ? proxies.value.proxies[group] : null;
+				let active = type(info) == "object" ? util.as_string(info.now) : "";
+				if (active != "") {
+					let exit = product_api.proxy_exit_ip(product, active, "5000");
+					if (exit.ok && exit.ip != "")
+						vpn = exit.ip;
+				}
+			}
+		}
+		if (vpn == "" && vpn_tag != "")
 			vpn = fetch_ip(vpn_tag);
 		run.run([ "rm", "-rf", IPCHECK_DIR ], 5);
 	}
@@ -592,7 +607,7 @@ function probe(product, force) {
 	result.total_tags = proxy.total_tags;
 	result.detail = proxy.detail;
 
-	let ips = current_ips(force);
+	let ips = current_ips(product, force);
 	result.direct_ip = ips.direct;
 	result.vpn_ip = ips.vpn;
 
