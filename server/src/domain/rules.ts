@@ -104,6 +104,15 @@ function asString(value: UciValue | undefined): string {
   return Array.isArray(value) ? value.join('\n') : String(value);
 }
 
+function decodeLinkLabel(value: string): string {
+  if (!value.includes('%')) return value;
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return value;
+  }
+}
+
 function asList(value: UciValue | undefined): string[] {
   if (value == null) return [];
   return (Array.isArray(value) ? value : [String(value)])
@@ -334,7 +343,7 @@ export function buildRuleViews(input: {
           id: match?.id ?? null,
           name: null,
           hash: item.hash,
-          label: match?.label ?? item.label ?? item.scheme,
+          label: match?.label ?? decodeLinkLabel(item.label ?? item.scheme),
           masked: `${item.scheme ? `${item.scheme}://` : ''}••••••••${item.tail}`,
           host: item.host,
           tail: item.tail,
