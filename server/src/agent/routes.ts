@@ -30,7 +30,7 @@ export interface AgentRouteContext {
 const probeSchema = z
   .object({
     agent_version: z.string().max(40).optional(),
-    product: z.enum(['forkop', 'prokop', 'podkop', 'unknown', 'conflict']).optional(),
+    product: z.enum(['forkop', 'prokop', 'podkop', 'tachyon', 'unknown', 'conflict']).optional(),
     product_version: z.string().max(60).nullable().optional(),
     conflict: z.boolean().optional(),
     manifest_version: z.coerce.number().int().nonnegative().nullable().optional(),
@@ -51,7 +51,7 @@ const probeSchema = z
 const bindSchema = z
   .object({
     token: z.string().min(20).max(64),
-    product: z.enum(['forkop', 'prokop', 'podkop', 'unknown', 'conflict']).optional(),
+    product: z.enum(['forkop', 'prokop', 'podkop', 'tachyon', 'unknown', 'conflict']).optional(),
     agent_version: z.string().max(40).optional(),
     hardware: z.record(z.string(), z.unknown()).optional(),
   })
@@ -93,7 +93,7 @@ function agentContext(request: FastifyRequest): AgentAuthContext {
 
 const INSTALL_SCRIPT = `#!/bin/sh
 # RoutX agent installer.
-# Usage: sh install.sh --server URL --token BINDING_TOKEN [--product prokop|forkop|podkop] [--sing-box tiny|stable|extended] [--reboot]
+# Usage: sh install.sh --server URL --token BINDING_TOKEN [--product prokop|forkop|podkop|tachyon] [--sing-box tiny|stable|extended] [--reboot]
 set -eu
 
 SERVER=""
@@ -117,7 +117,7 @@ done
 [ -n "$TOKEN" ] || { echo "--token is required" >&2; exit 2; }
 case "$PRODUCT_ARG" in
   ""|prokop|forkop|podkop) ;;
-  *) echo "--product must be prokop, forkop or podkop" >&2; exit 2 ;;
+  *) echo "--product must be prokop, forkop, podkop or tachyon" >&2; exit 2 ;;
 esac
 case "$SINGBOX" in
   ""|tiny|stable|extended) ;;
@@ -143,6 +143,17 @@ has_forkop() {
     opkg list-installed 2>/dev/null | grep -q '^forkop ' && return 0
   elif command -v apk >/dev/null 2>&1; then
     apk info -e forkop >/dev/null 2>&1 && return 0
+  fi
+  return 1
+}
+
+has_tachyon() {
+  [ -x /usr/bin/tachyon ] && return 0
+  [ -x /etc/init.d/tachyon ] && return 0
+  if command -v opkg >/dev/null 2>&1; then
+    opkg list-installed 2>/dev/null | grep -q '^tachyon ' && return 0
+  elif command -v apk >/dev/null 2>&1; then
+    apk info -e tachyon >/dev/null 2>&1 && return 0
   fi
   return 1
 }
@@ -179,12 +190,14 @@ has_podkop() {
 HAS_PROKOP=0
 HAS_FORKOP=0
 HAS_PODKOP=0
+HAS_TACHYON=0
 has_prokop && HAS_PROKOP=1
 has_forkop && HAS_FORKOP=1
 has_podkop && HAS_PODKOP=1
-FOUND=$((HAS_PROKOP + HAS_FORKOP + HAS_PODKOP))
+has_tachyon && HAS_TACHYON=1
+FOUND=$((HAS_PROKOP + HAS_FORKOP + HAS_PODKOP + HAS_TACHYON))
 if [ "$FOUND" -gt 1 ]; then
-  echo "На роутере одновременно найдено несколько продуктов (Prokop/Forkop/Podkop). Изменения запрещены: устраните конфликт вручную." >&2
+  echo "На роутере одновременно найдено несколько продуктов (Prokop/Forkop/Podkop/Tachyon). Изменения запрещены: устраните конфликт вручную." >&2
   exit 1
 fi
 if [ "$HAS_PROKOP" -eq 1 ]; then
@@ -193,6 +206,8 @@ elif [ "$HAS_FORKOP" -eq 1 ]; then
   PRODUCT="forkop"
 elif [ "$HAS_PODKOP" -eq 1 ]; then
   PRODUCT="podkop"
+elif [ "$HAS_TACHYON" -eq 1 ]; then
+  PRODUCT="tachyon"
 fi
 if [ -n "$PRODUCT_ARG" ] && [ -n "$PRODUCT" ] && [ "$PRODUCT_ARG" != "$PRODUCT" ]; then
   echo "На роутере уже установлен $PRODUCT, а запрошен $PRODUCT_ARG. Один роутер — один продукт." >&2
@@ -204,13 +219,14 @@ fi
 if [ -z "$PRODUCT" ]; then
   # /dev/tty может существовать как файл, но не открываться без терминала.
   if ! ( : </dev/tty ) 2>/dev/null; then
-    echo "Prokop/Forkop/Podkop не найден. Запустите установщик в терминале SSH или укажите --product prokop|forkop|podkop." >&2
+    echo "Prokop/Forkop/Podkop/Tachyon не найден. Запустите установщик в терминале SSH или укажите --product prokop|forkop|podkop|tachyon." >&2
     exit 2
   fi
-  printf '\\nProkop, Forkop или Podkop не найден. Что установить вместе с агентом?\\n' >/dev/tty
+  printf '\\nProkop, Forkop, Podkop или Tachyon не найден. Что установить вместе с агентом?\\n' >/dev/tty
   printf '  1) Prokop (рекомендуется)\\n' >/dev/tty
   printf '  2) Forkop\\n' >/dev/tty
   printf '  3) Podkop\\n' >/dev/tty
+  printf '  4) Tachyon (tachyon-core)\\n' >/dev/tty
   printf 'Выбор [1]: ' >/dev/tty
   read -r choice </dev/tty || choice=""
   [ -n "$choice" ] || choice="1"
@@ -218,6 +234,7 @@ if [ -z "$PRODUCT" ]; then
     1) PRODUCT="prokop" ;;
     2) PRODUCT="forkop" ;;
     3) PRODUCT="podkop" ;;
+    4) PRODUCT="tachyon" ;;
     *) echo "Некорректный выбор" >&2; exit 2 ;;
   esac
 fi
@@ -334,7 +351,7 @@ rm -f /var/run/routx-agent/status.json
 
 # Агент уже привязан. Теперь ставим продукт, только если его действительно нет.
 # Повторная проверка защищает от гонки и от ложного «продукта нет».
-if ! has_prokop && ! has_forkop && ! has_podkop; then
+if ! has_prokop && ! has_forkop && ! has_podkop && ! has_tachyon; then
   echo "Агент установлен и привязан. Устанавливаю $PRODUCT ..."
   case "$PRODUCT" in
     prokop)
@@ -380,12 +397,16 @@ if ! has_prokop && ! has_forkop && ! has_podkop; then
       fi
       echo n | sh -c "$PODKOP_INSTALLER" || true
       ;;
+    tachyon)
+      wget -O /tmp/tachyon-setup.sh https://raw.githubusercontent.com/Dushnilin/tachyon/main/install.sh && sh /tmp/tachyon-setup.sh -y --tachyon-core
+      ;;
   esac
 
   HAS_AFTER=0
   has_prokop && HAS_AFTER=$((HAS_AFTER + 1))
   has_forkop && HAS_AFTER=$((HAS_AFTER + 1))
   has_podkop && HAS_AFTER=$((HAS_AFTER + 1))
+  has_tachyon && HAS_AFTER=$((HAS_AFTER + 1))
   if [ "$HAS_AFTER" -gt 1 ]; then
     echo "После установки обнаружено несколько продуктов. Это конфликт: устраните его вручную. Агент не вносит изменений." >&2
     exit 1

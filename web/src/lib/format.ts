@@ -67,8 +67,9 @@ export const PRODUCT_LABEL: Record<string, string> = {
   forkop: 'Forkop',
   prokop: 'Prokop',
   podkop: 'Podkop',
+  tachyon: 'Tachyon',
   unknown: 'Не определён',
-  conflict: 'Forkop + Prokop + Podkop',
+  conflict: 'Конфликт продуктов',
 };
 
 export const JOB_STATUS: Record<string, string> = {

@@ -11,7 +11,7 @@ const SUPPORTED_ARCH = {
 	"aarch64_generic": true
 };
 
-const PRODUCTS = ["forkop", "prokop", "podkop"];
+const PRODUCTS = ["forkop", "prokop", "podkop", "tachyon"];
 
 function release_info() {
 	let text = util.read_file("/etc/openwrt_release", "");
@@ -94,14 +94,9 @@ function package_installed(product) {
 function product_installed(product) {
 	// У Podkop конфиг создаётся установщиком до готовности пакета; одного
 	// /etc/config/podkop недостаточно, иначе неполная установка считается рабочей.
-	if (product == "podkop") {
-		if (util.file_exists("/usr/bin/podkop") || util.file_exists("/etc/init.d/podkop"))
-			return true;
-		return package_installed(product);
-	}
-	if (util.file_exists(product_config(product)) || util.file_exists(product_binary(product)))
-		return true;
-	if (util.file_exists("/etc/init.d/" + product))
+	// Конфиг без бинарника/службы/пакета — это остаток после смены продукта
+	// (Tachyon сохраняет конфиги Podkop/Forkop для миграции), а не продукт.
+	if (util.file_exists(product_binary(product)) || util.file_exists("/etc/init.d/" + product))
 		return true;
 
 	// Бинарник и конфиг могут отсутствовать при частично снятом пакете.
@@ -121,7 +116,7 @@ function detect_product() {
 }
 
 function product_version(product) {
-	if (product != "forkop" && product != "prokop" && product != "podkop")
+	if (product != "forkop" && product != "prokop" && product != "podkop" && product != "tachyon")
 		return "";
 	let result = run.run_product(product, ["show_version"], 15);
 	if (!result.ok)
@@ -133,7 +128,7 @@ function sing_box_info(product) {
 	let version = "";
 	let variant = "";
 
-	if (product == "forkop" || product == "prokop" || product == "podkop") {
+	if (product == "forkop" || product == "prokop" || product == "podkop" || product == "tachyon") {
 		let result = run.run_product(product, ["show_sing_box_version"], 15);
 		if (result.ok)
 			version = run.first_line(result.stdout);
@@ -172,7 +167,7 @@ function sing_box_info(product) {
 }
 
 function manifest_version(product) {
-	if (product != "forkop" && product != "prokop")
+	if (product != "forkop" && product != "prokop" && product != "tachyon")
 		return null;
 	let cursor = uci.cursor();
 	let value = cursor.get(product, "settings", "config_version");
@@ -223,7 +218,7 @@ function podkop_ui_state() {
 function get_ui_state(product) {
 	if (product == "podkop")
 		return podkop_ui_state();
-	if (product != "forkop" && product != "prokop")
+	if (product != "forkop" && product != "prokop" && product != "tachyon")
 		return null;
 	let result = run.run_product(product, ["get_ui_state"], 20);
 	if (!result.ok)
@@ -242,7 +237,7 @@ function ui_state_values(product, ui) {
 			capabilities = ui.capabilities;
 	}
 
-	let own = (product == "forkop" || product == "prokop" || product == "podkop") && type(service[product]) == "object"
+	let own = (product == "forkop" || product == "prokop" || product == "podkop" || product == "tachyon") && type(service[product]) == "object"
 		? service[product] : {};
 	let sing_box = type(service.sing_box) == "object" ? service.sing_box : {};
 	let present = length(keys(service)) > 0;
@@ -255,7 +250,7 @@ function ui_state_values(product, ui) {
 	// Prokop/Forkop/Podkop сами запускают sing-box и штатно отключают его
 	// standalone автозапуск. Для них выключенный /etc/rc.d/S99sing-box — норма,
 	// если продукт включён и запущен.
-	let sing_box_managed = (product == "forkop" || product == "prokop" || product == "podkop") &&
+	let sing_box_managed = (product == "forkop" || product == "prokop" || product == "podkop" || product == "tachyon") &&
 		product_running && product_enabled;
 	let sing_box_autostart_ok = sing_box_enabled || sing_box_managed;
 
@@ -288,15 +283,15 @@ function ui_state_values(product, ui) {
 
 function capability_view(product) {
 	let platform = platform_state(product);
-	let writable = platform == "ok" && (product == "forkop" || product == "prokop");
+	let writable = platform == "ok" && (product == "forkop" || product == "prokop" || product == "tachyon");
 	return {
 		product: product,
 		readonly: !writable,
 		write_reason: writable ? null : (platform == "conflict" ? "product_conflict"
 			: platform == "unsupported" ? "unsupported_platform"
 			: product == "podkop" ? "podkop_readonly" : "product_unknown"),
-		snapshots: product == "prokop" ? "native" : (product == "forkop" ? "local" : "none"),
-		sing_box: product == "forkop" || product == "prokop" || product == "podkop",
+		snapshots: product == "prokop" ? "native" : ((product == "forkop" || product == "tachyon") ? "local" : "none"),
+		sing_box: product == "forkop" || product == "prokop" || product == "podkop" || product == "tachyon",
 		proxy_health: true,
 		diagnostics: true,
 		service_actions: ["restart", "start", "stop", "enable", "disable"],

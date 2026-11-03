@@ -15,7 +15,7 @@ export async function createBindingToken(
   input: {
     routerId: string;
     createdBy: string;
-    productHint?: 'any' | 'forkop' | 'prokop' | 'podkop';
+    productHint?: 'any' | 'forkop' | 'prokop' | 'podkop' | 'tachyon';
     ttlSeconds?: number;
   },
 ): Promise<BindingTokenResult> {

@@ -35,7 +35,7 @@ function diagnostics_quick(product) {
 		state: !ui_vals.health.sing_box_running ? "error" :
 			(ui_vals.health.sing_box_managed || ui_vals.health.sing_box_enabled ? "ok" : "warning"),
 		details: !ui_vals.health.sing_box_running ? "не запущен" :
-			(ui_vals.health.sing_box_managed ? "запущен, автозапуск через " + (product == "forkop" ? "Forkop" : (product == "podkop" ? "Podkop" : "Prokop")) :
+			(ui_vals.health.sing_box_managed ? "запущен, автозапуск через " + (product == "forkop" ? "Forkop" : (product == "podkop" ? "Podkop" : (product == "tachyon" ? "Tachyon" : "Prokop"))) :
 				(ui_vals.health.sing_box_enabled ? "запущен, автозапуск включён" : "запущен, автозапуск отключён"))
 	});
 
@@ -101,6 +101,9 @@ function diagnostics_quick(product) {
 	} else if (product == "forkop") {
 		let res = run.run_product("forkop", ["get_status"], 20);
 		push(report.checks, check_state("forkop_get_status", res.ok, res.ok ? "ok" : run.error_text(res)));
+	} else if (product == "tachyon") {
+		let res = run.run_product("tachyon", ["get_status"], 20);
+		push(report.checks, check_state("tachyon_get_status", res.ok, res.ok ? "ok" : run.error_text(res)));
 	} else if (product == "podkop") {
 		let res = run.run_product("podkop", ["get_status"], 20);
 		push(report.checks, check_state("podkop_get_status", res.ok, res.ok ? "ok" : run.error_text(res)));

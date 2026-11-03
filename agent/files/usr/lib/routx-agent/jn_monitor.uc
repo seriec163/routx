@@ -301,7 +301,8 @@ function load_sing_box_config() {
 	let paths = [
 		"/etc/sing-box/config.json",
 		"/etc/forkop/sing-box/config.json",
-		"/etc/prokop/sing-box/config.json"
+		"/etc/prokop/sing-box/config.json",
+		"/etc/tachyon-core/config.json"
 	];
 	for (let path in paths) {
 		if (!util.file_exists(path))
@@ -543,7 +544,7 @@ function probe(product, force) {
 			result.service_state = "running & enabled";
 			result.health = "ok";
 		}
-	} else if (product_api.is_forkop_v2(product)) {
+	} else if (product_api.is_forkop_v2(product) || product == "tachyon") {
 		let status = cli(product, [ "get_status" ], 15);
 		if (!status.ok) {
 			result.service_state = "unknown";

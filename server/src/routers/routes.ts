@@ -30,7 +30,7 @@ const createSchema = z
   .object({
     name: z.string().trim().min(1).max(120),
     owner_id: z.string().uuid().optional(),
-    product_hint: z.enum(['any', 'forkop', 'prokop', 'podkop']).default('any'),
+    product_hint: z.enum(['any', 'forkop', 'prokop', 'podkop', 'tachyon']).default('any'),
   })
   .strict();
 
@@ -430,7 +430,10 @@ export async function registerRouterRoutes(app: FastifyInstance, ctx: RouteConte
       routerId: router.id,
       createdBy: auth.userId,
       productHint:
-        router.product === 'forkop' || router.product === 'prokop' || router.product === 'podkop'
+        router.product === 'forkop' ||
+        router.product === 'prokop' ||
+        router.product === 'podkop' ||
+        router.product === 'tachyon'
           ? router.product
           : 'any',
     });
@@ -448,7 +451,10 @@ export async function registerRouterRoutes(app: FastifyInstance, ctx: RouteConte
     });
 
     const productArg =
-      router.product === 'forkop' || router.product === 'prokop' || router.product === 'podkop'
+      router.product === 'forkop' ||
+      router.product === 'prokop' ||
+      router.product === 'podkop' ||
+      router.product === 'tachyon'
         ? ` --product ${router.product}`
         : '';
     const command = `wget -qO- ${ctx.publicUrl}/agent/install.sh | sh -s -- --server ${ctx.publicUrl} --token ${token.token}${productArg} --reboot`;
@@ -999,6 +1005,53 @@ export async function registerRouterRoutes(app: FastifyInstance, ctx: RouteConte
     reply.code(202);
     return { job: jobJson(job) };
   });
+
+  // Смена продукта на роутере. Пока поддерживается установка Tachyon
+  // поверх Podkop/Forkop/Prokop: официальный установщик сам удаляет
+  // конфликтующие пакеты, сохраняя их конфиги для миграции.
+  app.post(
+    '/api/v1/routers/:id/product-switch',
+    { config: { rateLimit: { max: 3, timeWindow: '10 minutes' } } },
+    async (request, reply) => {
+      const auth = requireUser(request);
+      if (auth.role !== 'superadmin') {
+        throw forbidden('superadmin_required', 'Смена продукта доступна только администратору');
+      }
+      const params = z.object({ id: z.string().uuid() }).parse(request.params);
+      const body = z.object({ product: z.enum(['tachyon']) }).strict().parse(request.body);
+      const router = await getRouterForMutation(pool, auth, params.id);
+      assertOnline(router);
+      if (router.product === body.product) {
+        throw badRequest('product_already_installed', 'Этот продукт уже установлен');
+      }
+
+      const job = await enqueueJob(pool, {
+        type: 'product_switch',
+        routerId: router.id,
+        requestedBy: auth.userId,
+        timeoutSeconds: 1900,
+        maxAttempts: 1,
+        idempotencyKey: `product_switch:${router.id}:${body.product}:${Date.now()}`,
+        payload: { product: body.product },
+      });
+
+      await audit(pool, {
+        actorId: auth.userId,
+        actorRole: auth.role,
+        action: 'router.product_switch',
+        targetType: 'router',
+        targetId: router.id,
+        routerId: router.id,
+        result: 'ok',
+        ip: request.ip,
+        userAgent: request.headers['user-agent'],
+        metadata: { from: router.product, to: body.product, job_id: job.id },
+      });
+
+      reply.code(202);
+      return { job: jobJson(job) };
+    },
+  );
 
   // Перезагрузка самого роутера. Агент отвечает до reboot, поэтому задача
   // успевает завершиться; после перезагрузки связь восстанавливается сама.

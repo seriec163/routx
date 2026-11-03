@@ -115,7 +115,7 @@ function serviceText(value: unknown): string {
   if (value && typeof value === 'object') {
     const record = value as Record<string, unknown>;
     if (typeof record.status === 'string') return record.status;
-    for (const key of ['prokop', 'forkop', 'podkop']) {
+    for (const key of ['prokop', 'forkop', 'podkop', 'tachyon']) {
       const child = record[key];
       if (child && typeof child === 'object' && typeof (child as { status?: unknown }).status === 'string') {
         return `${key}: ${String((child as { status: string }).status)}`;
@@ -565,6 +565,7 @@ export function RouterDetailPage({ id }: { id: string }) {
   const [busy, setBusy] = useState(false);
   const [activeJob, setActiveJob] = useState<Job | null>(null);
   const [activeJobLabel, setActiveJobLabel] = useState('');
+  const [productSwitchBusy, setProductSwitchBusy] = useState(false);
   const [restoreRouterBusy, setRestoreRouterBusy] = useState(false);
   const [purgeOpen, setPurgeOpen] = useState(false);
   const [purgeName, setPurgeName] = useState('');
@@ -1128,6 +1129,47 @@ export function RouterDetailPage({ id }: { id: string }) {
     return null;
   }
 
+  async function switchToTachyon(): Promise<void> {
+    if (
+      !window.confirm(
+        'Установить Tachyon с ядром tachyon-core? Официальный установщик удалит пакеты Podkop/Forkop/Prokop, сохранив их конфигурацию для миграции. Это может занять несколько минут.',
+      )
+    ) {
+      return;
+    }
+    setProductSwitchBusy(true);
+    setActiveJob(null);
+    setActiveJobLabel('Устанавливаем Tachyon');
+    try {
+      const started = await api<{ job: Job }>(`/api/v1/routers/${id}/product-switch`, {
+        method: 'POST',
+        body: { product: 'tachyon' },
+      });
+      setActiveJob(started.job);
+      let done: Job | null = null;
+      for (let attempt = 0; attempt < 1200; attempt += 1) {
+        const response = await api<{ job: Job }>(`/api/v1/jobs/${started.job.id}`);
+        setActiveJob(response.job);
+        if (response.job.status !== 'queued' && response.job.status !== 'running') {
+          done = response.job;
+          break;
+        }
+        await new Promise((resolve) => window.setTimeout(resolve, 1500));
+      }
+      if (!done || done.status !== 'success') {
+        throw new Error(done?.error?.message ?? 'Установка Tachyon не завершилась');
+      }
+      toast.success('Tachyon установлен');
+      await detail.reload();
+    } catch (caught) {
+      toast.error(errorMessage(caught));
+    } finally {
+      setProductSwitchBusy(false);
+      setActiveJob(null);
+      setActiveJobLabel('');
+    }
+  }
+
   async function serviceAction(
     action: 'restart' | 'start' | 'stop' | 'enable' | 'disable',
   ): Promise<void> {
@@ -1471,6 +1513,16 @@ export function RouterDetailPage({ id }: { id: string }) {
         }
         actions={
           <>
+            {isAdmin && online && router.product !== 'tachyon' ? (
+              <Button
+                variant="ghost"
+                onClick={() => void switchToTachyon()}
+                busy={productSwitchBusy}
+                disabled={!canMutate || productSwitchBusy}
+              >
+                Установить Tachyon
+              </Button>
+            ) : null}
             <Button variant="ghost" onClick={() => void refreshState()} busy={busy} disabled={!online}>
               Прочитать состояние
             </Button>
@@ -1504,7 +1556,7 @@ export function RouterDetailPage({ id }: { id: string }) {
 
       {router.status === 'conflict' ? (
         <InfoBanner tone="warn">
-          На роутере обнаружено несколько продуктов (Forkop/Prokop/Podkop). Изменения запрещены: устраните конфликт
+          На роутере обнаружено несколько продуктов (Forkop/Prokop/Podkop/Tachyon). Изменения запрещены: устраните конфликт
           вручную, RoutX ничего не удаляет и не переустанавливает.
         </InfoBanner>
       ) : null}

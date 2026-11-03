@@ -100,6 +100,25 @@ function handle_command(cmd) {
 			if (!res.ok) return { status: "failed", error: { code: "select_proxy_failed", message: res.error } };
 			return { status: "success", result: res };
 		}
+		if (op == "product_switch") {
+			let target = util.as_string(args.product);
+			if (target != "tachyon")
+				return { status: "failed", error: { code: "unsupported_product_switch", message: "Переключение на " + target + " пока не поддерживается" } };
+			let command = "wget -O /tmp/tachyon-setup.sh https://raw.githubusercontent.com/Dushnilin/tachyon/main/install.sh && sh /tmp/tachyon-setup.sh -y --tachyon-core";
+			let res = runner.run([ "sh", "-c", command ], 1800);
+			let detected = platform.detect_product();
+			if (detected != "tachyon" && !res.ok)
+				return { status: "failed", error: { code: "product_switch_failed", message: runner.error_text(res) } };
+			if (detected != "tachyon")
+				return { status: "failed", error: { code: "product_switch_verify_failed", message: "после установки Tachyon не обнаружен" } };
+			let version = platform.product_version("tachyon");
+			return { status: "success", result: {
+				product: detected,
+				requested: target,
+				version: version,
+				install_output: util.truncate_text(util.mask_secrets(runner.error_text(res)), 2000)
+			} };
+		}
 		if (op == "sb_check_update") {
 			let res = runner.run_product(product, [ "component_action", "sing_box", "check_update" ], 120);
 			let parsed = util.json_parse(res.stdout);

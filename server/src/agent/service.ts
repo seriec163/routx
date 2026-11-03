@@ -454,7 +454,7 @@ export async function updateRouterFromProbe(
     `update routers set
         product = case
           when $2::boolean then 'conflict'
-          when $3 in ('forkop','prokop','podkop') then $3
+          when $3 in ('forkop','prokop','podkop','tachyon') then $3
           else product end,
         product_version = coalesce($4, product_version),
         agent_version = coalesce($5, agent_version),

@@ -1968,6 +1968,35 @@ export async function dnsBenchmark(ctx: HandlerContext, job: JobRow): Promise<Js
   }
 }
 
+export async function productSwitch(ctx: HandlerContext, job: JobRow): Promise<Json> {
+  const routerId = requireRouter(job);
+  const requested = asString(job.payload.product);
+  if (requested !== 'tachyon') {
+    throw new JobFailure(
+      'unsupported_product_switch',
+      `Переключение на ${requested || 'неизвестный продукт'} пока не поддерживается`,
+    );
+  }
+  await setJobPhase(ctx, job.id, 'product_switch', 10);
+  const raw = await runCommand(ctx, job, 'product_switch', { product: requested }, 1_800_000);
+  const product = asString(raw.product) || requested;
+  const version = asString(raw.version) || null;
+  await ctx.pool.query(
+    `update routers
+        set product = $2, product_version = $3, last_error = null,
+            status = case when $2 = 'conflict' then 'conflict' else 'online' end,
+            updated_at = now()
+      where id = $1`,
+    [routerId, product, version],
+  );
+  return {
+    product,
+    version,
+    requested,
+    install_output: asString(raw.install_output) || null,
+  };
+}
+
 export type JobHandler = (ctx: HandlerContext, job: JobRow) => Promise<Json>;
 
 export const HANDLERS: Record<string, JobHandler> = {
@@ -1983,6 +2012,7 @@ export const HANDLERS: Record<string, JobHandler> = {
   access_check: accessCheck,
   site_check: siteCheck,
   agent_update: agentUpdate,
+  product_switch: productSwitch,
   diagnostics,
   snapshot,
   restore: restoreSnapshot,

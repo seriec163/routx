@@ -17,6 +17,7 @@ export type JobType =
   | 'access_check'
   | 'site_check'
   | 'agent_update'
+  | 'product_switch'
   | 'diagnostics'
   | 'snapshot'
   | 'restore'

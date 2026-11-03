@@ -220,7 +220,7 @@ function reload(product) {
 }
 
 function apply_uci(product, items, base_state_hash, create_sections, local_lists) {
-	if (product != "forkop" && product != "prokop" && product != "podkop")
+	if (product != "forkop" && product != "prokop" && product != "podkop" && product != "tachyon")
 		return { ok: false, error: "неизвестный продукт" };
 
 	let current = state.read_state(product);
@@ -382,7 +382,7 @@ function connection_mask(url) {
 }
 
 function list_connections(product, args) {
-	if (product != "forkop" && product != "prokop" && product != "podkop")
+	if (product != "forkop" && product != "prokop" && product != "podkop" && product != "tachyon")
 		return { ok: false, error: "неизвестный продукт" };
 	let section = util.as_string(args.section);
 	if (match(section, SECTION_RE) == null)
@@ -588,7 +588,7 @@ function manage_podkop_connection(section, action, kind, value, args) {
 }
 
 function manage_connection(product, args) {
-	if (product != "forkop" && product != "prokop" && product != "podkop")
+	if (product != "forkop" && product != "prokop" && product != "podkop" && product != "tachyon")
 		return { ok: false, error: "неизвестный продукт" };
 	let section = util.as_string(args.section);
 	if (match(section, SECTION_RE) == null)
@@ -866,7 +866,7 @@ function select_proxy(product, args) {
 	if (group == "" || tag == "" || length(group) > 200 || length(tag) > 200 ||
 		match(group, /[\n\r]/) != null || match(tag, /[\n\r]/) != null)
 		return { ok: false, error: "invalid_proxy_tag" };
-	if (product != "forkop" && product != "prokop" && product != "podkop")
+	if (product != "forkop" && product != "prokop" && product != "podkop" && product != "tachyon")
 		return { ok: false, error: "неизвестный продукт" };
 	let res = product_api.set_group_proxy(product, group, tag);
 	if (!res.ok)
@@ -875,7 +875,7 @@ function select_proxy(product, args) {
 }
 
 function read_rules(product) {
-	if (product != "forkop" && product != "prokop" && product != "podkop")
+	if (product != "forkop" && product != "prokop" && product != "podkop" && product != "tachyon")
 		return { ok: false, error: "неизвестный продукт" };
 
 	let rs = state.read_state(product);
@@ -1075,7 +1075,7 @@ function apply_podkop_connections(section, links, args) {
 }
 
 function apply_connections(product, args) {
-	if (product != "forkop" && product != "prokop" && product != "podkop")
+	if (product != "forkop" && product != "prokop" && product != "podkop" && product != "tachyon")
 		return { ok: false, error: "неизвестный продукт" };
 	args = type(args) == "object" ? args : {};
 
