@@ -847,6 +847,10 @@ function RuleCard(props: {
         .map((line) => line.trim())
         .filter(Boolean);
   const manualCount = rule.manual_domains.length + rule.manual_ips.length;
+  const selectableLinks = rule.links.filter(
+    (connection) => connection.selectable && connection.proxy_tag,
+  );
+  const activeLink = selectableLinks.find((connection) => connection.active);
 
   return (
     <article className={`rule-card ${rule.enabled ? '' : 'rule-card-off'}`}>
@@ -913,6 +917,32 @@ function RuleCard(props: {
 
         <div>
           <p className="rule-section-title">Подключения</p>
+          {selectableLinks.length > 0 ? (
+            <Field
+              label="Активное подключение"
+              hint="Переключение через Clash API, без перезапуска Podkop."
+            >
+              <Select
+                value={activeLink?.proxy_tag ?? ''}
+                onChange={(value) => {
+                  const connection = selectableLinks.find(
+                    (item) => item.proxy_tag === value,
+                  );
+                  if (connection) props.onSelectProxy?.(rule.section, connection);
+                }}
+                disabled={props.disabled || !props.onSelectProxy}
+              >
+                {selectableLinks.map((connection) => (
+                  <option key={connection.proxy_tag} value={connection.proxy_tag}>
+                    {connection.label}
+                    {connection.delay_ms != null
+                      ? ` · ${Math.round(connection.delay_ms)} мс`
+                      : ''}
+                  </option>
+                ))}
+              </Select>
+            </Field>
+          ) : null}
           {rule.subscriptions.length + rule.links.length === 0 ? (
             <p className="muted-text small">Нет источников.</p>
           ) : (
@@ -938,11 +968,6 @@ function RuleCard(props: {
                   disabled={props.disabled}
                   onReplace={() => props.onReplace(connection)}
                   onDelete={() => props.onDelete(connection)}
-                  onSelect={
-                    props.onSelectProxy
-                      ? () => props.onSelectProxy!(rule.section, connection)
-                      : undefined
-                  }
                 />
               ))}
             </ul>
@@ -973,7 +998,6 @@ function ConnectionRow(props: {
   onReplace: () => void;
   onDelete: () => void;
   onExpand?: () => void;
-  onSelect?: () => void;
 }) {
   const { connection } = props;
   return (
@@ -997,11 +1021,6 @@ function ConnectionRow(props: {
         </span>
       </div>
       <div className="row-actions">
-        {props.onSelect && connection.selectable && !connection.active ? (
-          <Button size="sm" variant="ghost" onClick={props.onSelect} disabled={props.disabled}>
-            Выбрать
-          </Button>
-        ) : null}
         {props.onExpand ? (
           <Button size="sm" variant="ghost" onClick={props.onExpand} disabled={props.disabled}>
             Разобрать

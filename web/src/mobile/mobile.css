@@ -693,6 +693,25 @@ body.routx-app-body #root {
   margin-bottom: 6px;
 }
 
+.m-select-row {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 0 10px;
+  border-bottom: 1px solid var(--m-line);
+}
+
+.m-select {
+  width: 100%;
+  padding: 11px 13px;
+  border-radius: 14px;
+  border: 1px solid var(--m-line);
+  background: var(--m-card);
+  color: var(--m-ink);
+  font-size: 0.92rem;
+  font-family: inherit;
+}
+
 .m-listrow {
   display: flex;
   align-items: center;

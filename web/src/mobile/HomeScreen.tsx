@@ -102,6 +102,24 @@ export function HomeScreen() {
     return items;
   }, [rules.data]);
 
+  const selectGroups = useMemo(() => {
+    const map = new Map<
+      string,
+      { section: string; sectionLabel: string; items: ConnectionEntry[] }
+    >();
+    for (const connection of connections) {
+      if (!connection.selectable || !connection.proxy_tag) continue;
+      const group = map.get(connection.section) ?? {
+        section: connection.section,
+        sectionLabel: connection.sectionLabel,
+        items: [],
+      };
+      group.items.push(connection);
+      map.set(connection.section, group);
+    }
+    return [...map.values()];
+  }, [connections]);
+
   const status = selected ? STATUS[selected.status] ?? { label: selected.status, tone: 'warn' } : null;
   const latency = selected?.latency_ms;
   const time = now.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
@@ -392,6 +410,34 @@ export function HomeScreen() {
                 Обновить
               </button>
             </div>
+            {selectGroups.map((group) => {
+              const active = group.items.find((item) => item.active);
+              return (
+                <div className="m-select-row" key={group.section}>
+                  <span className="m-label">Активное · {group.sectionLabel}</span>
+                  <select
+                    className="m-select"
+                    value={active?.proxy_tag ?? ''}
+                    onChange={(event) => {
+                      const connection = group.items.find(
+                        (item) => item.proxy_tag === event.target.value,
+                      );
+                      if (connection) void selectConnection(connection);
+                    }}
+                    disabled={!selected || selected.status !== 'online' || action !== 'idle'}
+                  >
+                    {group.items.map((connection) => (
+                      <option key={connection.proxy_tag} value={connection.proxy_tag}>
+                        {connection.label}
+                        {connection.delay_ms != null
+                          ? ` · ${Math.round(connection.delay_ms)} мс`
+                          : ''}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              );
+            })}
             {connections.map((connection) => (
               <div
                 className="m-listrow"
