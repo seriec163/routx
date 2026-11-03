@@ -225,6 +225,7 @@ export function RouterRulesPanel(props: {
     rule: RuleView;
     connection: RuleConnectionView | null;
   } | null>(null);
+  const [subscriptionTarget, setSubscriptionTarget] = useState<RuleView | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<{
     rule: RuleView;
     connection: RuleConnectionView;
@@ -717,6 +718,7 @@ export function RouterRulesPanel(props: {
                 onDelete={(connection) => requestDelete(rule, connection)}
                 onExpandSubscription={isPodkop ? expandSubscription : undefined}
                 onSelectProxy={selectProxy}
+                onManageSubscription={isPodkop ? () => setSubscriptionTarget(rule) : undefined}
                 onToggle={() => requestToggle(rule)}
                 disabled={!online}
               />
@@ -758,6 +760,19 @@ export function RouterRulesPanel(props: {
           }}
           onApplied={async () => {
             if (diffRequest.afterApply) await diffRequest.afterApply();
+          }}
+        />
+      ) : null}
+
+      {subscriptionTarget ? (
+        <SubscriptionModal
+          routerId={props.routerId}
+          rule={subscriptionTarget}
+          onClose={() => setSubscriptionTarget(null)}
+          onDone={async () => {
+            setSubscriptionTarget(null);
+            await readLive();
+            props.onChanged();
           }}
         />
       ) : null}
@@ -834,6 +849,7 @@ function RuleCard(props: {
   onDelete: (connection: RuleConnectionView) => void;
   onExpandSubscription?: (section: string, connection: RuleConnectionView) => void;
   onSelectProxy?: (section: string, connection: RuleConnectionView) => void;
+  onManageSubscription?: () => void;
   onToggle: () => void;
 }) {
   const { rule } = props;
@@ -968,6 +984,7 @@ function RuleCard(props: {
                   disabled={props.disabled}
                   onReplace={() => props.onReplace(connection)}
                   onDelete={() => props.onDelete(connection)}
+                  onConfigure={connection.synthetic ? props.onEdit : undefined}
                 />
               ))}
             </ul>
@@ -984,6 +1001,16 @@ function RuleCard(props: {
             Добавить подключение
           </Button>
         ) : null}
+        {props.onManageSubscription ? (
+          <Button
+            size="sm"
+            variant="ghost"
+            onClick={props.onManageSubscription}
+            disabled={props.disabled}
+          >
+            Подписка
+          </Button>
+        ) : null}
         <Button size="sm" variant="ghost" onClick={props.onToggle} disabled={props.disabled}>
           {rule.enabled ? 'Выключить' : 'Включить'}
         </Button>
@@ -998,6 +1025,7 @@ function ConnectionRow(props: {
   onReplace: () => void;
   onDelete: () => void;
   onExpand?: () => void;
+  onConfigure?: () => void;
 }) {
   const { connection } = props;
   return (
@@ -1021,6 +1049,11 @@ function ConnectionRow(props: {
         </span>
       </div>
       <div className="row-actions">
+        {props.onConfigure ? (
+          <Button size="sm" variant="ghost" onClick={props.onConfigure} disabled={props.disabled}>
+            Изменить JSON
+          </Button>
+        ) : null}
         {props.onExpand ? (
           <Button size="sm" variant="ghost" onClick={props.onExpand} disabled={props.disabled}>
             Разобрать
@@ -2093,6 +2126,115 @@ function RuleDiffModal(props: {
           ) : null}
         </>
       ) : null}
+    </Modal>
+  );
+}
+
+function SubscriptionModal(props: {
+  routerId: string;
+  rule: RuleView;
+  onClose: () => void;
+  onDone: () => Promise<void>;
+}) {
+  const toast = useToast();
+  const [catalog, setCatalog] = useState<CatalogSubscription[]>([]);
+  const [catalogId, setCatalogId] = useState('');
+  const [url, setUrl] = useState('');
+  const [mode, setMode] = useState<'add' | 'replace'>('replace');
+  const [busy, setBusy] = useState(false);
+  const [job, setJob] = useState<Job | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    void api<{ items: CatalogSubscription[] }>('/api/v1/subscriptions')
+      .then((response) => setCatalog(response.items))
+      .catch(() => undefined);
+  }, []);
+
+  async function submit(): Promise<void> {
+    setBusy(true);
+    setError(null);
+    setJob(null);
+    try {
+      if (!catalogId && url.trim() === '') {
+        throw new Error('Выберите подписку из каталога или вставьте URL');
+      }
+      const response = await api<{
+        imported: number;
+        total: number;
+        skipped: number;
+        job: Job;
+      }>(`/api/v1/routers/${props.routerId}/podkop/subscription`, {
+        method: 'POST',
+        body: {
+          section: props.rule.section,
+          mode,
+          ...(catalogId ? { subscription_id: catalogId } : { url: url.trim() }),
+        },
+      });
+      setJob(response.job);
+      const done = await waitForJob(response.job, 600_000);
+      if (done.status !== 'success') {
+        throw new Error(done.error?.message ?? 'Не удалось применить подписку');
+      }
+      toast.success(
+        `Подписка разобрана: ${response.imported} подключений` +
+          (response.skipped > 0 ? `, пропущено: ${response.skipped}` : ''),
+      );
+      await props.onDone();
+    } catch (caught) {
+      setError(errorMessage(caught));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Modal
+      title={`Подписка для «${props.rule.label}»`}
+      onClose={props.onClose}
+      footer={
+        <>
+          <Button variant="ghost" onClick={props.onClose} disabled={busy}>
+            Отмена
+          </Button>
+          <Button onClick={() => void submit()} busy={busy}>
+            {mode === 'replace' ? 'Заменить ссылки' : 'Добавить ссылки'}
+          </Button>
+        </>
+      }
+    >
+      {error ? <ErrorBanner message={error} /> : null}
+      <p className="page-sub">
+        Podkop не поддерживает подписки. RoutX скачает её и сохранит ссылки как отдельные
+        подключения секции «{props.rule.section}».
+      </p>
+      <Field label="Режим">
+        <Select value={mode} onChange={(value) => setMode(value as 'add' | 'replace')}>
+          <option value="add">Добавить к текущим подключениям</option>
+          <option value="replace">Заменить все подключения секции</option>
+        </Select>
+      </Field>
+      <Field label="Подписка из каталога" hint="Необязательно, если вставляете URL вручную.">
+        <Select value={catalogId} onChange={setCatalogId}>
+          <option value="">Не выбирать</option>
+          {catalog.map((item) => (
+            <option key={item.id} value={item.id}>
+              {item.name} · {item.masked}
+            </option>
+          ))}
+        </Select>
+      </Field>
+      <Field label="URL подписки">
+        <TextInput value={url} onChange={setUrl} placeholder="https://…" />
+      </Field>
+      {mode === 'replace' ? (
+        <InfoBanner tone="warn">
+          Текущие ссылки секции будут заменены ссылками из подписки. Источник подписки
+          сохранится, чтобы её можно было обновить позже.
+        </InfoBanner>
+      ) : null}
+      {job ? <JobProgress job={job} label="Разбираем подписку" /> : null}
     </Modal>
   );
 }

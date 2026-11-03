@@ -693,6 +693,11 @@ body.routx-app-body #root {
   margin-bottom: 6px;
 }
 
+.m-list-actions {
+  display: flex;
+  gap: 8px;
+}
+
 .m-select-row {
   display: flex;
   flex-direction: column;

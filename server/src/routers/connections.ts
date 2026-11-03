@@ -86,6 +86,13 @@ async function storeImportedLinks(args: {
   parsed: { links: string[]; total: number; skipped: number };
   sourceConnectionId: string | null;
   userId: string;
+  replace?: boolean;
+  subscription?: {
+    url: string;
+    label: string;
+    catalogId?: string | null;
+    connectionId?: string | null;
+  };
 }): Promise<{
   imported: number;
   total: number;
@@ -93,9 +100,15 @@ async function storeImportedLinks(args: {
   job: Awaited<ReturnType<typeof enqueueJob>>;
 }> {
   const { pool, masterKey, routerId, section, parsed, sourceConnectionId, userId } = args;
+  if (args.replace) {
+    await pool.query(
+      "delete from router_connections where router_id = $1 and section = $2 and kind = 'vless'",
+      [routerId, section],
+    );
+  }
   const existing = await pool.query<{ id: string; secret_enc: string; label: string }>(
     `select id, secret_enc, label from router_connections
-      where router_id = $1 and section = $2`,
+      where router_id = $1 and section = $2 and kind = 'vless'`,
     [routerId, section],
   );
   const existingLinks = new Set<string>();
@@ -163,6 +176,48 @@ async function storeImportedLinks(args: {
         await client.query(
           'update router_connections set enabled = false, section = $2, updated_at = now() where id = $1',
           [sourceConnectionId, section],
+        );
+      }
+      await client.query('commit');
+    } catch (error) {
+      await client.query('rollback');
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
+  if (args.subscription) {
+    const sub = args.subscription;
+    const client = await pool.connect();
+    try {
+      await client.query('begin');
+      const existingSub = sub.connectionId
+        ? await client.query<{ id: string }>(
+            'select id from router_connections where id = $1 and router_id = $2',
+            [sub.connectionId, routerId],
+          )
+        : await client.query<{ id: string }>(
+            `select id from router_connections
+              where router_id = $1 and section = $2 and kind = 'subscription'
+              order by created_at asc limit 1`,
+            [routerId, section],
+          );
+      const secret = encryptSecret(sub.url, masterKey);
+      if (existingSub.rows[0]) {
+        await client.query(
+          `update router_connections
+              set section = $2, kind = 'subscription', label = $3, secret_enc = $4,
+                  enabled = false, subscription_id = $5, updated_at = now()
+            where id = $1`,
+          [existingSub.rows[0].id, section, sub.label.slice(0, 120), secret, sub.catalogId ?? null],
+        );
+      } else {
+        await client.query(
+          `insert into router_connections
+             (id, router_id, section, kind, label, secret_enc, enabled, created_by, subscription_id)
+           values ($1,$2,$3,'subscription',$4,$5,false,$6,$7)`,
+          [uuidv7(), routerId, section, sub.label.slice(0, 120), secret, userId, sub.catalogId ?? null],
         );
       }
       await client.query('commit');
@@ -937,6 +992,125 @@ export async function registerRouterConnectionRoutes(
         total: parsed.total,
         skipped,
         job: jobJson(job),
+      };
+    },
+  );
+
+  app.post(
+    '/api/v1/routers/:id/podkop/subscription',
+    { config: { rateLimit: { max: 10, timeWindow: '1 minute' } } },
+    async (request, reply) => {
+      const auth = requireUser(request);
+      const params = z.object({ id: z.string().uuid() }).parse(request.params);
+      const body = z
+        .object({
+          section: z.string().regex(/^[A-Za-z0-9_.-]{1,64}$/),
+          mode: z.enum(['add', 'replace']).default('add'),
+          subscription_id: z.string().uuid().optional(),
+          connection_id: z.string().uuid().optional(),
+          url: z.string().trim().max(2048).optional(),
+          label: z.string().trim().min(1).max(120).optional(),
+        })
+        .strict()
+        .refine(
+          (value) =>
+            [value.subscription_id, value.connection_id, value.url].filter(Boolean).length === 1,
+          { message: 'Укажите подписку из каталога, существующую подписку или URL' },
+        )
+        .parse(request.body);
+
+      const router = await getRouterForMutation(pool, auth, params.id);
+      assertOnline(router);
+      if (router.product !== 'podkop') {
+        throw badRequest('podkop_required', 'Подписки Podkop доступны только для Podkop');
+      }
+
+      let sourceUrl = body.url ?? '';
+      let label = body.label ?? 'Подписка';
+      let catalogId: string | null = null;
+      let sourceConnectionId: string | null = null;
+
+      if (body.subscription_id) {
+        const catalog = await loadAccessibleSubscription(pool, auth, body.subscription_id);
+        sourceUrl = decryptSecret(catalog.secret_enc, masterKey);
+        label = body.label ?? catalog.name;
+        catalogId = catalog.id;
+      } else if (body.connection_id) {
+        const source = await pool.query<{ kind: string; label: string; secret_enc: string }>(
+          'select kind, label, secret_enc from router_connections where id = $1 and router_id = $2',
+          [body.connection_id, router.id],
+        );
+        const row = source.rows[0];
+        if (!row || row.kind !== 'subscription') {
+          throw notFound('Подписка не найдена');
+        }
+        sourceUrl = decryptSecret(row.secret_enc, masterKey);
+        label = body.label ?? row.label;
+        sourceConnectionId = body.connection_id;
+      }
+
+      if (!SUBSCRIPTION_RE.test(sourceUrl)) {
+        throw badRequest(
+          'invalid_subscription',
+          'Ссылка на подписку должна начинаться с http:// или https://',
+        );
+      }
+
+      const state = await pool.query<{ managed: Record<string, unknown> | null }>(
+        'select managed from router_state where router_id = $1',
+        [router.id],
+      );
+      if (state.rows[0]?.managed?.[`section.${body.section}.connection_type`] === undefined) {
+        throw badRequest(
+          'section_missing',
+          `Секция «${body.section}» не найдена в Podkop. Сначала прочитайте состояние.`,
+        );
+      }
+
+      const parsed = await fetchSubscription(sourceUrl);
+      const result = await storeImportedLinks({
+        pool,
+        masterKey,
+        routerId: router.id,
+        section: body.section,
+        parsed,
+        sourceConnectionId: null,
+        userId: auth.userId,
+        replace: body.mode === 'replace',
+        subscription: {
+          url: sourceUrl,
+          label,
+          catalogId,
+          connectionId: sourceConnectionId,
+        },
+      });
+
+      await audit(pool, {
+        actorId: auth.userId,
+        actorRole: auth.role,
+        action: 'router.podkop_subscription_save',
+        targetType: 'router',
+        targetId: router.id,
+        routerId: router.id,
+        result: 'ok',
+        ip: request.ip,
+        userAgent: request.headers['user-agent'],
+        metadata: {
+          section: body.section,
+          mode: body.mode,
+          imported: result.imported,
+          total: result.total,
+          skipped: result.skipped,
+          job_id: result.job.id,
+        },
+      });
+
+      reply.code(202);
+      return {
+        imported: result.imported,
+        total: result.total,
+        skipped: result.skipped,
+        job: jobJson(result.job),
       };
     },
   );
