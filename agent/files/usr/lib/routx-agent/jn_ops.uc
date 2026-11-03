@@ -921,7 +921,10 @@ function apply_podkop_connections(section, links, args) {
 	if (mode == "outbound") {
 		if (length(links) == 0)
 			return { ok: true, section: section, links: 0, subscriptions: 0, created: 0, mode: mode };
-		return { ok: false, error: "podkop_outbound_managed_manually" };
+		// Пользователь добавляет ссылки в секцию, которая была outbound_json:
+		// переключаем её на selector и убираем старый JSON outbound.
+		mode = "selector";
+		cursor.delete("podkop", section, "outbound_json");
 	}
 
 	let link_state = load_link_state();
