@@ -44,6 +44,18 @@ describe('community lists', () => {
     expect(result.dropped).toEqual(['spotify']);
   });
 
+  it('drops lists that Forkop 2.0.0 does not know yet', () => {
+    const result = normalizeCommunityLists(
+      ['digitalocean', 'hetzner', 'ovh', 'cloudflare', 'facebook'],
+      'forkop',
+      '2.0.0',
+    );
+    expect(result.lists).toEqual(['cloudflare', 'facebook']);
+    expect(result.dropped).toEqual(['digitalocean', 'hetzner', 'ovh']);
+    const newer = normalizeCommunityLists(['digitalocean', 'hetzner'], 'forkop', '2.1.0');
+    expect(newer.lists).toEqual(['digitalocean', 'hetzner']);
+  });
+
   it('detects Forkop 2.x by version', () => {
     expect(isForkop2('forkop', '2.0.0')).toBe(true);
     expect(isForkop2('forkop', 'v2.1.0')).toBe(true);

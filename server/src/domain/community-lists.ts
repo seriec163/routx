@@ -40,6 +40,11 @@ const FORKOP2_LISTS = new Set([
   'ads',
 ]);
 
+// В Forkop 2.0.0 этих списков ещё нет; они появились в следующих релизах.
+const FORKOP2_200_LISTS = new Set(
+  [...FORKOP2_LISTS].filter((id) => !['digitalocean', 'hetzner', 'ovh'].includes(id)),
+);
+
 const LEGACY_TO_FORKOP2: Record<string, string[]> = {
   youtube: ['youtube'],
   discord: ['discord'],
@@ -96,6 +101,19 @@ export function isForkop2(product: string | null | undefined, version: string | 
   return match != null && Number(match[1]) >= 2;
 }
 
+export function isForkop20(
+  product: string | null | undefined,
+  version: string | null | undefined,
+): boolean {
+  if (!isForkop2(product, version)) return false;
+  const match = /^v?(\d+)\.(\d+)/.exec(String(version ?? '').trim());
+  return match != null && Number(match[1]) === 2 && Number(match[2]) === 0;
+}
+
+function forkop2Set(version: string | null | undefined): Set<string> {
+  return isForkop20('forkop', version) ? FORKOP2_200_LISTS : FORKOP2_LISTS;
+}
+
 export interface NormalizedLists {
   lists: string[];
   dropped: string[];
@@ -126,10 +144,11 @@ export function normalizeCommunityLists(
     }
     return { lists: result, dropped };
   }
+  const allowed = forkop2Set(version);
   for (const raw of lists) {
     const id = String(raw).trim();
     if (id === '') continue;
-    if (FORKOP2_LISTS.has(id)) {
+    if (allowed.has(id)) {
       if (!result.includes(id)) result.push(id);
       continue;
     }
@@ -138,7 +157,12 @@ export function normalizeCommunityLists(
       dropped.push(id);
       continue;
     }
-    for (const target of mapped) {
+    const targets = mapped.filter((target) => allowed.has(target));
+    if (targets.length === 0) {
+      dropped.push(id);
+      continue;
+    }
+    for (const target of targets) {
       if (!result.includes(target)) result.push(target);
     }
   }
