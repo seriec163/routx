@@ -1007,12 +1007,16 @@ function ConnectionRow(props: {
             Разобрать
           </Button>
         ) : null}
-        <Button size="sm" variant="ghost" onClick={props.onReplace} disabled={props.disabled}>
-          Заменить
-        </Button>
-        <Button size="sm" variant="subtle" onClick={props.onDelete} disabled={props.disabled}>
-          Удалить
-        </Button>
+        {!connection.synthetic ? (
+          <>
+            <Button size="sm" variant="ghost" onClick={props.onReplace} disabled={props.disabled}>
+              Заменить
+            </Button>
+            <Button size="sm" variant="subtle" onClick={props.onDelete} disabled={props.disabled}>
+              Удалить
+            </Button>
+          </>
+        ) : null}
       </div>
     </li>
   );

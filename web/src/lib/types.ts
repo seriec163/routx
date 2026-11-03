@@ -183,6 +183,7 @@ export interface RuleConnectionView {
   alive?: boolean | null;
   active?: boolean;
   selectable?: boolean;
+  synthetic?: boolean;
 }
 
 export interface RuleView {

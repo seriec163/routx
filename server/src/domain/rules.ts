@@ -40,6 +40,7 @@ export interface AgentLink {
   alive?: boolean | null;
   active?: boolean;
   selectable?: boolean;
+  synthetic?: boolean;
 }
 
 export interface AgentSection {
@@ -72,6 +73,7 @@ export interface RuleConnectionView {
   alive?: boolean | null;
   active?: boolean;
   selectable?: boolean;
+  synthetic?: boolean;
 }
 
 export interface RuleView {
@@ -356,6 +358,7 @@ export function buildRuleViews(input: {
           alive: item.alive ?? null,
           active: item.active === true,
           selectable: item.selectable === true,
+          synthetic: item.synthetic === true,
         });
       }
     } else {

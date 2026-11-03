@@ -402,8 +402,13 @@ export function HomeScreen() {
                 <span className="m-conn">
                   <span className="m-conn-label">{connection.label}</span>
                   <span className="m-conn-meta">
-                    {connection.kind === 'subscription' ? 'Подписка' : 'VLESS'} ·{' '}
-                    {connection.sectionLabel} · {connection.masked}
+                    {connection.synthetic
+                      ? 'JSON outbound'
+                      : connection.kind === 'subscription'
+                        ? 'Подписка'
+                        : 'VLESS'}{' '}
+                    · {connection.sectionLabel} ·{' '}
+                    {connection.synthetic ? connection.host : connection.masked}
                     {connection.missing ? ' · нет на роутере' : ''}
                     {!connection.enabled ? ' · выключено' : ''}
                     {connection.kind === 'link' && connection.active ? ' · активно' : ''}
@@ -424,22 +429,24 @@ export function HomeScreen() {
                     {action === 'select' ? 'Переключаем…' : 'Выбрать'}
                   </button>
                 ) : null}
-                <button
-                  type="button"
-                  className="m-mini"
-                  onClick={() => {
-                    setReplaceTarget(connection);
-                    setReplaceValue('');
-                    setReplaceError(null);
-                  }}
-                  disabled={
-                    !selected ||
-                    selected.status !== 'online' ||
-                    (!connection.id && !connection.name && !connection.hash)
-                  }
-                >
-                  Заменить
-                </button>
+                {!connection.synthetic ? (
+                  <button
+                    type="button"
+                    className="m-mini"
+                    onClick={() => {
+                      setReplaceTarget(connection);
+                      setReplaceValue('');
+                      setReplaceError(null);
+                    }}
+                    disabled={
+                      !selected ||
+                      selected.status !== 'online' ||
+                      (!connection.id && !connection.name && !connection.hash)
+                    }
+                  >
+                    Заменить
+                  </button>
+                ) : null}
               </div>
             ))}
           </section>

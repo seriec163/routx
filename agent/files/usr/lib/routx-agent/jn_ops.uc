@@ -447,6 +447,45 @@ function list_connections(product, args) {
 		index_value++;
 	}
 
+	if (product == "podkop") {
+		let mode = "";
+		let cursor_mode = uci.cursor();
+		let configured = util.as_string(cursor_mode.get("podkop", section, "proxy_config_type"));
+		if (configured == "outbound")
+			mode = "outbound";
+		else if (configured == "url" || configured == "selector" || configured == "urltest")
+			mode = configured;
+		else if (cursor_mode.get("podkop", section, "outbound_json") != null)
+			mode = "outbound";
+		else if (cursor_mode.get("podkop", section, "urltest_proxy_links") != null)
+			mode = "urltest";
+		else if (cursor_mode.get("podkop", section, "selector_proxy_links") != null)
+			mode = "selector";
+		else
+			mode = "url";
+		if (mode == "outbound") {
+			let raw = util.as_string(cursor_mode.get("podkop", section, "outbound_json"));
+			if (raw != "") {
+				let parsed = util.json_parse(raw);
+				let kind = type(parsed) == "object" ? util.as_string(parsed.type) : "";
+				let server = type(parsed) == "object" ? util.as_string(parsed.server) : "";
+				let port = type(parsed) == "object" ? util.as_string(parsed.server_port) : "";
+				let host = server;
+				if (host != "" && port != "")
+					host = host + ":" + port;
+				push(links, {
+					index: 0,
+					hash: util.sha256_hex(raw),
+					scheme: kind == "" ? "json" : kind,
+					host: host,
+					tail: "",
+					label: "JSON outbound",
+					synthetic: true
+				});
+			}
+		}
+	}
+
 	return { ok: true, section: section, subscriptions: subscriptions, links: links };
 }
 
@@ -711,7 +750,7 @@ function enrich_links(product, section, links, proxies) {
 				if (util.as_string(member) == tag)
 					link.selectable = true;
 		}
-		if (mode == "url")
+		if (mode == "url" || mode == "outbound")
 			link.active = true;
 		push(enriched, link);
 	}
