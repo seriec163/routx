@@ -110,6 +110,7 @@ export async function registerRouterRuleRoutes(
       extras,
       source: 'cache',
       product: router.product,
+      productVersion: router.product_version,
     });
 
     return {

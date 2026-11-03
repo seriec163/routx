@@ -1,6 +1,7 @@
 import { isIP } from 'node:net';
 import { sha256Hex } from '../lib/crypto.js';
 import type { UciValue } from './uci.js';
+import { displayCommunityLists } from './community-lists.js';
 import { isCommentLine, type RouterListExtras } from './uci.js';
 
 /**
@@ -239,6 +240,7 @@ export function buildRuleViews(input: {
   extras?: RouterListExtras;
   source: 'live' | 'cache';
   product?: string;
+  productVersion?: string | null;
 }): RuleView[] {
   const sectionNames = new Set<string>();
   const optionsFromState = extractOptions(input.managed, sectionNames);
@@ -268,6 +270,20 @@ export function buildRuleViews(input: {
     const domain = foldLegacyDomains(options);
     if (domain !== '') resources.domain = domain;
     else delete resources.domain;
+
+    if (Array.isArray(resources.community_lists)) {
+      resources.community_lists = displayCommunityLists(
+        resources.community_lists.map(String),
+        input.product,
+        input.productVersion,
+      );
+    } else if (typeof resources.community_lists === 'string') {
+      resources.community_lists = displayCommunityLists(
+        [resources.community_lists],
+        input.product,
+        input.productVersion,
+      );
+    }
 
     let manualDomains: string[] = [];
     let manualIps: string[] = [];

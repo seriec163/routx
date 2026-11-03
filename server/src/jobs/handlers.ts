@@ -19,6 +19,7 @@ import {
   type UciValue,
 } from '../domain/uci.js';
 import type { PlatformSettings } from '../settings.js';
+import { normalizeTemplateLists } from '../domain/community-lists.js';
 import { createCommand, waitForCommand } from '../agent/service.js';
 import { isCancelRequested } from './queue.js';
 import type { JobRow } from './queue.js';
@@ -237,6 +238,12 @@ export async function recomputeDrift(
 
   const result: Record<string, string> = {};
   const extras = await loadListExtras(pool, routerId);
+  const productRow = await pool.query<{ product: string; product_version: string | null }>(
+    'select product, product_version from routers where id = $1',
+    [routerId],
+  );
+  const product = productRow.rows[0]?.product ?? 'unknown';
+  const productVersion = productRow.rows[0]?.product_version ?? null;
   for (const assignment of assignments.rows) {
     try {
       const payload = templatePayloadSchema.parse(assignment.payload);
@@ -244,7 +251,8 @@ export async function recomputeDrift(
         ? assignment.exclusions.map(String)
         : [];
       const mapped = mapTemplateSections(payload, current);
-      const plan = computePlan(mapped.payload, current, exclusions, extras);
+      const normalized = normalizeTemplateLists(mapped.payload, product, productVersion);
+      const plan = computePlan(normalized, current, exclusions, extras);
       const drift = plan.items.length === 0 ? 'in_sync' : 'drift';
       result[assignment.template_id] = drift;
       await pool.query(
@@ -308,12 +316,18 @@ export async function diffTemplate(ctx: HandlerContext, job: JobRow): Promise<Js
   }
 
   const extras = await loadListExtras(ctx.pool, routerId);
-  const productRow = await ctx.pool.query<{ product: string; managed_section: string | null }>(
-    'select product, managed_section from routers where id = $1',
-    [routerId],
-  );
+  const productRow = await ctx.pool.query<{
+    product: string;
+    product_version: string | null;
+    managed_section: string | null;
+  }>('select product, product_version, managed_section from routers where id = $1', [routerId]);
   const product = productRow.rows[0]?.product ?? 'unknown';
+  const productVersion = productRow.rows[0]?.product_version ?? null;
   const managedSection = productRow.rows[0]?.managed_section ?? 'main';
+  mapped = {
+    ...mapped,
+    payload: normalizeTemplateLists(mapped.payload, product, productVersion),
+  };
 
   if (product === 'podkop') {
     const sectionNames = new Set([
@@ -466,7 +480,16 @@ export async function diffCustom(ctx: HandlerContext, job: JobRow): Promise<Json
   const current = await readState(ctx, job);
   await setJobPhase(ctx, job.id, 'plan', 60);
   const extras = await loadListExtras(ctx.pool, routerId);
-  const plan = computePlan(payload, current, exclusions, extras);
+  const productRow = await ctx.pool.query<{ product: string; product_version: string | null }>(
+    'select product, product_version from routers where id = $1',
+    [routerId],
+  );
+  const normalized = normalizeTemplateLists(
+    payload,
+    productRow.rows[0]?.product ?? 'unknown',
+    productRow.rows[0]?.product_version ?? null,
+  );
+  const plan = computePlan(normalized, current, exclusions, extras);
   const items = plan.items;
   const hash = diffHash(items);
   const baseHash = stateHash(current);
@@ -1672,11 +1695,12 @@ export async function listConnections(ctx: HandlerContext, job: JobRow): Promise
  */
 export async function readRules(ctx: HandlerContext, job: JobRow): Promise<Json> {
   const routerId = requireRouter(job);
-  const productRow = await ctx.pool.query<{ product: string }>(
-    'select product from routers where id = $1',
+  const productRow = await ctx.pool.query<{ product: string; product_version: string | null }>(
+    'select product, product_version from routers where id = $1',
     [routerId],
   );
   const product = productRow.rows[0]?.product ?? 'unknown';
+  const productVersion = productRow.rows[0]?.product_version ?? null;
   const raw = await runCommand(ctx, job, 'read_rules', {}, 90_000);
 
   // read_rules отдаёт секции, подписки и локальные списки, но не health/service.
@@ -1733,6 +1757,7 @@ export async function readRules(ctx: HandlerContext, job: JobRow): Promise<Json>
     extras,
     source: 'live',
     product,
+    productVersion,
   });
 
   // GET /rules собирает ручные записи из list_extras, без обращения к агенту.

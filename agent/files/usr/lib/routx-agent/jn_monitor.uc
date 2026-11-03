@@ -5,6 +5,7 @@ const fs = require("fs");
 const uci = require("uci");
 const util = require("jn_util");
 const run = require("jn_run");
+const product_api = require("jn_product_api");
 
 const OUTBOUND_ACTIONS = {
 	connection: true,
@@ -138,7 +139,7 @@ function active_delays(product, group, members, force) {
 	if (length(members) > MAX_ACTIVE_TAGS)
 		return { ok: false, error: "group_too_large" };
 
-	let res = cli(product, [ "clash_api", "get_group_latency", group, ACTIVE_TEST_TIMEOUT_MS ], 30);
+	let res = product_api.group_latency(product, group, ACTIVE_TEST_TIMEOUT_MS);
 	if (!res.ok || res.value.success === false)
 		return { ok: false, error: res.ok ? util.as_string(res.value.error) : res.error };
 
@@ -186,7 +187,7 @@ function probe_proxy(product, force) {
 		detail: ""
 	};
 
-	let proxies = cli(product, [ "clash_api", "get_proxies" ], 20);
+	let proxies = product_api.get_proxies(product, 20);
 	if (!proxies.ok || type(proxies.value.proxies) != "object") {
 		result.detail = "Clash API недоступен";
 		return result;
@@ -200,7 +201,7 @@ function probe_proxy(product, force) {
 			result.detail = "нет группы прокси";
 			return result;
 		}
-		let res = cli(product, [ "clash_api", "get_proxy_latency", single, "5000" ], 20);
+		let res = product_api.proxy_latency(product, single, "5000");
 		let delay = res.ok && res.value.success !== false && measured(res.value.delay)
 			? res.value.delay : null;
 		result.total_tags = 1;
@@ -406,7 +407,7 @@ function site_probe(product, targets) {
 		return { ok: false, error: "no_targets", message: "Нет адресов для проверки" };
 
 	let results = [];
-	let proxies = cli(product, [ "clash_api", "get_proxies" ], 20);
+	let proxies = product_api.get_proxies(product, 20);
 	let tag = "";
 	if (proxies.ok && type(proxies.value.proxies) == "object") {
 		let group = pick_group(proxies.value.proxies, enabled_sections(product));
@@ -419,7 +420,7 @@ function site_probe(product, targets) {
 			push(results, { target: target, ok: false, latency_ms: null, error: "vpn_unavailable" });
 			continue;
 		}
-		let res = cli(product, [ "clash_api", "get_proxy_latency", tag, "5000", target ], 20);
+		let res = product_api.proxy_latency(product, tag, "5000", target);
 		if (res.ok && res.value.success !== false && measured(res.value.delay))
 			push(results, { target: target, ok: true, latency_ms: res.value.delay });
 		else
@@ -441,7 +442,7 @@ function access_check(product, target) {
 	if (match(target, /^https?:\/\/[^ \t\r\n]+$/) == null)
 		return { ok: false, error: "invalid_target", message: "Некорректный адрес проверки" };
 
-	let proxies = cli(product, [ "clash_api", "get_proxies" ], 20);
+	let proxies = product_api.get_proxies(product, 20);
 	if (!proxies.ok || type(proxies.value.proxies) != "object")
 		return { ok: false, error: "clash_api_unavailable", message: "Clash API недоступен" };
 
@@ -510,6 +511,35 @@ function probe(product, force) {
 		} else {
 			result.service_state = "running & enabled";
 			result.health = "ok";
+		}
+	} else if (product_api.is_forkop_v2(product)) {
+		let status = cli(product, [ "get_status" ], 15);
+		if (!status.ok) {
+			result.service_state = "unknown";
+			result.health = "unknown";
+		} else {
+			let running = int(status.value.running) == 1;
+			let enabled = int(status.value.enabled) == 1;
+			result.service_state = util.as_string(status.value.status) ||
+				(running ? "running" : "stopped");
+			if (!running) {
+				result.health = "failed";
+			} else if (!enabled) {
+				result.health = "degraded";
+			} else {
+				result.health = "ok";
+				let checks = cli(product, [ "check_service" ], 20);
+				if (checks.ok && type(checks.value.core) == "object") {
+					let core = checks.value.core;
+					if (core.installed !== true) {
+						result.health = "degraded";
+						result.service_state += ", ядро не установлено";
+					} else if (util.as_string(core.problem) != "") {
+						result.health = "degraded";
+						result.service_state += ", " + util.as_string(core.problem);
+					}
+				}
+			}
 		}
 	} else {
 	let health = cli(product, [ "get_health_status" ], 20);

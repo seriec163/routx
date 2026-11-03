@@ -5,6 +5,7 @@ const util = require("jn_util");
 const allow = require("jn_allowlist");
 const run = require("jn_run");
 const state = require("jn_uci_state");
+const product_api = require("jn_product_api");
 
 /**
  * Prokop не может собрать конфигурацию, если не осталось ни одной включённой
@@ -706,13 +707,10 @@ function proxy_last_delay(proxy) {
 }
 
 function read_proxies(product) {
-	let res = run.run_product(product, [ "clash_api", "get_proxies" ], 20);
-	if (!res.ok)
+	let res = product_api.get_proxies(product, 20);
+	if (!res.ok || type(res.value.proxies) != "object")
 		return null;
-	let parsed = util.json_parse(res.stdout);
-	if (type(parsed) != "object" || type(parsed.proxies) != "object")
-		return null;
-	return parsed.proxies;
+	return res.value.proxies;
 }
 
 function enrich_links(product, section, links, proxies) {
@@ -769,10 +767,9 @@ function select_proxy(product, args) {
 		return { ok: false, error: "invalid_proxy_tag" };
 	if (product != "forkop" && product != "prokop" && product != "podkop")
 		return { ok: false, error: "неизвестный продукт" };
-	let res = run.run_product(product, [ "clash_api", "set_group_proxy", group, tag ], 30);
-	let parsed = util.json_parse(res.stdout);
-	if (!res.ok || type(parsed) != "object" || parsed.success !== true)
-		return { ok: false, error: run.error_text(res) };
+	let res = product_api.set_group_proxy(product, group, tag);
+	if (!res.ok)
+		return { ok: false, error: res.error };
 	return { ok: true, group: group, tag: tag };
 }
 
