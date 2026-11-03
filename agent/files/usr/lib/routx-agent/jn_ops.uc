@@ -105,24 +105,50 @@ function podkop_has_enabled_section() {
 	return false;
 }
 
+function podkop_log_tail() {
+	let res = run.run([ "logread", "-e", "podkop" ], 10);
+	if (!res.ok)
+		return "";
+	let lines = [];
+	for (let line in split(res.stdout, "\n")) {
+		let text = trim(line);
+		if (text != "")
+			push(lines, text);
+	}
+	let start = length(lines) > 6 ? length(lines) - 6 : 0;
+	let tail = [];
+	for (let i = start; i < length(lines); i++)
+		push(tail, lines[i]);
+	return util.truncate_text(util.mask_secrets(join(" | ", tail)), 900);
+}
+
 // Проверка результата reload для Podkop: конфиг sing-box должен проходить
 // `sing-box check`, а служба — реально работать. Иначе сервер откатит снимок.
 function podkop_reload_check() {
 	let path = podkop_config_path();
+	let tail = "";
 	if (util.file_exists(path)) {
 		let check = run.run([ "sing-box", "check", "-c", path ], 60);
-		if (!check.ok)
-			return { ok: false, error: "sing_box_check_failed: " + run.error_text(check) };
+		if (!check.ok) {
+			tail = podkop_log_tail();
+			return { ok: false, error: "sing_box_check_failed: " + run.error_text(check) +
+				(tail != "" ? " | " + tail : "") };
+		}
 	} else if (podkop_has_enabled_section()) {
 		return { ok: false, error: "sing_box_config_missing: " + path };
 	}
 	if (podkop_has_enabled_section()) {
 		let status = run.run_product("podkop", [ "get_sing_box_status" ], 20);
-		if (!status.ok)
-			return { ok: false, error: "sing_box_status_failed: " + run.error_text(status) };
+		if (!status.ok) {
+			tail = podkop_log_tail();
+			return { ok: false, error: "sing_box_status_failed: " + run.error_text(status) +
+				(tail != "" ? " | " + tail : "") };
+		}
 		let parsed = util.json_parse(status.stdout);
-		if (type(parsed) != "object" || int(parsed.running) != 1)
-			return { ok: false, error: "sing_box_not_running" };
+		if (type(parsed) != "object" || int(parsed.running) != 1) {
+			tail = podkop_log_tail();
+			return { ok: false, error: "sing_box_not_running" + (tail != "" ? ": " + tail : "") };
+		}
 	}
 	return { ok: true };
 }
@@ -140,7 +166,7 @@ function reload(product) {
 			(match(check.error, /no such file|rule-set|not found/i) != null ||
 			 check.error == "sing_box_not_running");
 		if (transient || (res.ok && !check.ok)) {
-			for (let i = 0; i < 18; i++) {
+			for (let i = 0; i < 24; i++) {
 				sleep(5000);
 				let next = podkop_reload_check();
 				if (next.ok) {
@@ -158,7 +184,8 @@ function reload(product) {
 		}
 		if (!check.ok)
 			return check;
-		return { ok: false, error: run.error_text(res) };
+		let tail = podkop_log_tail();
+		return { ok: false, error: run.error_text(res) + (tail != "" ? " | " + tail : "") };
 	}
 
 	// Для Prokop/Forkop сначала используем штатный CLI: init-скрипт может
