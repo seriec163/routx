@@ -130,9 +130,35 @@ function podkop_reload_check() {
 function reload(product) {
 	if (product == "podkop") {
 		let res = run.run_product("podkop", ["reload"], 120);
-		if (!res.ok)
-			return { ok: false, error: run.error_text(res) };
-		return podkop_reload_check();
+		let check = podkop_reload_check();
+		if (res.ok && check.ok)
+			return { ok: true };
+
+		// Podkop обновляет community-списки в фоне. Если sing-box не стартовал
+		// из-за ещё не скачанных rule-set, ждём обновление и повторяем.
+		let transient = !check.ok &&
+			(match(check.error, /no such file|rule-set|not found/i) != null ||
+			 check.error == "sing_box_not_running");
+		if (transient || (res.ok && !check.ok)) {
+			for (let i = 0; i < 18; i++) {
+				sleep(5000);
+				let next = podkop_reload_check();
+				if (next.ok) {
+					if (res.ok)
+						return { ok: true };
+					res = run.run_product("podkop", ["reload"], 120);
+					let after = podkop_reload_check();
+					if (res.ok && after.ok)
+						return { ok: true };
+					check = after;
+				} else {
+					check = next;
+				}
+			}
+		}
+		if (!check.ok)
+			return check;
+		return { ok: false, error: run.error_text(res) };
 	}
 
 	// Для Prokop/Forkop сначала используем штатный CLI: init-скрипт может

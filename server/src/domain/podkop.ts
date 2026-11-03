@@ -24,6 +24,36 @@ export const PODKOP_CONNECTION_TYPES = ['proxy', 'vpn', 'block', 'exclusion'] as
 export const PODKOP_PROXY_MODES = ['url', 'selector', 'urltest', 'outbound'] as const;
 export const PODKOP_LIST_TYPES = ['disabled', 'dynamic', 'text'] as const;
 
+// Список community-сервисов Podkop (podkop/files/usr/lib/constants.sh).
+// В каталоге RoutX есть и другие списки (github, supercell), которые Podkop
+// не принимает: их нужно пропускать, иначе reload завершается fatal-ошибкой.
+export const PODKOP_COMMUNITY_SERVICES = new Set([
+  'russia_inside',
+  'russia_outside',
+  'ukraine_inside',
+  'geoblock',
+  'block',
+  'porn',
+  'news',
+  'anime',
+  'youtube',
+  'hdrezka',
+  'tiktok',
+  'google_ai',
+  'google_play',
+  'hodca',
+  'discord',
+  'meta',
+  'twitter',
+  'cloudflare',
+  'cloudfront',
+  'digitalocean',
+  'hetzner',
+  'ovh',
+  'telegram',
+  'roblox',
+]);
+
 export type PodkopConnectionType = (typeof PODKOP_CONNECTION_TYPES)[number];
 export type PodkopProxyMode = (typeof PODKOP_PROXY_MODES)[number];
 export type PodkopListType = (typeof PODKOP_LIST_TYPES)[number];
@@ -49,6 +79,7 @@ export interface PodkopPlan {
   items: DiffItem[];
   createSections: string[];
   desiredHash: string;
+  warnings: string[];
 }
 
 export const podkopSectionInputSchema = z
@@ -200,6 +231,7 @@ export function computePodkopPlan(
   }
 
   const desired = new Map<string, UciValue>();
+  const warnings: string[] = [];
   const put = (option: string, value: UciValue): void => {
     desired.set(`section.${input.section}.${option}`, value);
   };
@@ -219,13 +251,23 @@ export function computePodkopPlan(
 
   if (input.community_lists !== undefined) {
     const ids: string[] = [];
+    const skipped: string[] = [];
     for (const raw of input.community_lists) {
       const id = String(raw).trim();
       if (id === '') continue;
       if (!ROUTING_SERVICE_IDS.has(id)) {
         throw badRequest('unknown_community_list', `Неизвестный список <${id}>`);
       }
+      if (!PODKOP_COMMUNITY_SERVICES.has(id)) {
+        if (!skipped.includes(id)) skipped.push(id);
+        continue;
+      }
       if (!ids.includes(id)) ids.push(id);
+    }
+    if (skipped.length > 0) {
+      warnings.push(
+        `Списки ${skipped.join(', ')} не поддерживаются Podkop и пропущены`,
+      );
     }
     put('community_lists', ids.length > 0 ? ids : null);
   }
@@ -307,6 +349,7 @@ export function computePodkopPlan(
     items,
     createSections: input.create ? [input.section] : [],
     desiredHash,
+    warnings,
   };
 }
 

@@ -45,6 +45,8 @@
 `exclusion`. В форме правила доступны:
 
 * **Community Lists** — те же сервисы из каталога, что у Prokop/Forkop;
+  списки, которые Podkop не поддерживает (`github`, `supercell`),
+  отфильтровываются автоматически;
 * **User Domain List Type**:
   * `dynamic` — список UCI `user_domains`, по одному домену на строку;
   * `text` — текстовый список `user_domains_text` (домены через запятую или

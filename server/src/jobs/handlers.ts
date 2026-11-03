@@ -379,7 +379,7 @@ export async function diffTemplate(ctx: HandlerContext, job: JobRow): Promise<Js
       counts,
       total: items.length,
       section_map: mapped.sectionMap,
-      warnings: mapped.warnings,
+      warnings: [...mapped.warnings, ...plan.warnings],
     };
   }
 
@@ -589,7 +589,7 @@ export async function diffPodkop(ctx: HandlerContext, job: JobRow): Promise<Json
     counts,
     total: items.length,
     section_map: {},
-    warnings: [],
+    warnings: plan.warnings,
   };
 }
 
