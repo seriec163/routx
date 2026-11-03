@@ -53,13 +53,6 @@ const ACTION_SHORT: Record<string, string> = {
   dns: 'только DNS',
 };
 
-const PODKOP_SERVICE_IDS = new Set([
-  'russia_inside', 'russia_outside', 'ukraine_inside', 'geoblock', 'block',
-  'porn', 'news', 'anime', 'youtube', 'hdrezka', 'tiktok', 'google_ai',
-  'google_play', 'hodca', 'discord', 'meta', 'twitter', 'cloudflare',
-  'cloudfront', 'digitalocean', 'hetzner', 'ovh', 'telegram', 'roblox',
-]);
-
 const CONNECTION_ACTIONS = new Set(['connection', 'proxy', 'outbound', 'vpn']);
 
 const PODKOP_OPTION_KEYS = new Set([
@@ -208,7 +201,7 @@ export function RouterRulesPanel(props: {
 }) {
   const toast = useToast();
   const catalog = useApi<{ services: RoutingService[]; actions: RoutingAction[] }>(
-    '/api/v1/settings/routing-catalog',
+    `/api/v1/settings/routing-catalog?router_id=${encodeURIComponent(props.routerId)}`,
   );
   const templates = useApi<{ items: TemplateListItem[] }>('/api/v1/templates');
   const [rules, setRules] = useState<RuleView[]>([]);
@@ -241,9 +234,7 @@ export function RouterRulesPanel(props: {
   const online = props.router.status === 'online';
   const isPodkop = props.router.product === 'podkop';
   const actions = catalog.data?.actions?.length ? catalog.data.actions : ACTION_FALLBACK;
-  const services = (catalog.data?.services ?? []).filter(
-    (service) => !isPodkop || PODKOP_SERVICE_IDS.has(service.id),
-  );
+  const services = catalog.data?.services ?? [];
 
   useEffect(() => {
     void loadCached();

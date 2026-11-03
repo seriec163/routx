@@ -6,6 +6,8 @@ import { requireUser } from '../auth/service.js';
 import { badRequest, notFound } from '../lib/errors.js';
 import { uuidv7 } from '../lib/ids.js';
 import { loadSettings } from '../settings.js';
+import { getRouter } from '../routers/service.js';
+import { isForkop2 } from '../domain/community-lists.js';
 import {
   buildPlan,
   presetFromPayload,
@@ -472,12 +474,22 @@ export async function registerTemplateRoutes(app: FastifyInstance, ctx: RouteCon
   });
 
   app.get('/api/v1/settings/routing-catalog', async (request) => {
-    requireUser(request);
+    const auth = requireUser(request);
+    const query = z
+      .object({ router_id: z.string().uuid().optional() })
+      .parse(request.query ?? {});
     const { ROUTING_ACTIONS, ROUTING_SERVICES, FORKOP2_SERVICES } = await import(
       '../domain/routing.js'
     );
+    let services = ROUTING_SERVICES;
+    if (query.router_id) {
+      const router = await getRouter(pool, auth, query.router_id);
+      if (isForkop2(router.product, router.product_version)) {
+        services = FORKOP2_SERVICES;
+      }
+    }
     return {
-      services: [...ROUTING_SERVICES, ...FORKOP2_SERVICES],
+      services,
       actions: ROUTING_ACTIONS,
     };
   });
