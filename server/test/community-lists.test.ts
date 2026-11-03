@@ -24,13 +24,13 @@ describe('community lists', () => {
     expect(result.dropped).toEqual(['cloudfront']);
   });
 
-  it('keeps Forkop 2.x lists and shows them as familiar IDs', () => {
+  it('keeps Forkop 2.x lists in the UI catalog', () => {
     const result = normalizeCommunityLists(['facebook', 'x', 'ru_blocked_all'], 'forkop', '2.0.0');
     expect(result.lists).toEqual(['facebook', 'x', 'ru_blocked_all']);
     expect(displayCommunityLists(result.lists, 'forkop', '2.0.0')).toEqual([
-      'meta',
-      'twitter',
-      'russia_outside',
+      'facebook',
+      'x',
+      'ru_blocked_all',
     ]);
   });
 

@@ -145,18 +145,17 @@ export function normalizeCommunityLists(
   return { lists: result, dropped };
 }
 
-/** Forkop 2.x ID → привычный ID каталога RoutX для отображения. */
+/** Приводит список к ID, которые понимает каталог интерфейса. */
 export function displayCommunityLists(
   lists: readonly string[],
   product: string | null | undefined,
   version: string | null | undefined,
 ): string[] {
-  if (!isForkop2(product, version)) return [...lists];
   const result: string[] = [];
   for (const raw of lists) {
     const id = String(raw).trim();
     if (id === '') continue;
-    const mapped = FORKOP2_TO_LEGACY[id] ?? id;
+    const mapped = isForkop2(product, version) ? id : FORKOP2_TO_LEGACY[id] ?? id;
     if (!result.includes(mapped)) result.push(mapped);
   }
   return result;
