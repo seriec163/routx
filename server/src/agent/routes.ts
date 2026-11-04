@@ -181,11 +181,35 @@ pkg_has() {
     return 1
   fi
 }
+pkg_mgr_for() {
+  if command -v opkg >/dev/null 2>&1 && opkg list-installed 2>/dev/null | grep -q "^$1 "; then
+    echo "opkg"
+    return 0
+  fi
+  if command -v apk >/dev/null 2>&1 && apk info -e "$1" >/dev/null 2>&1; then
+    echo "apk"
+    return 0
+  fi
+  echo ""
+}
+
 pkg_del() {
-  if command -v opkg >/dev/null 2>&1; then
-    opkg remove --force-depends "$1" >/dev/null 2>&1 || true
-  elif command -v apk >/dev/null 2>&1; then
-    apk del "$1" >/dev/null 2>&1 || true
+  delete_pkg_mgr="$(pkg_mgr_for "$1")"
+  if [ "$delete_pkg_mgr" = "opkg" ]; then
+    # Ждём, если другой установщик держит lock.
+    if [ -f /var/lock/opkg.lock ]; then
+      lock_wait=0
+      while [ -f /var/lock/opkg.lock ] && [ "$lock_wait" -lt 30 ]; do
+        sleep 1
+        lock_wait=$((lock_wait + 1))
+      done
+    fi
+    # Сначала снимаем зависимые пакеты, затем основной.
+    opkg remove --force-depends --force-removal-of-dependent-packages "$1" >/dev/null 2>&1 ||
+      opkg remove --force-depends "$1" >/dev/null 2>&1 || true
+  elif [ "$delete_pkg_mgr" = "apk" ]; then
+    apk del "$1" >/dev/null 2>&1 ||
+      apk del --force-broken-world "$1" >/dev/null 2>&1 || true
   fi
 }
 
@@ -200,10 +224,10 @@ product_label() {
 
 product_packages() {
   case "$1" in
-    prokop) echo "prokop luci-app-prokop luci-i18n-prokop-ru" ;;
-    forkop) echo "forkop luci-app-forkop luci-i18n-forkop-ru sing-box-forkop" ;;
-    podkop) echo "podkop luci-app-podkop" ;;
-    tachyon) echo "tachyon luci-app-tachyon luci-i18n-tachyon-ru tachyon-core" ;;
+    prokop) echo "luci-i18n-prokop-ru luci-app-prokop prokop" ;;
+    forkop) echo "luci-i18n-forkop-ru luci-app-forkop forkop sing-box-forkop" ;;
+    podkop) echo "luci-app-podkop podkop" ;;
+    tachyon) echo "luci-i18n-tachyon-ru luci-app-tachyon tachyon tachyon-core" ;;
   esac
 }
 
@@ -363,12 +387,14 @@ if [ "$FOUND" -gt 1 ]; then
   fi
   PRODUCT="$KEEP"
   REMAIN=0
-  has_prokop && REMAIN=$((REMAIN + 1))
-  has_forkop && REMAIN=$((REMAIN + 1))
-  has_podkop && REMAIN=$((REMAIN + 1))
-  has_tachyon && REMAIN=$((REMAIN + 1))
+  REMAIN_NAMES=""
+  has_prokop && { REMAIN=$((REMAIN + 1)); REMAIN_NAMES="$REMAIN_NAMES prokop"; }
+  has_forkop && { REMAIN=$((REMAIN + 1)); REMAIN_NAMES="$REMAIN_NAMES forkop"; }
+  has_podkop && { REMAIN=$((REMAIN + 1)); REMAIN_NAMES="$REMAIN_NAMES podkop"; }
+  has_tachyon && { REMAIN=$((REMAIN + 1)); REMAIN_NAMES="$REMAIN_NAMES tachyon"; }
   if [ "$REMAIN" -gt 1 ]; then
-    echo "Не удалось удалить лишние продукты (осталось $REMAIN). Устраните конфликт вручную." >&2
+    echo "Не удалось удалить лишние продукты:$REMAIN_NAMES. Устраните конфликт вручную." >&2
+    echo "Проверьте: opkg list-installed | grep -E 'forkop|prokop|podkop|tachyon' и /var/log/opkg.log" >&2
     exit 1
   fi
   echo "Оставлен активным: $(product_label "$PRODUCT") $PRODUCT." >&2
