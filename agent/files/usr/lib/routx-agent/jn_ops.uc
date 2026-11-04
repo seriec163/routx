@@ -1202,6 +1202,72 @@ function restore_section_options(product, args) {
 	return { ok: true, section: section, restored: restored };
 }
 
+function apply_tachyon_subscription(section, subscriptions, args) {
+	let sub = subscriptions[0];
+	if (type(sub) != "object" || util.as_string(sub.url) == "")
+		return { ok: false, error: "invalid_subscription" };
+	let cursor = uci.cursor();
+	if (cursor.get("tachyon", section) == null)
+		cursor.set("tachyon", section, "section");
+	let all = cursor.get_all("tachyon");
+	if (type(all) != "object")
+		all = {};
+
+	// Убираем JSON и старые источники подключений; DPI/desync-источники
+	// (zapret/byedpi/desync) не трогаем.
+	let source_ids = {};
+	for (let sname in all) {
+		let sect = all[sname];
+		if (type(sect) != "object" || sect[".type"] != "outbound_source")
+			continue;
+		let stype = lc(util.as_string(sect.source_type));
+		if (stype == "zapret" || stype == "zapret2" || stype == "byedpi" || stype == "desync")
+			continue;
+		source_ids[sname] = true;
+	}
+	let refs = all[section] != null && all[section].outbound_source_refs != null
+		? all[section].outbound_source_refs
+		: [];
+	if (type(refs) != "array")
+		refs = [ refs ];
+	let keep = [];
+	for (let ref in refs) {
+		let value = util.as_string(ref);
+		if (value != "" && source_ids[value] !== true)
+			push(keep, value);
+	}
+	for (let sname in source_ids)
+		cursor.delete("tachyon", sname);
+	for (let key in [ "selector_proxy_links", "proxy_links", "outbound_jsons", "outbound_json" ])
+		cursor.delete("tachyon", section, key);
+
+	let source_name = "src_sub_" + replace(section, /[^A-Za-z0-9_]/g, "_");
+	cursor.delete("tachyon", source_name);
+	cursor.set("tachyon", source_name, "outbound_source");
+	cursor.set("tachyon", source_name, "enabled", "1");
+	cursor.set("tachyon", source_name, "name", util.as_string(sub.label) != "" ? util.as_string(sub.label) : "Подписка");
+	cursor.set("tachyon", source_name, "source_type", "subscription");
+	cursor.set("tachyon", source_name, "url", util.as_string(sub.url));
+	cursor.set("tachyon", source_name, "subscription_update_enabled", "1");
+	cursor.set("tachyon", source_name, "subscription_update_interval", "1h");
+	cursor.set("tachyon", source_name, "download_via_proxy_enabled", "0");
+	cursor.set("tachyon", source_name, "prefix_nodes", "0");
+	cursor.set("tachyon", source_name, "include_urltest_groups", "1");
+
+	keep = util.dedupe(keep);
+	push(keep, source_name);
+	cursor.delete("tachyon", section, "outbound_source_refs");
+	cursor.set("tachyon", section, "outbound_source_refs", keep);
+	cursor.set("tachyon", section, "enabled", "1");
+	cursor.set("tachyon", section, "action", "connection");
+	if (cursor.commit("tachyon") == null)
+		return { ok: false, error: "uci commit failed" };
+	let reload_res = reload("tachyon");
+	if (!reload_res.ok)
+		return { ok: false, error: reload_res.error };
+	return { ok: true, section: section, subscriptions: 1, source: source_name };
+}
+
 function apply_connections(product, args) {
 	if (product != "forkop" && product != "prokop" && product != "podkop" && product != "tachyon")
 		return { ok: false, error: "неизвестный продукт" };
@@ -1238,6 +1304,8 @@ function apply_connections(product, args) {
 	}
 
 	let cursor = uci.cursor();
+	if (product == "tachyon" && length(subscriptions) > 0)
+		return apply_tachyon_subscription(section, subscriptions, args);
 	let exists = cursor.get(product, section);
 	if (exists == null) {
 		cursor.set(product, section, "section");
