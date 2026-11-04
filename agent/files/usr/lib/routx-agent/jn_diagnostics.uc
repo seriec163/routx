@@ -152,13 +152,13 @@ function diagnostics_full(product) {
 			state: proxies.ok ? "ok" : "error",
 			details: proxies.ok ? util.truncate_text(proxies.stdout, 20000) : run.error_text(proxies)
 		});
-		let logs = run.run([ "logread", "-e", "tachyon" ], 20);
+		let logs = run.run([ "sh", "-c", "logread -e tachyon | tail -n 250" ], 20);
 		push(report.checks, {
 			name: "tachyon_logs",
 			state: logs.ok ? "ok" : "warning",
-			details: logs.ok ? util.truncate_text(util.mask_secrets(logs.stdout), 60000) : run.error_text(logs)
+			details: logs.ok ? util.truncate_text(util.mask_secrets(logs.stdout), 30000) : run.error_text(logs)
 		});
-		let sb_logs = run.run([ "logread", "-e", "sing-box" ], 20);
+		let sb_logs = run.run([ "sh", "-c", "logread -e sing-box | tail -n 150" ], 20);
 		push(report.checks, {
 			name: "sing_box_logs",
 			state: sb_logs.ok ? "ok" : "warning",
