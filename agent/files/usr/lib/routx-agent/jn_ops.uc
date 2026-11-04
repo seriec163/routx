@@ -1309,6 +1309,8 @@ function apply_connections(product, args) {
 
 	let subscriptions = [];
 	stage = "subscriptions";
+	if (args.subscriptions != null && type(args.subscriptions) != "array")
+		return { ok: false, error: "subscriptions_not_array:" + type(args.subscriptions) + ":" + sprintf("%J", args.subscriptions) };
 	for (let raw in (args.subscriptions || [])) {
 		let name = util.as_string(raw.name);
 		let url = trim(util.as_string(raw.url));
