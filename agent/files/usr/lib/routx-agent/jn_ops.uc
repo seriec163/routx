@@ -420,6 +420,21 @@ function list_connections(product, args) {
 			let info = connection_mask(sect.url);
 			push(subscriptions, { name: sname, tag: trim(util.as_string(sect.tag)), host: info.host, tail: info.tail });
 		}
+		// Tachyon хранит подписку в outbound_source, а не в subscription_url.
+		for (let sname in all) {
+			let sect = all[sname];
+			if (type(sect) != "object" || sect[".type"] != "outbound_source")
+				continue;
+			if (util.as_string(sect.section) != section)
+				continue;
+			if (lc(util.as_string(sect.source_type)) != "subscription")
+				continue;
+			let url = util.as_string(sect.url);
+			if (url == "")
+				continue;
+			let info = connection_mask(url);
+			push(subscriptions, { name: sname, tag: trim(util.as_string(sect.tag)), host: info.host, tail: info.tail });
+		}
 	}
 
 	let links = [];
