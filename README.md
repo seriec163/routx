@@ -1,174 +1,296 @@
 # RoutX
 
-Централизованное управление парком роутеров OpenWrt с уже установленным **Forkop**, **Prokop** или **Podkop**: шаблоны конфигурации, подтверждаемое применение с откатом, мониторинг, диагностика, управление версиями sing-box.
+Централизованное управление парком роутеров OpenWrt с продуктами
+**Tachyon**, **Forkop**, **Prokop** и **Podkop**: шаблоны конфигурации,
+подписки и подключения, мониторинг, диагностика, снимки с откатом, задания,
+обновление агентов и смена продукта на роутере.
 
-> **Статус: этап 1 завершён (2026-10-27).** Реализованы каркас сервера Fastify 5 на Node.js, PostgreSQL 16 с миграциями, React SPA, Docker Compose, CI и runbook. Для Forkop/Prokop RoutX работает поверх запущенного продукта; Podkop поддерживает мониторинг, диагностику, чтение и редактирование секций/подключений с проверкой `sing-box check` и автоматическим откатом.
+RoutX не заменяет продукт на роутере без команды: он работает поверх
+установленного продукта и меняет его только при явной смене/переустановке
+из панели.
 
-## Итерация «имена, списки, подключения»
+## Возможности
 
-* В профиль пользователя добавлены имя, отчество и фамилия; приветствие на дашборде — «Здравствуйте, Артур Николаевич». Поля редактируют сам пользователь в «Аккаунте» и суперадминистратор в «Пользователях».
-* Редактор шаблона переведён с JSON на галочки: каталог ресурсов Prokop/Forkop (`community_lists`), URL-списки (`rule_set`, `remote_domain_lists`, `remote_subnet_lists`) и ручные домены/IP (`domain_ip_lists`).
-* Шаблон может явно создать управляемую секцию (`create_sections`) и задать её действие. Пользовательские секции и VLESS/Sub-подключения не перезаписываются.
-* В настройках роутера появилась вкладка «Свои списки»: дополнения к шаблону (URL или домены/IP) хранятся на сервере и подмешиваются в diff/apply.
-* Вкладка «Подключения»: подписка и/или VLESS-ссылки. Ссылки передаются по TLS, хранятся в AES-256-GCM и показываются в UI маской. RoutX пишет их в отдельную секцию `router_control` (`subscription_url` / `selector_proxy_links`).
+* **Один роутер — один продукт**: Tachyon, Forkop, Prokop или Podkop.
+* **Смена и переустановка продукта** из панели с переносом настроек,
+  списков, подписок и подключений.
+* **Каталог версий** из GitHub Releases. Для Tachyon можно выбрать версию;
+  Forkop, Prokop и Podkop ставятся официальным установщиком (последняя
+  версия).
+* **Список установленных пакетов** на роутере и удаление лишних пакетов.
+* **SSH-установщик RoutX** находит несколько продуктов, показывает версии и
+  пакеты, позволяет выбрать активный продукт и удаляет остальные вместе с
+  конфигами, состоянием и nft-таблицами.
+* **Подписки и VLESS**: Tachyon хранит подписку как native
+  `outbound_source`, Forkop/Prokop — как `subscription_url`, Podkop — как
+  отдельные ссылки.
+* **Шаблоны и правила**: встроенные списки, домены, подсети,
+  пользовательские списки, секции и действия.
+* **Мониторинг**: health, proxy health, задержка, direct/VPN IP, история.
+* **Диагностика** quick/full, отчёты и скачивание.
+* **Снимки и откат** перед изменениями.
+* **Асинхронные задания** с прогрессом, таймаутами и журналом.
+* **Обновление агентов** из панели для версий 1.5.0+; более старые —
+  один раз вручную.
+* **PWA и мобильный интерфейс**, push-уведомления, QR-вход.
 
----
+## Требования
 
-## Что уже сделано
+### Сервер с Docker
 
-| Артефакт | Содержание |
-|---|---|
-| [`docs/audit/INTEGRATION_MAP.md`](docs/audit/INTEGRATION_MAP.md) | Проверенные по исходникам Forkop/Prokop команды CLI, UCI-схема, секреты, reload, async-задания, диагностика, sing-box, снапшоты, совместимость платформ, трассировка требований, риски |
-| [`docs/architecture/ARCHITECTURE.md`](docs/architecture/ARCHITECTURE.md) | Компоненты, потоки, мониторинг, rollout sing-box, стек, этапы, критерии приёмки |
-| [`docs/architecture/DECISIONS.md`](docs/architecture/DECISIONS.md) | Принятые решения §20, обоснования, последствия; журнал решений |
-| [`docs/architecture/DATA_MODEL.md`](docs/architecture/DATA_MODEL.md) | Схема PostgreSQL, инварианты, retention |
-| [`docs/architecture/API.md`](docs/architecture/API.md) | Web API, протокол агента, allowlist операций, лимиты |
-| [`docs/architecture/JOBS.md`](docs/architecture/JOBS.md) | Статусы, lease, reaper, планировщик, reconcile, идемпотентность |
-| [`docs/architecture/TEMPLATES.md`](docs/architecture/TEMPLATES.md) | Грамматика путей, правило полноты, жёсткие исключения, трёхсторонний diff, apply/rollback |
-| [`docs/architecture/SECURITY.md`](docs/architecture/SECURITY.md) | Модель угроз, RBAC, токены, 2FA, защита агента, аудит и редакция |
-| [`docs/runbooks/phase-1.md`](docs/runbooks/phase-1.md) | Запуск, проверка, диагностика и откат этапа 1 |
-| [`docs/runbooks/phase-11-routing-ui.md`](docs/runbooks/phase-11-routing-ui.md) | Имена, галочки списков, свои списки роутера, подписки/VLESS, установка RoutX и страница LuCI |
-| [`docs/runbooks/singbox-variants.md`](docs/runbooks/singbox-variants.md) | Варианты sing-box Tiny/Extended/Stable, проверка и откат |
-| [`docs/runbooks/monitoring-and-rollouts.md`](docs/runbooks/monitoring-and-rollouts.md) | Мониторинг прокси и поэтапное обновление sing-box |
-| [`docs/runbooks/router-onboarding.md`](docs/runbooks/router-onboarding.md) | Мастер добавления роутера из четырёх шагов |
-| [`docs/runbooks/archive-and-delete.md`](docs/runbooks/archive-and-delete.md) | Архив, восстановление и полное удаление роутеров и шаблонов |
-| [`docs/runbooks/connections-and-sections.md`](docs/runbooks/connections-and-sections.md) | Физические и логические секции, внешние подписки, безопасное слияние подключений |
-| [`docs/runbooks/prokop-diagnostics.md`](docs/runbooks/prokop-diagnostics.md) | Пояснения к спорным проверкам Prokop |
-| [`docs/runbooks/backup-and-key-rotation.md`](docs/runbooks/backup-and-key-rotation.md) | Шифрованные бэкапы PostgreSQL и ротация `RC_MASTER_KEY` |
+* Docker 24+ и Docker Compose v2;
+* 2 ГБ RAM и 10 ГБ диска (сборка Node.js требует памяти);
+* для HTTPS — домен и открытые порты 80/443 (Caddy).
 
-Код этапа 1:
+### Сервер без Docker
 
-| Артефакт | Содержание |
-|---|---|
-| `server/` | Fastify 5 + TypeScript: конфигурация, `/healthz`, `/readyz`, `/api/v1/meta`, security-заголовки, статическая отдача SPA |
-| `server/migrations/` | `0001_init.sql`: `schema_migrations`, `settings`, `schema_version` |
-| `server/src/db/migrate.ts` | SQL-runner с advisory lock, отдельной транзакцией на файл и идемпотентным повторным запуском |
-| `server/src/cli/rotate-master-key.ts` | Ротация `RC_MASTER_KEY` с проверкой `--dry-run` и транзакционным перешифрованием |
-| `scripts/backup-db.sh`, `Dockerfile.backup` | Шифрованный `pg_dump`, проверка дампа, retention и offsite-хук |
-| `server/test/` | Vitest: конфигурация и служебные эндпоинты (15 тестов) |
-| `web/` | React 19 + Vite 8 SPA: статус API, PostgreSQL, схемы и панели |
-| `Dockerfile`, `docker-compose.yml` | Node 24, PostgreSQL 16, healthchecks, непривилегированный контейнер, профили `proxy` и `backup` |
-| `.gitlab-ci.yml` | GitLab CI: typecheck, тесты, сборка, миграции, agent-пакеты и Docker-образ |
-| `.github/workflows/ci.yml` | GitHub Actions: typecheck, тесты, сборка, миграции и runtime smoke-тест |
+* Node.js 22.12+ (рекомендуется 24 LTS);
+* PostgreSQL 16;
+* `npm` и стандартные build-инструменты;
+* reverse proxy (Caddy/nginx) для HTTPS, если нужен публичный доступ.
 
-Аудит выполнен по зафиксированным коммитам:
+### Роутер
 
-* Forkop — `dd483297be0ac4e52bb8f482e2640238b75af532` (2026-07-18);
-* Prokop — `3d2119e013d9671796dafccb460a5acbafcfef7b` (2026-10-20), `RELEASE_VERSION = 2.32.0`.
+* OpenWrt 24.10.x (opkg) или 25.12+ (apk);
+* архитектура `aarch64_cortex-a53` или `aarch64_generic`;
+* установленный Tachyon/Forkop/Prokop/Podkop либо установка продукта через
+  установщик RoutX;
+* для Podkop — OpenWrt 24.10+ и достаточно свободного места (обычно 25+ МБ).
 
-Клоны лежат в `audit/forkop` и `audit/prokop` **только для чтения** и не входят в поставку продукта.
+## Установка с Docker
 
----
-
-## Принятые решения (2026-10-27)
-
-| Параметр | Решение |
-|---|---|
-| Сервер | Node.js 24 LTS + TypeScript (Fastify 5), PostgreSQL 16, очередь в `jobs` без Redis, React 19 SPA |
-| Агент | HTTPS long-poll ≤ 25 с, bearer + nonce/timestamp |
-| Платформы | OpenWrt 24.10.x (opkg) и 25.12+ (apk); `aarch64_cortex-a53`, `aarch64_generic` |
-| 2FA | `all` по умолчанию (TOTP для всех), `off` отсутствует |
-| Лимиты | 10 роутеров/пользователя, 20 пользователей, 100 роутеров; batch 10 |
-| Мониторинг | 60 с, 3 пропуска ≈ 3 мин, деградация прокси > 1500 мс |
-| Retention | до 30 дней (метрики, отчёты, задания, аудит) |
-| Бэкап сервера | ночной шифрованный `pg_dump` + offsite, RPO 24 ч, RTO 1 ч |
-| Обновление агента | только вручную, подписанный пакет + SHA-256 |
-| sing-box | пользователь — на своих роутерах (каталог `extended`, 1/24 ч); rollout — superadmin |
-
-Полные формулировки и отклонённые альтернативы — `docs/architecture/DECISIONS.md`.
-
----
-
-## Проверенные поверхности интеграции
-
-* Только CLI продукта (`/usr/bin/forkop`, `/usr/bin/prokop`) и UCI по allowlist; прямые правки сгенерированного `sing-box/config.json` и внутренних `.uc`-модулей запрещены.
-* Вызов upstream CLI — всегда через `env -i PATH=/usr/sbin:/usr/bin:/sbin:/bin` (оба продукта учитывают переменные окружения).
-* Два независимых адаптера с общим контрактом: набор возможностей Forkop и Prokop различается (Prokop: health, snapshots, `core_releases`/`install_version`; Forkop: inbound-режим и свои проверки).
-* Снапшоты: нативные у Prokop (`config_snapshot_*`), собственные у Forkop (копия `/etc/config/forkop`, 0600).
-* Секреты (VLESS/URI, `outbound_jsons`, URL подписки, inbound) не попадают в шаблоны, diff, отчёты и аудит. Исключение — явно добавленные пользователем подписки/VLESS во вкладке «Подключения»: они передаются по TLS, хранятся на сервере только в AES-256-GCM и показываются маской.
-* Обнаружены оба продукта → `product_conflict`: чтение разрешено, изменения заблокированы.
-
-Подробности и точные команды — в `INTEGRATION_MAP.md`; ничего не додумано: каждая команда сопоставлена с исходником upstream.
-
----
-
-## Ключевые ограничения
-
-* Роутер инициирует только исходящий TLS; входящих портов, SSH и проброса портов нет.
-* Один управляемый продукт на роутер; переустановка/сброс/замена запрещены.
-* Все изменяющие операции — асинхронные задания с сохраняемым состоянием (`queued/running/success/failed/cancelled/timeout`).
-* Бэкап обязателен до применения; без снапшота apply не создаётся.
-* Шаблон — полный набор управляемых параметров + явные исключения; отдельные VLESS/Sub-подключения не перезаписываются.
-* Диагностика — только нативная; недоступное помечается «недоступно», а не имитируется.
-* Секреты не пишутся в логи и аудит; произвольного shell-API нет.
-
----
-
-## Быстрый старт
-
-Требования: Node.js 22.12+ (Docker/CI — Node.js 24), PostgreSQL 16, Docker Compose.
-
-```powershell
-Copy-Item .env.example .env
-node -e "console.log(require('crypto').randomBytes(32).toString('base64url'))"
-# вставьте ключ в RC_MASTER_KEY в .env
-
-docker compose up -d db
-npm ci
-npm run db:migrate
-npm run dev            # SPA: http://127.0.0.1:5173, API: http://127.0.0.1:3000
+```sh
+git clone https://gitlab.com/artur.utenkov/router-control.git
+cd router-control
+cp .env.example .env
 ```
 
-Проверка:
+Сгенерируйте ключ шифрования:
 
-```powershell
-Invoke-RestMethod http://127.0.0.1:3000/healthz
-Invoke-RestMethod http://127.0.0.1:3000/readyz
-Invoke-RestMethod http://127.0.0.1:3000/api/v1/meta
-npm run typecheck
-npm test
+```sh
+node -e "console.log(require('crypto').randomBytes(32).toString('base64url'))"
+```
+
+В `.env` задайте как минимум:
+
+```dotenv
+NODE_ENV=production
+POSTGRES_PASSWORD=<длинный пароль без спецсимволов URL>
+RC_MASTER_KEY=<сгенерированный ключ, 32+ символа>
+RC_PUBLIC_URL=http://localhost:3000
+RC_BIND_ADDR=127.0.0.1
+RC_PORT=3000
+
+# Первый администратор (создаётся при старте)
+RC_BOOTSTRAP_EMAIL=admin@example.com
+RC_BOOTSTRAP_PASSWORD=<пароль не короче 12 символов>
+```
+
+Запуск:
+
+```sh
+docker compose up -d --build
+docker compose ps
+curl http://127.0.0.1:3000/healthz
+curl http://127.0.0.1:3000/readyz
+```
+
+Панель: `http://127.0.0.1:3000`. Контейнер `app` сам применяет миграции при
+старте.
+
+### HTTPS через Caddy
+
+Задайте в `.env`:
+
+```dotenv
+RC_PUBLIC_URL=https://routx.example.com
+RC_COOKIE_SECURE=true
+TRUST_PROXY=true
+RC_DOMAIN=routx.example.com
+RC_TLS_MODE=admin@example.com
+```
+
+И запустите с профилем `proxy`:
+
+```sh
+docker compose --profile proxy up -d --build
+```
+
+`RC_TLS_MODE=internal` подходит только для локальной проверки; для публичного
+домена указывайте e-mail для Let's Encrypt.
+
+### Обновление Docker-установки
+
+```sh
+git pull
+docker compose --profile proxy up -d --build
+```
+
+Тома `router-control_pgdata`, `router-control_rc_data`,
+`router-control_caddy_data` сохраняют базу, ключи и сертификаты.
+
+## Установка без Docker
+
+Нужны Node.js 22.12+ и PostgreSQL 16.
+
+```sh
+git clone https://gitlab.com/artur.utenkov/router-control.git
+cd router-control
+cp .env.example .env
+npm ci
+```
+
+В `.env` задайте:
+
+```dotenv
+NODE_ENV=production
+DATABASE_URL=postgres://router_control:<пароль>@127.0.0.1:5432/router_control
+RC_MASTER_KEY=<сгенерированный ключ, 32+ символа>
+RC_PUBLIC_URL=https://routx.example.com
+RC_COOKIE_SECURE=true
+TRUST_PROXY=true
+RC_BIND_ADDR=127.0.0.1
+RC_PORT=3000
+RC_BOOTSTRAP_EMAIL=admin@example.com
+RC_BOOTSTRAP_PASSWORD=<пароль не короче 12 символов>
+```
+
+Примените миграции и соберите проект:
+
+```sh
+npm run db:migrate
 npm run build
 ```
 
-Production-запуск, HTTPS через Caddy, полная диагностика и откат —
-[`docs/runbooks/phase-1.md`](docs/runbooks/phase-1.md).
+Запуск production-сервера:
 
-Если нужен **отдельный собственный сервер** (VPS, свой домен, своя база),
-пошаговая инструкция: [`docs/runbooks/self-hosting.md`](docs/runbooks/self-hosting.md).
+```sh
+npm run start
+```
 
-План этапов и критерии приёмки — [`ARCHITECTURE.md` §13](docs/architecture/ARCHITECTURE.md):
+Сервер отдаёт API и собранную SPA из `web/dist`. Для HTTPS поставьте перед
+ним Caddy или nginx и проксируйте на `127.0.0.1:3000`.
 
-1. ✅ каркас, миграции, `/healthz`, Compose;
-2. аутентификация, RBAC, инвайты, 2FA, аудит;
-3. агент: bind, poll, heartbeat, precheck, конфликт продуктов;
-4. задания: очередь, lease, retry, timeout, reconcile;
-5. read state, diff, шаблоны;
-6. apply, snapshot, verify, rollback;
-7. мониторинг 60 с;
-8. диагностика quick/full и отчёты;
-9. версии sing-box и staged rollout;
-10. hardening.
+Для разработки:
 
----
+```sh
+# PostgreSQL должен быть запущен
+npm run dev
+# SPA: http://127.0.0.1:5173
+# API: http://127.0.0.1:3000
+```
+
+### Сборка пакетов агента без Docker
+
+```sh
+npm run agent:build
+```
+
+Пакеты появятся в `agent/dist/` и будут раздаваться панелью по адресам
+`/agent/routx-agent.ipk`, `/agent/routx-agent.apk`, `/agent/routx-agent.version`.
+
+### Обновление без Docker
+
+```sh
+git pull
+npm ci
+npm run db:migrate
+npm run build
+# перезапустите процесс routx (systemd/pm2/supervisor)
+```
+
+## Установка агента на роутер
+
+1. Добавьте роутер в панели.
+2. Скопируйте команду установки.
+3. Выполните её на роутере по SSH.
+
+Если на роутере уже есть несколько продуктов, установщик покажет:
+
+```text
+На роутере найдено несколько продуктов:
+  1) Forkop 1.0.5
+     пакеты: forkop luci-app-forkop luci-i18n-forkop-ru sing-box-forkop
+  2) Tachyon 1.7.12
+     пакеты: tachyon luci-app-tachyon luci-i18n-tachyon-ru tachyon-core
+Какой продукт оставить активным? [1]:
+```
+
+Выбранный продукт остаётся, остальные удаляются вместе с пакетами,
+конфигами, состоянием, LuCI-файлами, cron-заданиями и nft-таблицами.
+Для автоматического выбора:
+
+```sh
+wget -qO- https://routx.example.com/agent/install.sh | sh -s -- \
+  --server https://routx.example.com \
+  --token <token> \
+  --keep tachyon
+```
+
+Обновление агентов — на странице «Развёртывание и перенос». Агенты 1.5.0+
+обновляются из панели; более старые нужно один раз обновить вручную.
+
+## CI и пайплайны
+
+В репозитории есть:
+
+* `.gitlab-ci.yml` — `verify` (typecheck, тесты, сборка, миграции,
+  agent-пакеты) и `docker` (сборка образа);
+* `.github/workflows/ci.yml` — аналогичная проверка и runtime smoke-тест.
+
+Если GitLab показывает **«Before you can run pipelines, we need to verify
+your account»**, пайплайны блокируются настройками GitLab, а не кодом.
+Варианты:
+
+* подтвердить учётную запись GitLab;
+* запустить проверки локально:
+
+```sh
+npm ci
+npm run typecheck
+npm test
+npm run build
+npm run db:migrate
+npm run agent:build
+```
+
+* использовать GitHub Actions, если репозиторий зеркалируется на GitHub.
+
+## Документация
+
+* [`docs/runbooks/self-hosting.md`](docs/runbooks/self-hosting.md) — свой
+  сервер, домен, HTTPS, первый вход.
+* [`docs/runbooks/agent-packages.md`](docs/runbooks/agent-packages.md) —
+  установка, обновление и удаление агента, выбор активного продукта.
+* [`docs/runbooks/products-and-versions.md`](docs/runbooks/products-and-versions.md) —
+  продукты, версии, установленные пакеты и переустановка.
+* [`docs/runbooks/phase-1.md`](docs/runbooks/phase-1.md) — запуск и
+  диагностика.
+* [`docs/runbooks/backup-and-key-rotation.md`](docs/runbooks/backup-and-key-rotation.md) —
+  бэкапы и ротация ключа.
+* [`docs/architecture/ARCHITECTURE.md`](docs/architecture/ARCHITECTURE.md) —
+  архитектура.
+* [`docs/architecture/API.md`](docs/architecture/API.md) — API и протокол
+  агента.
 
 ## Структура репозитория
 
 ```text
-server/           # Node.js + TS: API, домен, задания, шлюз агента, планировщик, миграции
-server/migrations/ # SQL-миграции
-server/src/db/    # пул PostgreSQL, Drizzle-схема, SQL-runner
-server/test/      # Vitest
-web/              # React + TypeScript SPA (Vite)
-docs/             # аудит, архитектура, runbook'и
-audit/            # read-only клоны Forkop/Prokop (не входят в поставку, в .gitignore)
-.github/          # CI
+server/            Fastify + TypeScript: API, задания, агент-шлюз, миграции
+server/migrations/ SQL-миграции
+server/test/       Vitest
+web/               React + Vite SPA и PWA
+agent/             ucode-агент для OpenWrt и сборка пакетов
+docs/              архитектура и runbook'и
+deploy/            примеры развёртывания, включая OpenWrt + Caddy
+.github/           GitHub Actions
+.gitlab-ci.yml     GitLab CI
+Dockerfile         production-образ
+docker-compose.yml PostgreSQL + app + Caddy (профиль proxy)
 ```
 
-Каталоги `agent/` и `tests/` появятся на этапах 3 и 4. Агент не входит в этап 1.
+## Лицензия
 
----
-
-## Следующий шаг
-
-Этап 2: аутентификация, роли `superadmin`/`user`, инвайты с одноразовыми токенами,
-TOTP-политика `all`/`admins`, аудит без секретов и изоляция пользователей.
+Файл лицензии в репозитории не добавлен. По умолчанию действует режим
+«все права защищены». Если нужна открытая лицензия, добавьте её явно
+(например, MIT или Apache-2.0).

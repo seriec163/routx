@@ -101,7 +101,8 @@ jobs:
             const ready = await (await fetch(`${base}/readyz`)).json();
             if (ready.status !== "ready" || ready.checks.db !== "ok") throw new Error("readyz");
             const meta = await (await fetch(`${base}/api/v1/meta`)).json();
-            if (meta.schema_version !== "1") throw new Error(`schema_version=${meta.schema_version}`);
+            if (!meta.schema_version || String(meta.schema_version) !== String(ready.schema_version))
+              throw new Error(`schema_version=${meta.schema_version}, ready=${ready.schema_version}`);
             const html = await (await fetch(`${base}/`)).text();
             if (!html.includes("<div id=\"root\">")) throw new Error("SPA");
             console.log("runtime smoke test: ok");
