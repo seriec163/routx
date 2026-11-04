@@ -704,9 +704,22 @@ function manage_connection(product, args) {
 					cursor.set(product, section, "outbound_source_refs", keep);
 			} else {
 				cursor.set(product, name, "url", value);
+				cursor.set(product, name, "enabled", "1");
 				cursor.delete(product, name, "user_agent");
 				cursor.delete(product, name, "hwid");
 				cursor.delete(product, name, "tag");
+				let refs = cursor.get(product, section, "outbound_source_refs");
+				if (type(refs) != "array")
+					refs = refs == null ? [] : [ refs ];
+				let refs_next = [];
+				for (let ref in refs) {
+					let ref_value = util.as_string(ref);
+					if (ref_value != "")
+						push(refs_next, ref_value);
+				}
+				push(refs_next, name);
+				cursor.delete(product, section, "outbound_source_refs");
+				cursor.set(product, section, "outbound_source_refs", util.dedupe(refs_next));
 			}
 		} else {
 			return { ok: false, error: "subscription_missing" };
