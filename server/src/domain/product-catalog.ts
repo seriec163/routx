@@ -4,7 +4,7 @@
  * не упиралась в лимит GitHub при каждом открытии карточки роутера.
  */
 
-export type ProductId = 'tachyon' | 'forkop' | 'podkop';
+export type ProductId = 'tachyon' | 'forkop' | 'podkop' | 'prokop';
 
 export interface ProductRelease {
   version: string;
@@ -29,6 +29,7 @@ const PRODUCTS: Array<{ product: ProductId; label: string; repo: string }> = [
   { product: 'tachyon', label: 'Tachyon', repo: 'Dushnilin/tachyon' },
   { product: 'forkop', label: 'Forkop', repo: 'ushan0v/forkop' },
   { product: 'podkop', label: 'Podkop', repo: 'itdoginfo/podkop' },
+  { product: 'prokop', label: 'Prokop', repo: 'Asofwar/prokop' },
 ];
 
 const CACHE_TTL_MS = 10 * 60 * 1000;

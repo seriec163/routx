@@ -1981,7 +1981,7 @@ export async function productSwitch(ctx: HandlerContext, job: JobRow): Promise<J
   const routerId = requireRouter(job);
   const requested = asString(job.payload.product) ?? '';
   const version = asString(job.payload.version) || null;
-  if (!['tachyon', 'forkop', 'podkop'].includes(requested)) {
+  if (!['tachyon', 'forkop', 'podkop', 'prokop'].includes(requested)) {
     throw new JobFailure(
       'unsupported_product_switch',
       `Переключение на ${requested || 'неизвестный продукт'} пока не поддерживается`,

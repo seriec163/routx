@@ -126,7 +126,7 @@ function serviceText(value: unknown): string {
 }
 
 interface ProductCatalogItem {
-  product: 'tachyon' | 'forkop' | 'podkop';
+  product: 'tachyon' | 'forkop' | 'podkop' | 'prokop';
   label: string;
   repo: string;
   current_version: string | null;
@@ -1227,6 +1227,22 @@ export function RouterDetailPage({ id }: { id: string }) {
     }
   }
 
+  async function reinstallCurrent(): Promise<void> {
+    try {
+      const response = await api<{ items: ProductCatalogItem[] }>(
+        `/api/v1/routers/${id}/product-catalog`,
+      );
+      const current = response.items.find((item) => item.product === router?.product);
+      if (!current) {
+        toast.error('Текущий продукт не найден в каталоге');
+        return;
+      }
+      await installProduct(current);
+    } catch (caught) {
+      toast.error(errorMessage(caught));
+    }
+  }
+
   async function serviceAction(
     action: 'restart' | 'start' | 'stop' | 'enable' | 'disable',
   ): Promise<void> {
@@ -1571,14 +1587,29 @@ export function RouterDetailPage({ id }: { id: string }) {
         actions={
           <>
             {isAdmin && online ? (
-              <Button
-                variant="ghost"
-                onClick={() => void openProductManager()}
-                busy={productSwitchBusy}
-                disabled={!canMutate || productSwitchBusy}
-              >
-                Пакет продукта
-              </Button>
+              <>
+                <Button
+                  variant="ghost"
+                  onClick={() => void openProductManager()}
+                  busy={productSwitchBusy}
+                  disabled={!canMutate || productSwitchBusy}
+                >
+                  Пакет продукта
+                </Button>
+                {router.product === 'tachyon' ||
+                router.product === 'forkop' ||
+                router.product === 'podkop' ||
+                router.product === 'prokop' ? (
+                  <Button
+                    variant="ghost"
+                    onClick={() => void reinstallCurrent()}
+                    busy={productSwitchBusy}
+                    disabled={!canMutate || productSwitchBusy}
+                  >
+                    Переустановить
+                  </Button>
+                ) : null}
+              </>
             ) : null}
             <Button variant="ghost" onClick={() => void refreshState()} busy={busy} disabled={!online}>
               Прочитать состояние
@@ -3134,7 +3165,16 @@ export function RouterDetailPage({ id }: { id: string }) {
             переносятся автоматически; перед установкой создаётся резервная копия конфигурации.
           </p>
           {productLoading ? <Spinner label="Проверяем версии…" /> : null}
-          {productItems.map((item) => {
+          {productItems.length === 0 && !productLoading ? (
+            <p className="muted-text small">Каталог продуктов пуст.</p>
+          ) : null}
+          {productItems
+            .slice()
+            .sort(
+              (left, right) =>
+                Number(right.product === router.product) - Number(left.product === router.product),
+            )
+            .map((item) => {
             const same = router.product === item.product;
             const selected = productVersions[item.product] ?? item.latest_version ?? '';
             return (
@@ -3187,7 +3227,7 @@ export function RouterDetailPage({ id }: { id: string }) {
                   size="sm"
                   onClick={() => void installProduct(item)}
                   busy={productSwitchBusy}
-                  disabled={productSwitchBusy || (same && !item.update_available && item.product !== 'tachyon')}
+                  disabled={productSwitchBusy}
                 >
                   {same
                     ? item.update_available

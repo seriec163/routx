@@ -1012,7 +1012,10 @@ export async function registerRouterRoutes(app: FastifyInstance, ctx: RouteConte
     const params = z.object({ id: z.string().uuid() }).parse(request.params);
     const router = await getRouter(pool, auth, params.id);
     const current =
-      router.product === 'tachyon' || router.product === 'forkop' || router.product === 'podkop'
+      router.product === 'tachyon' ||
+      router.product === 'forkop' ||
+      router.product === 'podkop' ||
+      router.product === 'prokop'
         ? { [router.product as ProductId]: router.product_version }
         : {};
     return { items: await productCatalog(current) };
@@ -1032,7 +1035,7 @@ export async function registerRouterRoutes(app: FastifyInstance, ctx: RouteConte
       const params = z.object({ id: z.string().uuid() }).parse(request.params);
       const body = z
         .object({
-          product: z.enum(['tachyon', 'forkop', 'podkop']),
+          product: z.enum(['tachyon', 'forkop', 'podkop', 'prokop']),
           version: z
             .string()
             .trim()

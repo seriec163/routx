@@ -108,7 +108,7 @@ function handle_command(cmd) {
 		if (op == "product_switch") {
 			let target = util.as_string(args.product);
 			let version = util.as_string(args.version);
-			if (target != "tachyon" && target != "forkop" && target != "podkop")
+			if (target != "tachyon" && target != "forkop" && target != "podkop" && target != "prokop")
 				return { status: "failed", error: { code: "unsupported_product_switch", message: "Переключение на " + target + " пока не поддерживается" } };
 			if (version != "" && match(version, /^[0-9]+([.][0-9]+){2,3}$/) == null)
 				return { status: "failed", error: { code: "invalid_product_version", message: "Некорректная версия продукта" } };
@@ -122,10 +122,21 @@ function handle_command(cmd) {
 				if (current == "tachyon")
 					command += "wget -O /tmp/tachyon-uninstall.sh https://raw.githubusercontent.com/Dushnilin/tachyon/main/uninstall.sh && sh /tmp/tachyon-uninstall.sh -y; ";
 				if (target == "podkop") {
+					command += "if command -v opkg >/dev/null 2>&1; then opkg remove --force-depends prokop luci-app-prokop sing-box-forkop tachyon-core luci-i18n-forkop-ru >/dev/null 2>&1 || true; fi; ";
+					command += "if command -v apk >/dev/null 2>&1; then apk del prokop luci-app-prokop sing-box-forkop tachyon-core luci-i18n-forkop-ru >/dev/null 2>&1 || true; fi; ";
 					command += "PODKOP_INSTALLER=\"$(wget -qO- https://raw.githubusercontent.com/itdoginfo/podkop/main/install.sh)\" && echo n | sh -c \"$PODKOP_INSTALLER\"; ";
-					command += "if command -v opkg >/dev/null 2>&1; then opkg remove --force-depends sing-box-forkop tachyon-core luci-i18n-forkop-ru >/dev/null 2>&1 || true; fi; ";
 					command += "if ! command -v sing-box >/dev/null 2>&1; then if command -v apk >/dev/null 2>&1; then apk update >/dev/null 2>&1; apk add sing-box >/dev/null 2>&1 || apk add sing-box-tiny >/dev/null 2>&1 || true; else opkg update >/dev/null 2>&1; opkg install sing-box >/dev/null 2>&1 || opkg install sing-box-tiny >/dev/null 2>&1 || true; fi; fi";
+				} else if (target == "prokop") {
+					// Prokop — переименованный Forkop: свой установщик сам
+					// переносит старый Forkop. Podkop и Tachyon он не знает,
+					// поэтому их пакеты удаляем заранее.
+					command += "if command -v opkg >/dev/null 2>&1; then opkg remove --force-depends podkop luci-app-podkop tachyon-core >/dev/null 2>&1 || true; fi; ";
+					command += "if command -v apk >/dev/null 2>&1; then apk del podkop luci-app-podkop tachyon-core >/dev/null 2>&1 || true; fi; ";
+					command += "wget -qO- https://asofwar.github.io/prokop/install.sh | sh -s -- --lang ru --confirm-legacy-migration";
 				} else {
+					// Forkop не умеет удалять Podkop/Prokop, делаем это сами.
+					command += "if command -v opkg >/dev/null 2>&1; then opkg remove --force-depends prokop luci-app-prokop podkop luci-app-podkop tachyon-core >/dev/null 2>&1 || true; fi; ";
+					command += "if command -v apk >/dev/null 2>&1; then apk del prokop luci-app-prokop podkop luci-app-podkop tachyon-core >/dev/null 2>&1 || true; fi; ";
 					command += "wget -qO- https://raw.githubusercontent.com/ushan0v/forkop/main/install.sh | sh -s";
 				}
 			}
