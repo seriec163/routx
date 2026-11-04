@@ -193,6 +193,42 @@ pkg_mgr_for() {
   echo ""
 }
 
+force_remove_opkg_status() {
+  force_pkg="$1"
+  force_status=""
+  for force_file in /usr/lib/opkg/status /var/lib/opkg/status; do
+    if [ -f "$force_file" ]; then
+      force_status="$force_file"
+      break
+    fi
+  done
+  [ -n "$force_status" ] || return 1
+  force_tmp="$force_status.routx.$$"
+  awk -v pkg="$force_pkg" '
+    /^Package: / { skip = ($2 == pkg) }
+    skip { next }
+    { print }
+  ' "$force_status" > "$force_tmp" || { rm -f "$force_tmp"; return 1; }
+  mv "$force_tmp" "$force_status"
+  rm -f /usr/lib/opkg/info/"$force_pkg".* /var/lib/opkg/info/"$force_pkg".* 2>/dev/null || true
+  return 0
+}
+
+force_remove_apk_package() {
+  force_pkg="$1"
+  if [ -f /etc/apk/world ]; then
+    sed -i "/^$force_pkg\([@=].*\)\{0,1\}$/d" /etc/apk/world 2>/dev/null || true
+  fi
+  if [ -f /lib/apk/db/installed ]; then
+    force_tmp="/lib/apk/db/installed.routx.$$"
+    awk -v pkg="$force_pkg" 'BEGIN { RS=""; ORS="\n\n" } $0 !~ ("(^|\n)P:" pkg "(\n|$)") { print }' \
+      /lib/apk/db/installed > "$force_tmp" || { rm -f "$force_tmp"; return 1; }
+    mv "$force_tmp" /lib/apk/db/installed
+  fi
+  rm -rf /lib/apk/db/scripts/"$force_pkg".* 2>/dev/null || true
+  return 0
+}
+
 pkg_del() {
   delete_pkg_mgr="$(pkg_mgr_for "$1")"
   if [ "$delete_pkg_mgr" = "opkg" ]; then
@@ -204,12 +240,30 @@ pkg_del() {
         lock_wait=$((lock_wait + 1))
       done
     fi
-    # Сначала снимаем зависимые пакеты, затем основной.
-    opkg remove --force-depends --force-removal-of-dependent-packages "$1" >/dev/null 2>&1 ||
-      opkg remove --force-depends "$1" >/dev/null 2>&1 || true
+    # Скрипты пакета могут падать и отменять удаление. На время удаления
+    # отключаем их: сервис уже остановлен, файлы и конфиг удалим сами.
+    for delete_script in /usr/lib/opkg/info/"$1".preinst /usr/lib/opkg/info/"$1".prerm \
+      /usr/lib/opkg/info/"$1".postinst /usr/lib/opkg/info/"$1".postrm \
+      /var/lib/opkg/info/"$1".preinst /var/lib/opkg/info/"$1".prerm \
+      /var/lib/opkg/info/"$1".postinst /var/lib/opkg/info/"$1".postrm; do
+      [ -f "$delete_script" ] && mv "$delete_script" "$delete_script.routx-disabled" 2>/dev/null || true
+    done
+    delete_log="/tmp/routx-opkg-remove-$1.log"
+    opkg remove --force-depends --force-removal-of-dependent-packages "$1" >"$delete_log" 2>&1 ||
+      opkg remove --force-depends "$1" >>"$delete_log" 2>&1 || true
+    if opkg list-installed 2>/dev/null | grep -q "^$1 "; then
+      echo "opkg не смог удалить $1; принудительно убираю запись пакета." >&2
+      tail -n 5 "$delete_log" >&2 2>/dev/null || true
+      force_remove_opkg_status "$1" || true
+    fi
+    rm -f /usr/lib/opkg/info/"$1".*.routx-disabled /var/lib/opkg/info/"$1".*.routx-disabled 2>/dev/null || true
   elif [ "$delete_pkg_mgr" = "apk" ]; then
     apk del "$1" >/dev/null 2>&1 ||
       apk del --force-broken-world "$1" >/dev/null 2>&1 || true
+    if apk info -e "$1" >/dev/null 2>&1; then
+      echo "apk не смог удалить $1; принудительно убираю запись пакета." >&2
+      force_remove_apk_package "$1" || true
+    fi
   fi
 }
 
