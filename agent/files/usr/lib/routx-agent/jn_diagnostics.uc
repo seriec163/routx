@@ -133,6 +133,37 @@ function diagnostics_full(product) {
 		} else {
 			push(report.checks, { name: "global_check", state: "error", details: run.error_text(res) });
 		}
+	} else if (product == "tachyon") {
+		let status = run.run_product("tachyon", [ "get_status" ], 15);
+		push(report.checks, {
+			name: "tachyon_get_status",
+			state: status.ok ? "ok" : "error",
+			details: status.ok ? util.truncate_text(status.stdout, 4000) : run.error_text(status)
+		});
+		let service = run.run_product("tachyon", [ "check_service" ], 20);
+		push(report.checks, {
+			name: "tachyon_check_service",
+			state: service.ok ? "ok" : "warning",
+			details: service.ok ? util.truncate_text(service.stdout, 8000) : run.error_text(service)
+		});
+		let proxies = run.run_product("tachyon", [ "clash_api", "get_proxies" ], 30);
+		push(report.checks, {
+			name: "tachyon_proxies",
+			state: proxies.ok ? "ok" : "error",
+			details: proxies.ok ? util.truncate_text(proxies.stdout, 20000) : run.error_text(proxies)
+		});
+		let logs = run.run([ "logread", "-e", "tachyon" ], 20);
+		push(report.checks, {
+			name: "tachyon_logs",
+			state: logs.ok ? "ok" : "warning",
+			details: logs.ok ? util.truncate_text(util.mask_secrets(logs.stdout), 60000) : run.error_text(logs)
+		});
+		let sb_logs = run.run([ "logread", "-e", "sing-box" ], 20);
+		push(report.checks, {
+			name: "sing_box_logs",
+			state: sb_logs.ok ? "ok" : "warning",
+			details: sb_logs.ok ? util.truncate_text(util.mask_secrets(sb_logs.stdout), 30000) : run.error_text(sb_logs)
+		});
 	} else {
 		push(report.checks, { name: "global_check", state: "not_available", details: "доступно только для Prokop/Podkop" });
 	}
