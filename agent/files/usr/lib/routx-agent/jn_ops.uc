@@ -1291,6 +1291,8 @@ function apply_connections(product, args) {
 	if (match(section, SECTION_RE) == null)
 		return { ok: false, error: "invalid_section" };
 
+	let stage = "links";
+	try {
 	let links = [];
 	for (let raw in (args.links || [])) {
 		let value = trim(util.as_string(raw));
@@ -1306,6 +1308,7 @@ function apply_connections(product, args) {
 		return apply_podkop_connections(section, links, args);
 
 	let subscriptions = [];
+	stage = "subscriptions";
 	for (let raw in (args.subscriptions || [])) {
 		let name = util.as_string(raw.name);
 		let url = trim(util.as_string(raw.url));
@@ -1318,8 +1321,10 @@ function apply_connections(product, args) {
 	}
 
 	let cursor = uci.cursor();
+	stage = "tachyon_branch";
 	if (product == "tachyon" && length(subscriptions) > 0)
 		return apply_tachyon_subscription(section, subscriptions, args);
+	stage = "generic";
 	let exists = cursor.get(product, section);
 	if (exists == null) {
 		cursor.set(product, section, "section");
@@ -1459,6 +1464,9 @@ function apply_connections(product, args) {
 		preserved_links: length(preserved),
 		enabled: enabled
 	};
+	} catch (e) {
+		return { ok: false, error: "apply_connections_" + stage + ": " + e.message };
+	}
 }
 
 return { precheck, verify, service_action, reload, apply_uci, apply_connections, cleanup_json_outbounds, restore_section_options, list_connections, manage_connection, set_podkop_outbound, select_proxy, read_rules };
