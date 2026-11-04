@@ -677,8 +677,12 @@ function manage_connection(product, args) {
 				return { ok: false, error: "subscription_section_mismatch" };
 			if (action == "delete")
 				cursor.delete(product, name);
-			else
+			else {
 				cursor.set(product, name, "url", value);
+				cursor.delete(product, name, "user_agent");
+				cursor.delete(product, name, "hwid");
+				cursor.delete(product, name, "tag");
+			}
 		} else if (product == "tachyon" && source_type == "outbound_source") {
 			if (lc(util.as_string(cursor.get(product, name, "source_type"))) != "subscription")
 				return { ok: false, error: "subscription_missing" };
@@ -700,6 +704,9 @@ function manage_connection(product, args) {
 					cursor.set(product, section, "outbound_source_refs", keep);
 			} else {
 				cursor.set(product, name, "url", value);
+				cursor.delete(product, name, "user_agent");
+				cursor.delete(product, name, "hwid");
+				cursor.delete(product, name, "tag");
 			}
 		} else {
 			return { ok: false, error: "subscription_missing" };
@@ -765,6 +772,8 @@ function manage_connection(product, args) {
 
 	if (cursor.commit(product) == null)
 		return { ok: false, error: "uci commit failed" };
+	if (product == "tachyon" && action == "replace" && kind == "subscription")
+		run.run_product("tachyon", [ "subscription_update_if_due" ], 180);
 	return { ok: true, section: section, action: action, kind: kind, disabled: disabled };
 }
 
