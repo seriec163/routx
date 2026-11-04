@@ -1264,6 +1264,18 @@ function restore_section_options(product, args) {
 				continue;
 			option_value = util.dedupe(next);
 		}
+		if (product == "tachyon" && key == "community_lists") {
+			let list = type(option_value) == "array" ? option_value : [ option_value ];
+			let next = [];
+			for (let item in list) {
+				let mapped = tachyon_community_list(item);
+				if (mapped != "")
+					push(next, mapped);
+			}
+			if (length(next) == 0)
+				continue;
+			option_value = util.dedupe(next);
+		}
 		cursor.set(product, section, key, option_value);
 		push(restored, key);
 	}
@@ -1575,6 +1587,15 @@ function tachyon_rule_set_url(value) {
 	return url;
 }
 
+function tachyon_community_list(value) {
+	let id = lc(util.as_string(value));
+	if (id == "facebook" || id == "instagram" || id == "whatsapp")
+		return "meta";
+	if (id == "twitter")
+		return "x";
+	return util.as_string(value);
+}
+
 function migrate_tachyon_lists() {
 	let cursor = uci.cursor();
 	let all = cursor.get_all("tachyon");
@@ -1585,7 +1606,7 @@ function migrate_tachyon_lists() {
 		let sect = all[sname];
 		if (type(sect) != "object" || sect[".type"] != "section")
 			continue;
-		for (let key in [ "rule_set", "rule_set_with_subnets" ]) {
+		for (let key in [ "rule_set", "rule_set_with_subnets", "community_lists" ]) {
 			let raw = cursor.get("tachyon", sname, key);
 			if (raw == null)
 				continue;
@@ -1594,7 +1615,7 @@ function migrate_tachyon_lists() {
 			let dirty = false;
 			for (let item in list) {
 				let original = util.as_string(item);
-				let mapped = tachyon_rule_set_url(original);
+				let mapped = key == "community_lists" ? tachyon_community_list(original) : tachyon_rule_set_url(original);
 				if (mapped != original)
 					dirty = true;
 				if (mapped != "")
