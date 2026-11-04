@@ -1251,7 +1251,20 @@ function restore_section_options(product, args) {
 	for (let key in allowed) {
 		if (options[key] == null)
 			continue;
-		cursor.set(product, section, key, options[key]);
+		let option_value = options[key];
+		if (product == "tachyon" && (key == "rule_set" || key == "rule_set_with_subnets")) {
+			let list = type(option_value) == "array" ? option_value : [ option_value ];
+			let next = [];
+			for (let item in list) {
+				let mapped = tachyon_rule_set_url(item);
+				if (mapped != "")
+					push(next, mapped);
+			}
+			if (length(next) == 0)
+				continue;
+			option_value = util.dedupe(next);
+		}
+		cursor.set(product, section, key, option_value);
 		push(restored, key);
 	}
 	let label = util.as_string(args.label);
@@ -1550,6 +1563,59 @@ function apply_product_config(to) {
 		links: links,
 		warnings: warnings
 	};
+}
+
+function tachyon_rule_set_url(value) {
+	let url = util.as_string(value);
+	let m = match(url, /forkop-lists\/releases\/latest\/download\/([A-Za-z0-9_.-]+)\.json$/);
+	if (m != null)
+		return "https://github.com/itdoginfo/allow-domains/releases/latest/download/" + m[1] + ".srs";
+	if (match(url, /\.json$/) != null)
+		return "";
+	return url;
+}
+
+function migrate_tachyon_lists() {
+	let cursor = uci.cursor();
+	let all = cursor.get_all("tachyon");
+	if (type(all) != "object")
+		return { ok: true, changed: 0 };
+	let changed = 0;
+	for (let sname in all) {
+		let sect = all[sname];
+		if (type(sect) != "object" || sect[".type"] != "section")
+			continue;
+		for (let key in [ "rule_set", "rule_set_with_subnets" ]) {
+			let raw = cursor.get("tachyon", sname, key);
+			if (raw == null)
+				continue;
+			let list = type(raw) == "array" ? raw : [ raw ];
+			let next = [];
+			let dirty = false;
+			for (let item in list) {
+				let original = util.as_string(item);
+				let mapped = tachyon_rule_set_url(original);
+				if (mapped != original)
+					dirty = true;
+				if (mapped != "")
+					push(next, mapped);
+			}
+			if (dirty) {
+				cursor.delete("tachyon", sname, key);
+				if (length(next) > 0)
+					cursor.set("tachyon", sname, key, util.dedupe(next));
+				changed++;
+			}
+		}
+	}
+	if (changed > 0) {
+		if (cursor.commit("tachyon") == null)
+			return { ok: false, error: "uci commit failed" };
+		let reload_res = reload("tachyon");
+		if (!reload_res.ok)
+			return { ok: false, error: reload_res.error };
+	}
+	return { ok: true, changed: changed };
 }
 
 function apply_tachyon_subscription(section, subscriptions, args) {
@@ -1905,4 +1971,4 @@ function apply_connections(product, args) {
 	}
 }
 
-return { precheck, verify, service_action, reload, apply_uci, apply_connections, cleanup_json_outbounds, restore_section_options, capture_product_config, apply_product_config, list_connections, manage_connection, set_podkop_outbound, select_proxy, read_rules, migrate_legacy_tachyon_subscriptions };
+return { precheck, verify, service_action, reload, apply_uci, apply_connections, cleanup_json_outbounds, restore_section_options, capture_product_config, apply_product_config, list_connections, manage_connection, set_podkop_outbound, select_proxy, read_rules, migrate_legacy_tachyon_subscriptions, migrate_tachyon_lists };

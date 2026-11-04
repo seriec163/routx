@@ -444,6 +444,11 @@ function run() {
 			warn("tachyon legacy subscription migration: " + util.as_string(migrated.error) + "\n");
 		else if (int(migrated.migrated) > 0)
 			warn("tachyon legacy subscriptions migrated: " + migrated.migrated + "\n");
+		let lists = ops.migrate_tachyon_lists();
+		if (!lists.ok)
+			warn("tachyon list migration: " + util.as_string(lists.error) + "\n");
+		else if (int(lists.changed) > 0)
+			warn("tachyon rule_set lists migrated: " + lists.changed + "\n");
 	}
 
 	// Если агент перезапустился посреди смены продукта, применяем
