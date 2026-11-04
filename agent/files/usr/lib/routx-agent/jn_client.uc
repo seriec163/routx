@@ -6,7 +6,7 @@ const store = require("jn_store");
 const platform = require("jn_platform");
 const uci_state = require("jn_uci_state");
 
-const VERSION = "1.5.23";
+const VERSION = "1.5.24";
 
 function build_probe(product) {
 	let pver = platform.product_version(product);
@@ -25,6 +25,7 @@ function build_probe(product) {
 		sing_box_version: sb.version == "" ? null : sb.version,
 		sing_box_variant: sb.variant == "" ? null : sb.variant,
 		platform_state: platform.platform_state(product),
+		installed_products: platform.installed_products(),
 		health: ui_vals.health,
 		service: ui_vals.service,
 		capabilities: platform.capability_view(product),

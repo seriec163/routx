@@ -1080,6 +1080,52 @@ export async function registerRouterRoutes(app: FastifyInstance, ctx: RouteConte
     },
   );
 
+  // Удаление выбранных пакетов продуктов. Нужно, когда на роутере остались
+  // пакеты от прошлых установок и пользователь хочет убрать их вручную.
+  app.post(
+    '/api/v1/routers/:id/packages/remove',
+    { config: { rateLimit: { max: 5, timeWindow: '10 minutes' } } },
+    async (request, reply) => {
+      const auth = requireUser(request);
+      if (auth.role !== 'superadmin') {
+        throw forbidden('superadmin_required', 'Удаление пакетов доступно только администратору');
+      }
+      const params = z.object({ id: z.string().uuid() }).parse(request.params);
+      const body = z
+        .object({ packages: z.array(z.string().trim().min(1).max(80)).min(1).max(30) })
+        .strict()
+        .parse(request.body);
+      const router = await getRouterForMutation(pool, auth, params.id);
+      assertOnline(router);
+
+      const job = await enqueueJob(pool, {
+        type: 'remove_packages',
+        routerId: router.id,
+        requestedBy: auth.userId,
+        timeoutSeconds: 360,
+        maxAttempts: 1,
+        idempotencyKey: `remove_packages:${router.id}:${body.packages.slice().sort().join(',')}:${Date.now()}`,
+        payload: { packages: [...new Set(body.packages)] },
+      });
+
+      await audit(pool, {
+        actorId: auth.userId,
+        actorRole: auth.role,
+        action: 'router.packages_remove',
+        targetType: 'router',
+        targetId: router.id,
+        routerId: router.id,
+        result: 'ok',
+        ip: request.ip,
+        userAgent: request.headers['user-agent'],
+        metadata: { packages: [...new Set(body.packages)], job_id: job.id },
+      });
+
+      reply.code(202);
+      return { job: jobJson(job) };
+    },
+  );
+
   // Перезагрузка самого роутера. Агент отвечает до reboot, поэтому задача
   // успевает завершиться; после перезагрузки связь восстанавливается сама.
   app.post(

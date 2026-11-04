@@ -2071,8 +2071,27 @@ export async function productSwitch(ctx: HandlerContext, job: JobRow): Promise<J
     requested,
     requested_version: version,
     install_output: asString(raw.install_output) || null,
+    removed_products: Array.isArray(raw.removed_products) ? raw.removed_products : [],
+    installed_products: Array.isArray(raw.installed_products) ? raw.installed_products : [],
     restore_job_id: restoreJob.id,
     restore_warning: restoreWarning,
+  };
+}
+
+export async function removePackages(ctx: HandlerContext, job: JobRow): Promise<Json> {
+  const routerId = requireRouter(job);
+  const packages = Array.isArray(job.payload.packages)
+    ? job.payload.packages.map((value) => asString(value)).filter((value): value is string => Boolean(value))
+    : [];
+  if (packages.length === 0) {
+    throw new JobFailure('no_packages', 'Не выбрано ни одного пакета');
+  }
+  const raw = await runCommand(ctx, job, 'remove_packages', { packages }, 330_000);
+  return {
+    router_id: routerId,
+    packages: Array.isArray(raw.packages) ? raw.packages : packages,
+    installed_products: Array.isArray(raw.installed_products) ? raw.installed_products : [],
+    output: asString(raw.output) || null,
   };
 }
 
@@ -2092,6 +2111,7 @@ export const HANDLERS: Record<string, JobHandler> = {
   site_check: siteCheck,
   agent_update: agentUpdate,
   product_switch: productSwitch,
+  remove_packages: removePackages,
   diagnostics,
   snapshot,
   restore: restoreSnapshot,

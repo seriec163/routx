@@ -40,6 +40,16 @@ const probeSchema = z
     sing_box_version: z.string().max(60).nullable().optional(),
     sing_box_variant: z.string().max(40).nullable().optional(),
     platform_state: z.enum(['ok', 'unsupported', 'conflict']).optional(),
+    installed_products: z
+      .array(
+        z.object({
+          product: z.enum(['forkop', 'prokop', 'podkop', 'tachyon']),
+          version: z.string().max(60).nullable().optional(),
+          packages: z.array(z.string().max(80)).max(20).optional(),
+        }),
+      )
+      .max(10)
+      .optional(),
     last_error: z.string().max(500).nullable().optional(),
     health: z.record(z.string(), z.unknown()).optional(),
     service: z.record(z.string(), z.unknown()).optional(),

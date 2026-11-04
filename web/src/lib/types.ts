@@ -1,5 +1,11 @@
 export type Role = 'superadmin' | 'user';
 
+export interface InstalledProduct {
+  product: 'forkop' | 'prokop' | 'podkop' | 'tachyon';
+  version?: string | null;
+  packages?: string[];
+}
+
 export interface RouterRecord {
   id: string;
   owner_id: string;
@@ -17,6 +23,7 @@ export interface RouterRecord {
   sing_box_previous_version?: string | null;
   sing_box_previous_variant?: string | null;
   sing_box_installed_at?: string | null;
+  installed_products?: InstalledProduct[];
   status: string;
   last_seen_at: string | null;
   last_error: string | null;

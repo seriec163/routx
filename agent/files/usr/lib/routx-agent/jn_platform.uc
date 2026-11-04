@@ -13,6 +13,15 @@ const SUPPORTED_ARCH = {
 
 const PRODUCTS = ["forkop", "prokop", "podkop", "tachyon"];
 
+// Пакеты, которые относятся к продукту. Нужны для прозрачного списка
+// «что установлено» и для удаления только выбранных пакетов.
+const PRODUCT_PACKAGES = {
+	forkop: [ "forkop", "luci-app-forkop", "luci-i18n-forkop-ru", "sing-box-forkop" ],
+	prokop: [ "prokop", "luci-app-prokop", "luci-i18n-prokop-ru" ],
+	podkop: [ "podkop", "luci-app-podkop" ],
+	tachyon: [ "tachyon", "luci-app-tachyon", "luci-i18n-tachyon-ru", "tachyon-core" ]
+};
+
 function release_info() {
 	let text = util.read_file("/etc/openwrt_release", "");
 	let info = {};
@@ -122,6 +131,65 @@ function product_version(product) {
 	if (!result.ok)
 		return "";
 	return run.first_line(result.stdout);
+}
+
+let products_cache = { at: -1000, value: [] };
+
+function installed_packages() {
+	let installed = {};
+	let list = run.run([ "opkg", "list-installed" ], 20);
+	if (list.ok) {
+		for (let line in split(list.stdout, "\n")) {
+			let name = split(trim(line), " ")[0];
+			if (name != "")
+				installed[name] = true;
+		}
+		return installed;
+	}
+	for (let product in PRODUCTS) {
+		for (let pkg in PRODUCT_PACKAGES[product]) {
+			let apk = run.run([ "apk", "info", "-e", pkg ], 10);
+			if (apk.ok)
+				installed[pkg] = true;
+		}
+	}
+	return installed;
+}
+
+// Список установленных продуктов с версиями и пакетами. Кэш на минуту:
+// probe вызывается часто, а opkg/apk list — не бесплатный.
+function installed_products(force) {
+	let now = util.now_epoch();
+	if (!force && now - products_cache.at < 60)
+		return products_cache.value;
+	let installed = installed_packages();
+	let out = [];
+	for (let product in PRODUCTS) {
+		if (!product_installed(product))
+			continue;
+		let packages = [];
+		for (let pkg in PRODUCT_PACKAGES[product]) {
+			if (installed[pkg] === true)
+				push(packages, pkg);
+		}
+		push(out, {
+			product: product,
+			version: product_version(product),
+			packages: packages
+		});
+	}
+	products_cache = { at: now, value: out };
+	return out;
+}
+
+function package_product(name) {
+	for (let product in PRODUCT_PACKAGES) {
+		for (let pkg in PRODUCT_PACKAGES[product]) {
+			if (pkg == name)
+				return product;
+		}
+	}
+	return "";
 }
 
 function sing_box_info(product) {
@@ -304,6 +372,7 @@ return {
 	release_info, openwrt_version, arch, target, model,
 	supported_arch, supported_openwrt,
 	product_config, product_binary, detect_product, product_version,
+	PRODUCT_PACKAGES, installed_products, package_product,
 	sing_box_info, manifest_version, platform_state, get_ui_state,
 	ui_state_values, capability_view
 };

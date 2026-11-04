@@ -113,6 +113,7 @@ function handle_command(cmd) {
 			if (version != "" && match(version, /^[0-9]+([.][0-9]+){2,3}$/) == null)
 				return { status: "failed", error: { code: "invalid_product_version", message: "Некорректная версия продукта" } };
 			let current = platform.detect_product();
+			let before = platform.installed_products(true);
 			let command = "";
 			if (target == "tachyon") {
 				// Один роутер — один продукт: Tachyon не знает Prokop,
@@ -173,13 +174,53 @@ function handle_command(cmd) {
 			if (detected != target)
 				return { status: "failed", error: { code: "product_switch_verify_failed", message: "после установки " + target + " не обнаружен" } };
 			let detected_version = platform.product_version(target);
+			let after = platform.installed_products(true);
+			let removed = [];
+			for (let item in before) {
+				let still = false;
+				for (let now_item in after) {
+					if (now_item.product == item.product)
+						still = true;
+				}
+				if (!still)
+					push(removed, item.product);
+			}
 			runner.run([ "sh", "-c", "(sleep 3; /etc/init.d/routx-agent restart) >/dev/null 2>&1 &" ], 5);
 			return { status: "success", result: {
 				product: detected,
 				requested: target,
 				version: detected_version,
 				requested_version: version,
+				removed_products: removed,
+				installed_products: after,
 				install_output: util.truncate_text(util.mask_secrets(runner.error_text(res)), 2000)
+			} };
+		}
+		if (op == "remove_packages") {
+			let current = platform.detect_product();
+			let packages = [];
+			for (let raw in (args.packages || [])) {
+				let name = util.as_string(raw);
+				let owner = platform.package_product(name);
+				if (owner == "")
+					return { status: "failed", error: { code: "invalid_package", message: "неизвестный пакет: " + name } };
+				if (current != "conflict" && owner == current)
+					return { status: "failed", error: { code: "cannot_remove_active_product", message: "нельзя удалить пакет активного продукта: " + name } };
+				push(packages, name);
+			}
+			packages = util.dedupe(packages);
+			if (length(packages) == 0)
+				return { status: "failed", error: { code: "no_packages", message: "не выбрано ни одного пакета" } };
+			let joined = join(" ", packages);
+			let command = "if command -v opkg >/dev/null 2>&1; then opkg remove --force-depends " + joined + "; elif command -v apk >/dev/null 2>&1; then apk del " + joined + "; else exit 127; fi";
+			let res = runner.run([ "sh", "-c", command ], 300);
+			let after = platform.installed_products(true);
+			if (!res.ok)
+				return { status: "failed", error: { code: "remove_packages_failed", message: runner.error_text(res) } };
+			return { status: "success", result: {
+				packages: packages,
+				installed_products: after,
+				output: util.truncate_text(util.mask_secrets(runner.error_text(res)), 1000)
 			} };
 		}
 		if (op == "sb_check_update") {

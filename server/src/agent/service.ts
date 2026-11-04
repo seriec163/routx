@@ -476,6 +476,7 @@ export async function updateRouterFromProbe(
           when status in ('conflict','unsupported') and not $2::boolean then 'online'
           else status end,
         last_error = $13,
+        installed_products = coalesce($14::jsonb, installed_products),
         updated_at = now()
       where id = $1`,
     [
@@ -492,6 +493,7 @@ export async function updateRouterFromProbe(
       str('sing_box_variant'),
       str('platform_state') ?? (conflict ? 'conflict' : 'ok'),
       str('last_error'),
+      Array.isArray(probe.installed_products) ? JSON.stringify(probe.installed_products) : null,
     ],
   );
 }

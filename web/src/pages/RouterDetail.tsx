@@ -589,6 +589,9 @@ export function RouterDetailPage({ id }: { id: string }) {
   const [productError, setProductError] = useState<string | null>(null);
   const [productJob, setProductJob] = useState<Job | null>(null);
   const [productLoading, setProductLoading] = useState(false);
+  const [removePackagesSelected, setRemovePackagesSelected] = useState<string[]>([]);
+  const [removePackagesBusy, setRemovePackagesBusy] = useState(false);
+  const [productNotice, setProductNotice] = useState<string | null>(null);
   const [restoreRouterBusy, setRestoreRouterBusy] = useState(false);
   const [purgeOpen, setPurgeOpen] = useState(false);
   const [purgeName, setPurgeName] = useState('');
@@ -656,6 +659,7 @@ export function RouterDetailPage({ id }: { id: string }) {
   const [extrasBusy, setExtrasBusy] = useState(false);
 
   const router = detail.data?.router;
+  const installedProducts = router?.installed_products ?? [];
   const state = detail.data?.state;
   const assignments = detail.data?.assignments ?? [];
   const online = router?.status === 'online';
@@ -1157,6 +1161,9 @@ export function RouterDetailPage({ id }: { id: string }) {
     setProductLoading(true);
     setProductError(null);
     setProductJob(null);
+    setProductNotice(null);
+    setRemovePackagesSelected([]);
+    void detail.reload();
     try {
       const response = await api<{ items: ProductCatalogItem[] }>(
         `/api/v1/routers/${id}/product-catalog`,
@@ -1215,8 +1222,23 @@ export function RouterDetailPage({ id }: { id: string }) {
       if (!done || done.status !== 'success') {
         throw new Error(done?.error?.message ?? 'Смена продукта не завершилась');
       }
+      const result = (done.result ?? {}) as {
+        removed_products?: string[];
+        installed_products?: Array<{ product?: string; version?: string | null }>;
+      };
+      const removed = (result.removed_products ?? []).filter(Boolean);
+      const installed = (result.installed_products ?? [])
+        .map((entry) => `${entry.product ?? ''}${entry.version ? ` ${entry.version}` : ''}`.trim())
+        .filter(Boolean);
+      setProductNotice(
+        [
+          `Установлено: ${installed.length > 0 ? installed.join(', ') : `${item.label} ${version}`.trim()}`,
+          removed.length > 0 ? `Удалено: ${removed.join(', ')}` : null,
+        ]
+          .filter(Boolean)
+          .join(' · '),
+      );
       toast.success(`${item.label} установлен`);
-      setProductOpen(false);
       await detail.reload();
     } catch (caught) {
       setProductError(errorMessage(caught));
@@ -1224,6 +1246,47 @@ export function RouterDetailPage({ id }: { id: string }) {
       setProductSwitchBusy(false);
       setActiveJob(null);
       setActiveJobLabel('');
+    }
+  }
+
+  function toggleRemovePackage(name: string): void {
+    setRemovePackagesSelected((current) =>
+      current.includes(name) ? current.filter((item) => item !== name) : [...current, name],
+    );
+  }
+
+  async function removeSelectedPackages(): Promise<void> {
+    if (!router) return;
+    const packages = [...new Set(removePackagesSelected)];
+    if (packages.length === 0) return;
+    if (
+      !window.confirm(
+        `Удалить пакеты:\n${packages.join('\n')}\n\nЭто может отключить текущий продукт и связь с панелью. Продолжить?`,
+      )
+    ) {
+      return;
+    }
+    setRemovePackagesBusy(true);
+    setProductError(null);
+    setProductNotice(null);
+    try {
+      const started = await api<{ job: Job }>(`/api/v1/routers/${id}/packages/remove`, {
+        method: 'POST',
+        body: { packages },
+      });
+      const finished = await trackJob(started.job, 'Удаление пакетов');
+      if (!finished || finished.status !== 'success') {
+        throw new Error(finished?.error?.message ?? 'Не удалось удалить пакеты');
+      }
+      const result = (finished.result ?? {}) as { packages?: string[] };
+      const removed = result.packages ?? packages;
+      setProductNotice(`Удалено: ${removed.join(', ')}`);
+      setRemovePackagesSelected([]);
+      await detail.reload();
+    } catch (caught) {
+      setProductError(errorMessage(caught));
+    } finally {
+      setRemovePackagesBusy(false);
     }
   }
 
@@ -3160,10 +3223,95 @@ export function RouterDetailPage({ id }: { id: string }) {
           }
         >
           {productError ? <ErrorBanner message={productError} /> : null}
+          {productNotice ? <InfoBanner>{productNotice}</InfoBanner> : null}
           <p className="page-sub">
             Смена продукта удаляет текущий пакет и ставит выбранный. Подписки и подключения RoutX
             переносятся автоматически; перед установкой создаётся резервная копия конфигурации.
           </p>
+          {installedProducts.length > 0 ? (
+            <div
+              style={{
+                border: '1px solid var(--line, rgba(120,90,120,.16))',
+                borderRadius: 12,
+                padding: 14,
+                marginBottom: 12,
+              }}
+            >
+              <strong>Установлено на роутере</strong>
+              {installedProducts.map((installed) => {
+                const active = installed.product === router.product;
+                const packages = installed.packages ?? [];
+                return (
+                  <div key={installed.product} style={{ marginTop: 10 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                      <strong>{PRODUCT_LABEL[installed.product] ?? installed.product}</strong>
+                      <span className="muted-text small">
+                        {installed.version ?? 'версия не определена'}
+                      </span>
+                      {active ? <StatusBadge status="success" label="активный" /> : null}
+                    </div>
+                    <div className="muted-text small">
+                      {packages.length > 0
+                        ? `Пакеты: ${packages.join(', ')}`
+                        : 'Пакеты не определены'}
+                    </div>
+                    {!active && packages.length > 0 ? (
+                      <div style={{ marginTop: 6 }}>
+                        {packages.map((pkg) => (
+                          <label
+                            key={pkg}
+                            style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13 }}
+                          >
+                            <input
+                              type="checkbox"
+                              checked={removePackagesSelected.includes(pkg)}
+                              onChange={() => toggleRemovePackage(pkg)}
+                              disabled={removePackagesBusy || productSwitchBusy}
+                            />
+                            {pkg}
+                          </label>
+                        ))}
+                      </div>
+                    ) : null}
+                  </div>
+                );
+              })}
+              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 10 }}>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  disabled={removePackagesBusy || productSwitchBusy}
+                  onClick={() =>
+                    setRemovePackagesSelected(
+                      installedProducts
+                        .filter((installed) => installed.product !== router.product)
+                        .flatMap((installed) => installed.packages ?? []),
+                    )
+                  }
+                >
+                  Выбрать все лишние
+                </Button>
+                <Button
+                  size="sm"
+                  onClick={() => void removeSelectedPackages()}
+                  busy={removePackagesBusy}
+                  disabled={
+                    removePackagesBusy || productSwitchBusy || removePackagesSelected.length === 0
+                  }
+                >
+                  Удалить выбранные ({removePackagesSelected.length})
+                </Button>
+              </div>
+              <p className="muted-text small">
+                Пакеты активного продукта удалить нельзя. Удаление лишних пакетов помогает
+                освободить место и убрать конфликты перед установкой.
+              </p>
+            </div>
+          ) : (
+            <p className="muted-text small">
+              Список установленных пакетов появится после следующего опроса роутера.
+            </p>
+          )}
           {productLoading ? <Spinner label="Проверяем версии…" /> : null}
           {productItems.length === 0 && !productLoading ? (
             <p className="muted-text small">Каталог продуктов пуст.</p>
@@ -3175,7 +3323,13 @@ export function RouterDetailPage({ id }: { id: string }) {
                 Number(right.product === router.product) - Number(left.product === router.product),
             )
             .map((item) => {
-            const same = router.product === item.product;
+            const installed = installedProducts.find((entry) => entry.product === item.product);
+            const same = installed != null;
+            const installedVersion =
+              installed?.version ??
+              (router.product === item.product
+                ? item.current_version ?? router.product_version
+                : null);
             const selected = productVersions[item.product] ?? item.latest_version ?? '';
             return (
               <div
@@ -3196,9 +3350,14 @@ export function RouterDetailPage({ id }: { id: string }) {
                   <span className="muted-text small">{item.repo}</span>
                 </div>
                 <p className="muted-text small" style={{ margin: '8px 0 4px' }}>
-                  Установлено: {same ? item.current_version ?? router.product_version ?? '—' : '—'} ·
+                  Установлено: {same ? installedVersion ?? '—' : '—'} ·
                   Последняя: {item.latest_version ?? '—'}
                 </p>
+                {installed?.packages && installed.packages.length > 0 ? (
+                  <p className="muted-text small">
+                    Пакеты: {installed.packages.join(', ')}
+                  </p>
+                ) : null}
                 {item.product === 'tachyon' ? (
                   <Field label="Версия Tachyon">
                     <Select

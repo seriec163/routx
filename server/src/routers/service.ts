@@ -18,6 +18,7 @@ export interface RouterRecord {
   sing_box_previous_version?: string | null;
   sing_box_previous_variant?: string | null;
   sing_box_installed_at?: Date | null;
+  installed_products?: unknown[];
   status: string;
   last_seen_at: Date | null;
   last_poll_at: Date | null;
@@ -54,6 +55,7 @@ export function routerJson(row: RouterRecord) {
     sing_box_previous_version: row.sing_box_previous_version ?? null,
     sing_box_previous_variant: row.sing_box_previous_variant ?? null,
     sing_box_installed_at: row.sing_box_installed_at?.toISOString() ?? null,
+    installed_products: row.installed_products ?? [],
     status: row.status,
     last_seen_at: row.last_seen_at?.toISOString() ?? null,
     last_error: row.last_error,
