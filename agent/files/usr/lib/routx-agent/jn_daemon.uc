@@ -145,6 +145,9 @@ function handle_command(cmd) {
 					// Prokop сам управляет sing-box; отдельный автозапуск
 					// от Podkop нужно погасить, иначе старт будет отклонён.
 					command += "/etc/init.d/sing-box stop >/dev/null 2>&1 || true; /etc/init.d/sing-box disable >/dev/null 2>&1 || true; ubus call service delete '{ \"name\": \"sing-box\" }' >/dev/null 2>&1 || true; ";
+					// Снимаем зависший guard от неудавшегося restore:
+					// иначе Prokop навсегда показывает health = error.
+					command += "nft delete table inet ProkopConfigRestoreDpiGuard >/dev/null 2>&1 || true; ";
 					command += "wget -qO- https://asofwar.github.io/prokop/install.sh | sh -s -- --lang ru --confirm-legacy-migration";
 				} else {
 					// Forkop не умеет удалять Podkop/Prokop, делаем это сами.
