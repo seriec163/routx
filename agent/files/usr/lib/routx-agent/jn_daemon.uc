@@ -138,7 +138,10 @@ function handle_command(cmd) {
 					command += "if command -v apk >/dev/null 2>&1; then apk del podkop luci-app-podkop tachyon-core >/dev/null 2>&1 || true; fi; ";
 					// Остатки Tachyon занимают место, которого не хватает
 					// установщику sing-box на роутерах с малым overlay.
-					command += "rm -rf /etc/tachyon /etc/tachyon-core /usr/share/tachyon-core /usr/lib/tachyon /usr/lib/tachyon-core; ";
+					command += "rm -rf /etc/tachyon /etc/tachyon-core /etc/config/tachyon /etc/config/tachyon-core /usr/share/tachyon-core /usr/lib/tachyon /usr/lib/tachyon-core; ";
+					// Ставим sing-box заранее: Prokop сохраняет уже
+					// установленный вариант и не упирается в свой расчёт места.
+					command += "if ! command -v sing-box >/dev/null 2>&1; then if command -v opkg >/dev/null 2>&1; then opkg update >/dev/null 2>&1; opkg install --force-space sing-box-tiny >/dev/null 2>&1 || opkg install --force-space sing-box >/dev/null 2>&1 || true; else apk update >/dev/null 2>&1; apk add sing-box-tiny >/dev/null 2>&1 || apk add sing-box >/dev/null 2>&1 || true; fi; fi; ";
 					// Prokop сам управляет sing-box; отдельный автозапуск
 					// от Podkop нужно погасить, иначе старт будет отклонён.
 					command += "/etc/init.d/sing-box stop >/dev/null 2>&1 || true; /etc/init.d/sing-box disable >/dev/null 2>&1 || true; ubus call service delete '{ \"name\": \"sing-box\" }' >/dev/null 2>&1 || true; ";
