@@ -1465,6 +1465,11 @@ function apply_product_config(to) {
 	let reload_res = reload(to);
 	if (!reload_res.ok)
 		push(warnings, "reload:" + reload_res.error);
+	if (to == "tachyon") {
+		let update_res = run.run_product("tachyon", [ "subscription_update_if_due" ], 180);
+		if (!update_res.ok)
+			push(warnings, "subscription_update:" + run.error_text(update_res));
+	}
 	try { fs.unlink(PRODUCT_MIGRATION_FILE); } catch (e) {}
 	return {
 		ok: true,

@@ -453,6 +453,11 @@ function run() {
 		if (pending.ok && int(pending.applied) > 0)
 			warn("pending product migration applied: " + pending.applied + " sections\n");
 	}
+	if (product == "tachyon") {
+		let upd = runner.run_product("tachyon", [ "subscription_update_if_due" ], 180);
+		if (!upd.ok)
+			warn("tachyon subscription update: " + runner.error_text(upd) + "\n");
+	}
 
 	write_status(cfg, product);
 
