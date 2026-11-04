@@ -1267,6 +1267,7 @@ function apply_tachyon_subscription(section, subscriptions, args) {
 	let source_name = "src_sub_" + replace(section, /[^A-Za-z0-9_]/g, "_");
 	cursor.delete("tachyon", source_name);
 	cursor.set("tachyon", source_name, "outbound_source");
+	cursor.set("tachyon", source_name, "section", section);
 	cursor.set("tachyon", source_name, "enabled", "1");
 	cursor.set("tachyon", source_name, "name", util.as_string(sub.label) != "" ? util.as_string(sub.label) : "Подписка");
 	cursor.set("tachyon", source_name, "source_type", "subscription");
