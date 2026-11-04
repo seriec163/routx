@@ -1635,9 +1635,10 @@ export async function applyRouterConnections(ctx: HandlerContext, job: JobRow): 
     }
 
     await setJobPhase(ctx, job.id, 'reload', 70);
+    await runCommand(ctx, job, 'reload', {}, 300_000);
     await runCommand(ctx, job, 'service_action', { action: 'start' }, 180_000);
-    // Reload после старта: Prokop/Forkop записывают неудачный reload в
-    // health, если служба была ещё остановлена.
+    // Повторный reload после старта: Prokop/Forkop записывают неудачный
+    // reload в health, если первая попытка была до готовности службы.
     await runCommand(ctx, job, 'reload', {}, 300_000);
     await setJobPhase(ctx, job.id, 'verify', 85);
     const raw = await runCommand(ctx, job, 'read_state', {}, 60_000);
