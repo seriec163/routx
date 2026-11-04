@@ -1318,7 +1318,7 @@ function apply_connections(product, args) {
 		let label = trim(util.as_string(raw.label));
 		if (match(name, SECTION_RE) == null || match(url, SUBSCRIPTION_RE) == null)
 			return { ok: false, error: "invalid_subscription" };
-		push(subscriptions, { name: name, url: url, label: label.slice(0, 120) });
+		push(subscriptions, { name: name, url: url, label: substr(label, 0, 120) });
 		if (length(subscriptions) > 100)
 			return { ok: false, error: "too_many_subscriptions" };
 		} catch (e) {
