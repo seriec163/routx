@@ -1247,6 +1247,17 @@ function migration_append_list(target, value) {
 	}
 }
 
+function migration_copy_options(cursor, product, name, options) {
+	if (type(options) != "object")
+		return;
+	for (let key in options) {
+		if (key == "" || substr(key, 0, 1) == "." || key == "url" || key == "section" ||
+		    key == "name" || key == "source_type" || key == "enabled")
+			continue;
+		cursor.set(product, name, key, options[key]);
+	}
+}
+
 function capture_product_config(from, to) {
 	let cursor = uci.cursor();
 	let all = cursor.get_all(from);
@@ -1288,12 +1299,16 @@ function capture_product_config(from, to) {
 				continue;
 			if (child[".type"] == "subscription_url" && util.as_string(child.section) == section) {
 				if (util.as_string(child.url) != "") {
+					let sub_options = {};
+					for (let option in child) {
+						if (option == "" || substr(option, 0, 1) == "." || option == "url" || option == "section" || option == "name")
+							continue;
+						sub_options[option] = child[option];
+					}
 					push(item.subscriptions, {
 						url: util.as_string(child.url),
 						label: util.as_string(child.name),
-						update_enabled: util.as_string(child.subscription_update_enabled),
-						update_interval: util.as_string(child.subscription_update_interval),
-						download_via_proxy: util.as_string(child.download_via_proxy_enabled)
+						options: sub_options
 					});
 					subscription_count++;
 				}
@@ -1303,12 +1318,16 @@ function capture_product_config(from, to) {
 			let source_type = lc(util.as_string(child.source_type));
 			if (source_type == "subscription") {
 				if (util.as_string(child.url) != "") {
+					let sub_options = {};
+					for (let option in child) {
+						if (option == "" || substr(option, 0, 1) == "." || option == "url" || option == "section" || option == "name" || option == "source_type")
+							continue;
+						sub_options[option] = child[option];
+					}
 					push(item.subscriptions, {
 						url: util.as_string(child.url),
 						label: util.as_string(child.name),
-						update_enabled: util.as_string(child.subscription_update_enabled),
-						update_interval: util.as_string(child.subscription_update_interval),
-						download_via_proxy: util.as_string(child.download_via_proxy_enabled)
+						options: sub_options
 					});
 					subscription_count++;
 				}
@@ -1394,6 +1413,7 @@ function apply_product_config(to) {
 				cursor.set(to, source, "download_via_proxy_enabled", util.as_string(sub.download_via_proxy) != "" ? sub.download_via_proxy : "0");
 				cursor.set(to, source, "prefix_nodes", "0");
 				cursor.set(to, source, "include_urltest_groups", "1");
+				migration_copy_options(cursor, to, source, sub.options);
 				push(refs, source);
 				subscriptions++;
 			}
@@ -1429,6 +1449,7 @@ function apply_product_config(to) {
 				cursor.set(to, name, "subscription_update_enabled", util.as_string(sub.update_enabled) != "" ? sub.update_enabled : "1");
 				cursor.set(to, name, "subscription_update_interval", util.as_string(sub.update_interval) != "" ? sub.update_interval : "1h");
 				cursor.set(to, name, "download_via_proxy_enabled", util.as_string(sub.download_via_proxy) != "" ? sub.download_via_proxy : "0");
+				migration_copy_options(cursor, to, name, sub.options);
 				subscriptions++;
 			}
 			if (length(item.links) > 0) {
@@ -1453,6 +1474,7 @@ function apply_product_config(to) {
 					cursor.set(to, name, "section", section);
 					cursor.set(to, name, "name", util.as_string(sub.label) != "" ? sub.label : "Подписка");
 					cursor.set(to, name, "url", sub.url);
+					migration_copy_options(cursor, to, name, sub.options);
 					push(warnings, "podkop_subscription:" + section);
 				}
 				subscriptions += length(item.subscriptions);
