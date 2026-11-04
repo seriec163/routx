@@ -8,12 +8,14 @@ import {
   Panel,
   Select,
   Spinner,
+  Stat,
   Switch,
   TextInput,
   useToast,
 } from '../components/ui';
 import { api, errorMessage } from '../lib/api';
-import type { SettingsEffective, SettingsResponse } from '../lib/types';
+import { formatBytes } from '../lib/format';
+import type { SettingsEffective, SettingsResponse, SettingsStorage } from '../lib/types';
 import { useApi } from '../lib/useApi';
 
 interface FormState {
@@ -47,6 +49,7 @@ function StatusBadge({ tone, children }: { tone: 'ok' | 'warn' | 'muted'; childr
 export function SettingsPage() {
   const toast = useToast();
   const settings = useApi<SettingsResponse>('/api/v1/settings');
+  const storage = useApi<SettingsStorage>('/api/v1/settings/storage');
   const [form, setForm] = useState<FormState | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -393,6 +396,64 @@ export function SettingsPage() {
                 />
               </Field>
             </div>
+          </Panel>
+
+          <Panel
+            title="Логи и история"
+            subtitle="Сколько места занимают журналы, история заданий, мониторинг и отчёты в PostgreSQL."
+            actions={
+              <Button
+                variant="ghost"
+                onClick={() => void storage.reload()}
+                busy={storage.loading}
+                disabled={storage.loading}
+              >
+                Обновить
+              </Button>
+            }
+          >
+            {storage.loading && !storage.data ? <Spinner label="Считаем размер…" /> : null}
+            {storage.error ? (
+              <ErrorBanner message={storage.error} onRetry={() => void storage.reload()} />
+            ) : null}
+            {storage.data ? (
+              <>
+                <div className="grid-2 grid-2-compact">
+                  <Stat label="Журналы и история" value={formatBytes(storage.data.log_bytes)} />
+                  <Stat label="Вся база" value={formatBytes(storage.data.database_bytes)} />
+                </div>
+                <p className="field-hint">
+                  Срок хранения истории: {storage.data.retention.days} дн., журнал команд агента:{' '}
+                  {storage.data.retention.commandsDays} дн., снимков на роутер:{' '}
+                  {storage.data.retention.snapshotsLocal}.
+                </p>
+                <div className="table-wrap">
+                  <table className="table">
+                    <thead>
+                      <tr>
+                        <th>Таблица</th>
+                        <th>Строк</th>
+                        <th>Размер</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {storage.data.tables.map((table) => (
+                        <tr key={table.name}>
+                          <td className="mono small">{table.name}</td>
+                          <td>{table.rows.toLocaleString('ru-RU')}</td>
+                          <td>{formatBytes(table.bytes)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                <p className="field-hint">
+                  Сырые логи контейнера Docker сюда не входят: они лежат вне PostgreSQL и смотрятся
+                  через <span className="mono">docker compose logs</span>. Таблица показывает
+                  журналы и историю, которые RoutX хранит в базе.
+                </p>
+              </>
+            ) : null}
           </Panel>
 
           <Panel

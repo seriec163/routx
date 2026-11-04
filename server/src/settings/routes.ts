@@ -78,6 +78,26 @@ const patchSchema = z
 
 const RAW_KEYS = ['limits', 'monitoring', 'retention', 'agent', 'singbox', 'features'] as const;
 
+// Таблицы, в которых RoutX хранит журналы, историю и отчёты. Размер
+// считается по pg_total_relation_size, включая индексы и TOAST.
+const LOG_TABLES = [
+  'audit_log',
+  'jobs',
+  'job_events',
+  'agent_commands',
+  'monitoring_samples',
+  'monitoring_rollups',
+  'diagnostics_reports',
+  'agent_reports',
+  'notifications',
+  'router_snapshots',
+  'apply_runs',
+  'apply_items',
+  'connection_edits',
+  'rollouts',
+  'rollout_targets',
+] as const;
+
 export async function registerSettingsRoutes(
   app: FastifyInstance,
   ctx: RouteContext,
@@ -93,6 +113,43 @@ export async function registerSettingsRoutes(
         order by key`,
     );
     return { effective: await loadSettings(pool), values: raw.rows };
+  });
+
+  // Сколько места занимают журналы и история в PostgreSQL. Сырые логи
+  // контейнера Docker сюда не входят: они лежат вне базы и смотрятся
+  // через `docker compose logs`.
+  app.get('/api/v1/settings/storage', async (request) => {
+    requireSuperadmin(request);
+    const [tables, database, settings] = await Promise.all([
+      pool.query<{ name: string; bytes: string; rows: string }>(
+        `select c.relname as name,
+                pg_total_relation_size(c.oid)::text as bytes,
+                coalesce(s.n_live_tup, 0)::text as rows
+           from pg_class c
+           join pg_namespace n on n.oid = c.relnamespace
+           left join pg_stat_user_tables s on s.relid = c.oid
+          where n.nspname = 'public'
+            and c.relname = any($1::text[])
+          order by pg_total_relation_size(c.oid) desc`,
+        [LOG_TABLES],
+      ),
+      pool.query<{ bytes: string }>(
+        'select pg_database_size(current_database())::text as bytes',
+      ),
+      loadSettings(pool),
+    ]);
+    const items = tables.rows.map((row) => ({
+      name: row.name,
+      bytes: Number(row.bytes) || 0,
+      rows: Number(row.rows) || 0,
+    }));
+    return {
+      generated_at: new Date().toISOString(),
+      database_bytes: Number(database.rows[0]?.bytes ?? 0) || 0,
+      log_bytes: items.reduce((sum, item) => sum + item.bytes, 0),
+      tables: items,
+      retention: settings.retention,
+    };
   });
 
   app.patch('/api/v1/settings', async (request) => {

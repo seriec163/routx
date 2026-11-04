@@ -644,6 +644,20 @@ export interface SettingsResponse {
   values: Array<{ key: string; value: Record<string, unknown>; updated_at: string }>;
 }
 
+export interface SettingsStorageTable {
+  name: string;
+  bytes: number;
+  rows: number;
+}
+
+export interface SettingsStorage {
+  generated_at: string;
+  database_bytes: number;
+  log_bytes: number;
+  tables: SettingsStorageTable[];
+  retention: { days: number; commandsDays: number; snapshotsLocal: number };
+}
+
 export interface Allowlist {
   settings: string[];
   section: string[];
