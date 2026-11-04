@@ -251,7 +251,8 @@ routx-agent status
 - **1.5.20+** — при переходе на Prokop sing-box ставится заранее с
   `--force-space`, поэтому установка не упирается в расчёт свободного места;
 - **1.5.21+** — при установке Prokop снимается зависший nft-guard
-  `ProkopConfigRestoreDpiGuard`, из-за которого health оставался `error`.
+  `ProkopConfigRestoreDpiGuard`, из-за которого health оставался `error`;
+- **1.5.22+** — при уходе с Prokop удаляется и пакет `luci-i18n-prokop-ru`.
 
 ## Частые ошибки установки
 

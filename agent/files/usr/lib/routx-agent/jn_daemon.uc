@@ -117,8 +117,8 @@ function handle_command(cmd) {
 			if (target == "tachyon") {
 				// Один роутер — один продукт: Tachyon не знает Prokop,
 				// поэтому его пакеты и ядро убираем до установки.
-				command = "if command -v opkg >/dev/null 2>&1; then /etc/init.d/prokop stop >/dev/null 2>&1 || true; /etc/init.d/podkop stop >/dev/null 2>&1 || true; /etc/init.d/forkop stop >/dev/null 2>&1 || true; opkg remove --force-depends prokop luci-app-prokop podkop luci-app-podkop forkop luci-app-forkop luci-i18n-forkop-ru sing-box-forkop sing-box sing-box-tiny >/dev/null 2>&1 || true; fi; ";
-				command += "if command -v apk >/dev/null 2>&1; then apk del prokop luci-app-prokop podkop luci-app-podkop forkop luci-app-forkop luci-i18n-forkop-ru sing-box-forkop sing-box sing-box-tiny >/dev/null 2>&1 || true; fi; ";
+				command = "if command -v opkg >/dev/null 2>&1; then /etc/init.d/prokop stop >/dev/null 2>&1 || true; /etc/init.d/podkop stop >/dev/null 2>&1 || true; /etc/init.d/forkop stop >/dev/null 2>&1 || true; opkg remove --force-depends prokop luci-app-prokop luci-i18n-prokop-ru podkop luci-app-podkop forkop luci-app-forkop luci-i18n-forkop-ru sing-box-forkop sing-box sing-box-tiny >/dev/null 2>&1 || true; fi; ";
+				command += "if command -v apk >/dev/null 2>&1; then apk del prokop luci-app-prokop luci-i18n-prokop-ru podkop luci-app-podkop forkop luci-app-forkop luci-i18n-forkop-ru sing-box-forkop sing-box sing-box-tiny >/dev/null 2>&1 || true; fi; ";
 				command += "wget -O /tmp/tachyon-setup.sh https://raw.githubusercontent.com/Dushnilin/tachyon/main/install.sh && sh /tmp/tachyon-setup.sh -y --tachyon-core";
 				if (version != "")
 					command += " --tag " + version;
@@ -126,8 +126,8 @@ function handle_command(cmd) {
 				if (current == "tachyon")
 					command += "wget -O /tmp/tachyon-uninstall.sh https://raw.githubusercontent.com/Dushnilin/tachyon/main/uninstall.sh && sh /tmp/tachyon-uninstall.sh -y; ";
 				if (target == "podkop") {
-					command += "if command -v opkg >/dev/null 2>&1; then opkg remove --force-depends prokop luci-app-prokop sing-box-forkop tachyon-core luci-i18n-forkop-ru >/dev/null 2>&1 || true; fi; ";
-					command += "if command -v apk >/dev/null 2>&1; then apk del prokop luci-app-prokop sing-box-forkop tachyon-core luci-i18n-forkop-ru >/dev/null 2>&1 || true; fi; ";
+					command += "if command -v opkg >/dev/null 2>&1; then opkg remove --force-depends prokop luci-app-prokop luci-i18n-prokop-ru sing-box-forkop tachyon-core luci-i18n-forkop-ru >/dev/null 2>&1 || true; fi; ";
+					command += "if command -v apk >/dev/null 2>&1; then apk del prokop luci-app-prokop luci-i18n-prokop-ru sing-box-forkop tachyon-core luci-i18n-forkop-ru >/dev/null 2>&1 || true; fi; ";
 					command += "PODKOP_INSTALLER=\"$(wget -qO- https://raw.githubusercontent.com/itdoginfo/podkop/main/install.sh)\" && echo n | sh -c \"$PODKOP_INSTALLER\"; ";
 					command += "if ! command -v sing-box >/dev/null 2>&1; then if command -v apk >/dev/null 2>&1; then apk update >/dev/null 2>&1; apk add sing-box >/dev/null 2>&1 || apk add sing-box-tiny >/dev/null 2>&1 || true; else opkg update >/dev/null 2>&1; opkg install sing-box >/dev/null 2>&1 || opkg install sing-box-tiny >/dev/null 2>&1 || true; fi; fi";
 				} else if (target == "prokop") {
@@ -151,8 +151,8 @@ function handle_command(cmd) {
 					command += "wget -qO- https://asofwar.github.io/prokop/install.sh | sh -s -- --lang ru --confirm-legacy-migration";
 				} else {
 					// Forkop не умеет удалять Podkop/Prokop, делаем это сами.
-					command += "if command -v opkg >/dev/null 2>&1; then opkg remove --force-depends prokop luci-app-prokop podkop luci-app-podkop tachyon-core >/dev/null 2>&1 || true; fi; ";
-					command += "if command -v apk >/dev/null 2>&1; then apk del prokop luci-app-prokop podkop luci-app-podkop tachyon-core >/dev/null 2>&1 || true; fi; ";
+					command += "if command -v opkg >/dev/null 2>&1; then opkg remove --force-depends prokop luci-app-prokop luci-i18n-prokop-ru podkop luci-app-podkop tachyon-core >/dev/null 2>&1 || true; fi; ";
+					command += "if command -v apk >/dev/null 2>&1; then apk del prokop luci-app-prokop luci-i18n-prokop-ru podkop luci-app-podkop tachyon-core >/dev/null 2>&1 || true; fi; ";
 					command += "wget -qO- https://raw.githubusercontent.com/ushan0v/forkop/main/install.sh | sh -s";
 				}
 			}
