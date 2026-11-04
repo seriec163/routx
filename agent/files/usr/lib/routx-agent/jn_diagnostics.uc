@@ -140,9 +140,9 @@ function diagnostics_full(product) {
 			state: status.ok ? "ok" : "error",
 			details: status.ok ? util.truncate_text(status.stdout, 4000) : run.error_text(status)
 		});
-		let service = run.run_product("tachyon", [ "check_service" ], 20);
+		let service = run.run_product("tachyon", [ "get_sing_box_status" ], 20);
 		push(report.checks, {
-			name: "tachyon_check_service",
+			name: "tachyon_sing_box_status",
 			state: service.ok ? "ok" : "warning",
 			details: service.ok ? util.truncate_text(service.stdout, 8000) : run.error_text(service)
 		});
