@@ -1312,6 +1312,7 @@ function apply_connections(product, args) {
 	if (args.subscriptions != null && type(args.subscriptions) != "array")
 		return { ok: false, error: "subscriptions_not_array:" + type(args.subscriptions) + ":" + sprintf("%J", args.subscriptions) };
 	for (let raw in (args.subscriptions || [])) {
+		try {
 		let name = util.as_string(raw.name);
 		let url = trim(util.as_string(raw.url));
 		let label = trim(util.as_string(raw.label));
@@ -1320,6 +1321,9 @@ function apply_connections(product, args) {
 		push(subscriptions, { name: name, url: url, label: label.slice(0, 120) });
 		if (length(subscriptions) > 100)
 			return { ok: false, error: "too_many_subscriptions" };
+		} catch (e) {
+			return { ok: false, error: "subscription_item:" + type(raw) + ":" + sprintf("%J", raw) };
+		}
 	}
 
 	let cursor = uci.cursor();
