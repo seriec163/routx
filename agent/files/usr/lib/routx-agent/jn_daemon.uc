@@ -115,7 +115,11 @@ function handle_command(cmd) {
 			let current = platform.detect_product();
 			let command = "";
 			if (target == "tachyon") {
-				command = "wget -O /tmp/tachyon-setup.sh https://raw.githubusercontent.com/Dushnilin/tachyon/main/install.sh && sh /tmp/tachyon-setup.sh -y --tachyon-core";
+				// Один роутер — один продукт: Tachyon не знает Prokop,
+				// поэтому его пакеты и ядро убираем до установки.
+				command = "if command -v opkg >/dev/null 2>&1; then /etc/init.d/prokop stop >/dev/null 2>&1 || true; /etc/init.d/podkop stop >/dev/null 2>&1 || true; /etc/init.d/forkop stop >/dev/null 2>&1 || true; opkg remove --force-depends prokop luci-app-prokop podkop luci-app-podkop forkop luci-app-forkop luci-i18n-forkop-ru sing-box-forkop sing-box sing-box-tiny >/dev/null 2>&1 || true; fi; ";
+				command += "if command -v apk >/dev/null 2>&1; then apk del prokop luci-app-prokop podkop luci-app-podkop forkop luci-app-forkop luci-i18n-forkop-ru sing-box-forkop sing-box sing-box-tiny >/dev/null 2>&1 || true; fi; ";
+				command += "wget -O /tmp/tachyon-setup.sh https://raw.githubusercontent.com/Dushnilin/tachyon/main/install.sh && sh /tmp/tachyon-setup.sh -y --tachyon-core";
 				if (version != "")
 					command += " --tag " + version;
 			} else {
@@ -151,6 +155,11 @@ function handle_command(cmd) {
 				let cleanup = ops.cleanup_json_outbounds("tachyon");
 				if (cleanup.ok && cleanup.removed > 0)
 					runner.run_product("tachyon", [ "reload" ], 120);
+				// После установки Tachyon асинхронно обновляет списки и в это
+				// время может падать на ещё не собранных ruleset. Ждём
+				// завершения обновления и затем гарантированно стартуем.
+				let settle = "sleep 10; i=0; while [ $i -lt 40 ]; do tachyon list_update_status 2>/dev/null | grep -q '\"running\": true' || break; i=$((i+1)); sleep 3; done; tachyon start >/dev/null 2>&1 || true; i=0; while [ $i -lt 20 ]; do tachyon get_status 2>/dev/null | grep -q '\"running\": 1' && break; i=$((i+1)); sleep 2; done";
+				runner.run([ "sh", "-c", settle ], 190);
 			}
 			let detected = platform.detect_product();
 			if (detected != target && !res.ok)
