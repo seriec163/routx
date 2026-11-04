@@ -103,12 +103,13 @@ function agentContext(request: FastifyRequest): AgentAuthContext {
 
 const INSTALL_SCRIPT = `#!/bin/sh
 # RoutX agent installer.
-# Usage: sh install.sh --server URL --token BINDING_TOKEN [--product prokop|forkop|podkop|tachyon] [--sing-box tiny|stable|extended] [--reboot]
+# Usage: sh install.sh --server URL --token BINDING_TOKEN [--product prokop|forkop|podkop|tachyon] [--keep prokop|forkop|podkop|tachyon] [--sing-box tiny|stable|extended] [--reboot]
 set -eu
 
 SERVER=""
 TOKEN=""
 PRODUCT=""
+KEEP=""
 SINGBOX=""
 PRODUCT_ARG=""
 REBOOT="0"
@@ -117,6 +118,7 @@ while [ $# -gt 0 ]; do
     --server) SERVER="$2"; shift 2 ;;
     --token) TOKEN="$2"; shift 2 ;;
     --product) PRODUCT_ARG="$2"; shift 2 ;;
+    --keep) KEEP="$2"; shift 2 ;;
     --sing-box) SINGBOX="$2"; shift 2 ;;
     --reboot) REBOOT="1"; shift ;;
     *) echo "unknown argument: $1" >&2; exit 2 ;;
@@ -126,8 +128,12 @@ done
 [ -n "$SERVER" ] || { echo "--server is required" >&2; exit 2; }
 [ -n "$TOKEN" ] || { echo "--token is required" >&2; exit 2; }
 case "$PRODUCT_ARG" in
-  ""|prokop|forkop|podkop) ;;
+  ""|prokop|forkop|podkop|tachyon) ;;
   *) echo "--product must be prokop, forkop, podkop or tachyon" >&2; exit 2 ;;
+esac
+case "$KEEP" in
+  ""|prokop|forkop|podkop|tachyon) ;;
+  *) echo "--keep must be prokop, forkop, podkop or tachyon" >&2; exit 2 ;;
 esac
 case "$SINGBOX" in
   ""|tiny|stable|extended) ;;
@@ -136,7 +142,6 @@ esac
 
 has_prokop() {
   [ -x /usr/bin/prokop ] && return 0
-  [ -f /etc/config/prokop ] && return 0
   [ -x /etc/init.d/prokop ] && return 0
   if command -v opkg >/dev/null 2>&1; then
     opkg list-installed 2>/dev/null | grep -q '^prokop ' && return 0
@@ -147,7 +152,6 @@ has_prokop() {
 }
 has_forkop() {
   [ -x /usr/bin/forkop ] && return 0
-  [ -f /etc/config/forkop ] && return 0
   [ -x /etc/init.d/forkop ] && return 0
   if command -v opkg >/dev/null 2>&1; then
     opkg list-installed 2>/dev/null | grep -q '^forkop ' && return 0
@@ -185,6 +189,55 @@ pkg_del() {
   fi
 }
 
+product_label() {
+  case "$1" in
+    prokop) echo "Prokop" ;;
+    forkop) echo "Forkop" ;;
+    podkop) echo "Podkop" ;;
+    tachyon) echo "Tachyon" ;;
+  esac
+}
+
+product_packages() {
+  case "$1" in
+    prokop) echo "prokop luci-app-prokop luci-i18n-prokop-ru" ;;
+    forkop) echo "forkop luci-app-forkop luci-i18n-forkop-ru sing-box-forkop" ;;
+    podkop) echo "podkop luci-app-podkop" ;;
+    tachyon) echo "tachyon luci-app-tachyon luci-i18n-tachyon-ru tachyon-core" ;;
+  esac
+}
+
+product_version() {
+  case "$1" in
+    prokop|forkop|podkop|tachyon)
+      if command -v "$1" >/dev/null 2>&1; then
+        "$1" show_version 2>/dev/null | head -n 1
+      fi
+      ;;
+  esac
+}
+
+remove_product() {
+  remove_name="$1"
+  echo "Удаляю $(product_label "$remove_name") ..." >&2
+  if [ -x "/etc/init.d/$remove_name" ]; then
+    "/etc/init.d/$remove_name" stop >/dev/null 2>&1 || true
+    "/etc/init.d/$remove_name" disable >/dev/null 2>&1 || true
+  fi
+  for remove_pkg in $(product_packages "$remove_name"); do
+    pkg_del "$remove_pkg"
+  done
+  rm -f "/usr/bin/$remove_name" "/etc/init.d/$remove_name" 2>/dev/null || true
+  if [ -f "/etc/config/$remove_name" ]; then
+    mv "/etc/config/$remove_name" "/etc/config/$remove_name.routx-removed-$(date +%Y%m%d-%H%M%S)" 2>/dev/null ||
+      rm -f "/etc/config/$remove_name"
+  fi
+  if [ "$remove_name" = "prokop" ] && command -v nft >/dev/null 2>&1; then
+    nft delete table inet ProkopConfigRestoreDpiGuard >/dev/null 2>&1 || true
+  fi
+  REMOVED="$REMOVED $remove_name"
+}
+
 has_podkop() {
   # /etc/config/podkop появляется до готовности пакета, поэтому его одного мало.
   [ -x /usr/bin/podkop ] && return 0
@@ -206,22 +259,81 @@ has_forkop && HAS_FORKOP=1
 has_podkop && HAS_PODKOP=1
 has_tachyon && HAS_TACHYON=1
 FOUND=$((HAS_PROKOP + HAS_FORKOP + HAS_PODKOP + HAS_TACHYON))
+FOUND_KEYS=""
+for found_name in prokop forkop podkop tachyon; do
+  case "$found_name" in
+    prokop) [ "$HAS_PROKOP" -eq 1 ] && FOUND_KEYS="$FOUND_KEYS $found_name" ;;
+    forkop) [ "$HAS_FORKOP" -eq 1 ] && FOUND_KEYS="$FOUND_KEYS $found_name" ;;
+    podkop) [ "$HAS_PODKOP" -eq 1 ] && FOUND_KEYS="$FOUND_KEYS $found_name" ;;
+    tachyon) [ "$HAS_TACHYON" -eq 1 ] && FOUND_KEYS="$FOUND_KEYS $found_name" ;;
+  esac
+done
+
 if [ "$FOUND" -gt 1 ]; then
-  echo "На роутере одновременно найдено несколько продуктов (Prokop/Forkop/Podkop/Tachyon). Изменения запрещены: устраните конфликт вручную." >&2
-  exit 1
-fi
-if [ "$HAS_PROKOP" -eq 1 ]; then
-  PRODUCT="prokop"
-elif [ "$HAS_FORKOP" -eq 1 ]; then
-  PRODUCT="forkop"
-elif [ "$HAS_PODKOP" -eq 1 ]; then
-  PRODUCT="podkop"
-elif [ "$HAS_TACHYON" -eq 1 ]; then
-  PRODUCT="tachyon"
-fi
-if [ -n "$PRODUCT_ARG" ] && [ -n "$PRODUCT" ] && [ "$PRODUCT_ARG" != "$PRODUCT" ]; then
-  echo "На роутере уже установлен $PRODUCT, а запрошен $PRODUCT_ARG. Один роутер — один продукт." >&2
-  exit 1
+  echo "На роутере найдено несколько продуктов:" >&2
+  found_index=0
+  for found_name in $FOUND_KEYS; do
+    found_index=$((found_index + 1))
+    echo "  $found_index) $(product_label "$found_name") $(product_version "$found_name")" >&2
+    echo "     пакеты: $(product_packages "$found_name")" >&2
+  done
+  if [ -z "$KEEP" ] && [ -n "$PRODUCT_ARG" ]; then
+    case " $FOUND_KEYS " in
+      *" $PRODUCT_ARG "*) KEEP="$PRODUCT_ARG" ;;
+    esac
+  fi
+  if [ -z "$KEEP" ]; then
+    if ! ( : </dev/tty ) 2>/dev/null; then
+      echo "Укажите, какой продукт оставить активным: --keep prokop|forkop|podkop|tachyon" >&2
+      exit 2
+    fi
+    printf 'Какой продукт оставить активным? [1]: ' >/dev/tty
+    read -r keep_choice </dev/tty || keep_choice=""
+    [ -n "$keep_choice" ] || keep_choice="1"
+    found_index=0
+    for found_name in $FOUND_KEYS; do
+      found_index=$((found_index + 1))
+      [ "$found_index" = "$keep_choice" ] && KEEP="$found_name"
+    done
+  fi
+  case " $FOUND_KEYS " in
+    *" $KEEP "*) ;;
+    *) echo "Продукт '$KEEP' не найден среди установленных." >&2; exit 2 ;;
+  esac
+  REMOVED=""
+  for found_name in $FOUND_KEYS; do
+    [ "$found_name" = "$KEEP" ] && continue
+    remove_product "$found_name"
+  done
+  PRODUCT="$KEEP"
+  REMAIN=0
+  has_prokop && REMAIN=$((REMAIN + 1))
+  has_forkop && REMAIN=$((REMAIN + 1))
+  has_podkop && REMAIN=$((REMAIN + 1))
+  has_tachyon && REMAIN=$((REMAIN + 1))
+  if [ "$REMAIN" -gt 1 ]; then
+    echo "Не удалось удалить лишние продукты (осталось $REMAIN). Устраните конфликт вручную." >&2
+    exit 1
+  fi
+  echo "Оставлен активным: $(product_label "$PRODUCT") $PRODUCT." >&2
+  echo "Удалено:$REMOVED" >&2
+  if [ -x "/etc/init.d/$PRODUCT" ]; then
+    "/etc/init.d/$PRODUCT" start >/dev/null 2>&1 || true
+  fi
+elif [ "$FOUND" -eq 1 ]; then
+  for found_name in $FOUND_KEYS; do
+    PRODUCT="$found_name"
+    break
+  done
+  if [ -n "$KEEP" ] && [ "$KEEP" != "$PRODUCT" ]; then
+    echo "На роутере уже установлен $PRODUCT, а запрошен $KEEP. Один роутер — один продукт." >&2
+    exit 1
+  fi
+  if [ -n "$PRODUCT_ARG" ] && [ "$PRODUCT_ARG" != "$PRODUCT" ]; then
+    echo "На роутере уже установлен $PRODUCT, а запрошен $PRODUCT_ARG. Один роутер — один продукт." >&2
+    echo "Чтобы заменить продукт, удалите старый или используйте панель RoutX." >&2
+    exit 1
+  fi
 fi
 if [ -z "$PRODUCT" ] && [ -n "$PRODUCT_ARG" ]; then
   PRODUCT="$PRODUCT_ARG"
