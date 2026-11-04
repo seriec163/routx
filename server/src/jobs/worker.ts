@@ -256,12 +256,21 @@ export class JobWorker {
           and r.status in ('online','offline')
           and not exists (
             select 1 from jobs j
-             where j.router_id = r.id and j.type = 'monitor'
+             where j.router_id = r.id
                and j.status in ('queued','running')
-               and j.created_at > now() - interval '90 seconds'
+               and j.type in ('monitor','product_switch','connections_apply','apply','agent_update','sb_install','restore')
           )
        on conflict (idempotency_key) where idempotency_key is not null do nothing`,
       [interval, stagger],
+    );
+
+    // Устаревшие мониторинги не должны копиться в очереди, пока роутер
+    // занят длинной операцией: иначе они выполняются пачкой после неё.
+    await this.pool.query(
+      `update jobs set status = 'timeout', finished_at = now(),
+              error_code = 'lease_expired', error_detail = 'Задача мониторинга устарела'
+        where status = 'queued' and type = 'monitor'
+          and created_at < now() - interval '10 minutes'`,
     );
 
     await this.pool.query(
