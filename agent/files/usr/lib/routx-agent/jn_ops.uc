@@ -671,14 +671,39 @@ function manage_connection(product, args) {
 		let name = util.as_string(args.name);
 		if (match(name, SECTION_RE) == null)
 			return { ok: false, error: "invalid_name" };
-		if (cursor.get(product, name) != "subscription_url")
+		let source_type = cursor.get(product, name);
+		if (source_type == "subscription_url") {
+			if (util.as_string(cursor.get(product, name, "section")) != section)
+				return { ok: false, error: "subscription_section_mismatch" };
+			if (action == "delete")
+				cursor.delete(product, name);
+			else
+				cursor.set(product, name, "url", value);
+		} else if (product == "tachyon" && source_type == "outbound_source") {
+			if (lc(util.as_string(cursor.get(product, name, "source_type"))) != "subscription")
+				return { ok: false, error: "subscription_missing" };
+			if (util.as_string(cursor.get(product, name, "section")) != section)
+				return { ok: false, error: "subscription_section_mismatch" };
+			if (action == "delete") {
+				cursor.delete(product, name);
+				let refs = cursor.get(product, section, "outbound_source_refs");
+				if (type(refs) != "array")
+					refs = refs == null ? [] : [ refs ];
+				let keep = [];
+				for (let ref in refs) {
+					let ref_value = util.as_string(ref);
+					if (ref_value != "" && ref_value != name)
+						push(keep, ref_value);
+				}
+				cursor.delete(product, section, "outbound_source_refs");
+				if (length(keep) > 0)
+					cursor.set(product, section, "outbound_source_refs", keep);
+			} else {
+				cursor.set(product, name, "url", value);
+			}
+		} else {
 			return { ok: false, error: "subscription_missing" };
-		if (util.as_string(cursor.get(product, name, "section")) != section)
-			return { ok: false, error: "subscription_section_mismatch" };
-		if (action == "delete")
-			cursor.delete(product, name);
-		else
-			cursor.set(product, name, "url", value);
+		}
 	} else {
 		let hash = util.as_string(args.hash);
 		if (match(hash, /^[a-f0-9]{64}$/) == null)
@@ -720,6 +745,9 @@ function manage_connection(product, args) {
 		for (let sname in all) {
 			let sect = all[sname];
 			if (type(sect) == "object" && sect[".type"] == "subscription_url" &&
+			    util.as_string(sect.section) == section)
+				subscriptions++;
+			if (product == "tachyon" && type(sect) == "object" && sect[".type"] == "outbound_source" &&
 			    util.as_string(sect.section) == section)
 				subscriptions++;
 		}
