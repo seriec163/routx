@@ -19,7 +19,7 @@ import {
   useToast,
 } from '../components/ui';
 import { api, errorMessage } from '../lib/api';
-import { APPLY_STATUS, formatRelative } from '../lib/format';
+import { APPLY_STATUS, formatRelative, PRODUCT_LABEL } from '../lib/format';
 import type {
   ApplyRunDetail,
   CatalogSubscription,
@@ -233,6 +233,7 @@ export function RouterRulesPanel(props: {
 
   const online = props.router.status === 'online';
   const isPodkop = props.router.product === 'podkop';
+  const productLabel = PRODUCT_LABEL[props.router.product] ?? 'продукт';
   const actions = catalog.data?.actions?.length ? catalog.data.actions : ACTION_FALLBACK;
   const services = catalog.data?.services ?? [];
 
@@ -647,9 +648,9 @@ export function RouterRulesPanel(props: {
 
         {rules.length > 0 && enabledRules.length === 1 ? (
           <InfoBanner tone="warn">
-            В Prokop должно оставаться хотя бы одно включённое правило. Последнее включённое правило
-            нельзя выключить или оставить без источника подключения — иначе Prokop не сможет
-            собрать конфигурацию.
+            В {productLabel} должно оставаться хотя бы одно включённое правило. Последнее включённое
+            правило нельзя выключить или оставить без источника подключения — иначе {productLabel} не
+            сможет собрать конфигурацию.
           </InfoBanner>
         ) : null}
 
@@ -670,6 +671,7 @@ export function RouterRulesPanel(props: {
                 key={rule.section}
                 rule={rule}
                 services={services}
+                productLabel={productLabel}
                 onEdit={() => openEdit(rule)}
                 onAddConnection={() =>
                   setConnectionTarget({ rule, connection: null })
@@ -808,6 +810,7 @@ export function RouterRulesPanel(props: {
 function RuleCard(props: {
   rule: RuleView;
   services: RoutingService[];
+  productLabel: string;
   disabled: boolean;
   onEdit: () => void;
   onAddConnection: () => void;
@@ -864,10 +867,10 @@ function RuleCard(props: {
         </InfoBanner>
       ))}
 
-      {canHaveConnections && rule.subscriptions.length + rule.links.length === 0 ? (
+      {canHaveConnections && rule.enabled && rule.subscriptions.length + rule.links.length === 0 ? (
         <InfoBanner tone="warn">
-          У правила нет источника подключения. Добавьте подписку или VLESS-ссылку, иначе Prokop
-          не сможет пустить трафик через VPN.
+          У правила нет источника подключения. Добавьте подписку или VLESS-ссылку, иначе{' '}
+          {props.productLabel} не сможет пустить трафик через VPN.
         </InfoBanner>
       ) : null}
 

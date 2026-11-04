@@ -428,6 +428,17 @@ function run() {
 		return 1;
 	}
 
+	// Старые конфиги Forkop после смены продукта могут содержать
+	// subscription_url. Tachyon понимает только outbound_source, поэтому
+	// переносим подписку, иначе прокси-группа не создаётся.
+	if (product == "tachyon") {
+		let migrated = ops.migrate_legacy_tachyon_subscriptions();
+		if (!migrated.ok)
+			warn("tachyon legacy subscription migration: " + util.as_string(migrated.error) + "\n");
+		else if (int(migrated.migrated) > 0)
+			warn("tachyon legacy subscriptions migrated: " + migrated.migrated + "\n");
+	}
+
 	write_status(cfg, product);
 
 	let bind_error = "";

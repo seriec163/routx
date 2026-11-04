@@ -1298,6 +1298,85 @@ function apply_tachyon_subscription(section, subscriptions, args) {
 	}
 }
 
+function migrate_legacy_tachyon_subscriptions() {
+	let stage = "init";
+	try {
+		let cursor = uci.cursor();
+		let all = cursor.get_all("tachyon");
+		if (type(all) != "object")
+			return { ok: true, migrated: 0 };
+		let legacy = [];
+		for (let sname in all) {
+			let sect = all[sname];
+			if (type(sect) != "object" || sect[".type"] != "subscription_url")
+				continue;
+			let section = util.as_string(sect.section);
+			let url = util.as_string(sect.url);
+			if (section == "" || url == "")
+				continue;
+			push(legacy, {
+				name: sname,
+				section: section,
+				url: url,
+				label: util.as_string(sect.name)
+			});
+		}
+		if (length(legacy) == 0)
+			return { ok: true, migrated: 0 };
+		stage = "migrate";
+		let migrated_sections = [];
+		let index = 0;
+		for (let sub in legacy) {
+			index = index + 1;
+			let source_name = "src_sub_" + replace(sub.section, /[^A-Za-z0-9_]/g, "_");
+			if (index > 1)
+				source_name = source_name + "_" + index;
+			cursor.delete("tachyon", source_name);
+			cursor.set("tachyon", source_name, "outbound_source");
+			cursor.set("tachyon", source_name, "section", sub.section);
+			cursor.set("tachyon", source_name, "enabled", "1");
+			cursor.set("tachyon", source_name, "name", sub.label != "" ? sub.label : "Подписка");
+			cursor.set("tachyon", source_name, "source_type", "subscription");
+			cursor.set("tachyon", source_name, "url", sub.url);
+			cursor.set("tachyon", source_name, "subscription_update_enabled", "1");
+			cursor.set("tachyon", source_name, "subscription_update_interval", "1h");
+			cursor.set("tachyon", source_name, "download_via_proxy_enabled", "0");
+			cursor.set("tachyon", source_name, "prefix_nodes", "0");
+			cursor.set("tachyon", source_name, "include_urltest_groups", "1");
+
+			let refs = cursor.get("tachyon", sub.section, "outbound_source_refs");
+			if (refs == null)
+				refs = [];
+			else if (type(refs) != "array")
+				refs = [ refs ];
+			let keep = [];
+			for (let ref in refs) {
+				let value = util.as_string(ref);
+				if (value != "")
+					push(keep, value);
+			}
+			keep = util.dedupe(keep);
+			push(keep, source_name);
+			cursor.delete("tachyon", sub.section, "outbound_source_refs");
+			cursor.set("tachyon", sub.section, "outbound_source_refs", keep);
+			cursor.set("tachyon", sub.section, "enabled", "1");
+			cursor.set("tachyon", sub.section, "action", "connection");
+			cursor.delete("tachyon", sub.name);
+			push(migrated_sections, sub.section);
+		}
+		stage = "commit";
+		if (cursor.commit("tachyon") == null)
+			return { ok: false, error: "uci commit failed" };
+		stage = "reload";
+		let reload_res = reload("tachyon");
+		if (!reload_res.ok)
+			return { ok: false, error: reload_res.error };
+		return { ok: true, migrated: length(legacy), sections: util.dedupe(migrated_sections) };
+	} catch (e) {
+		return { ok: false, error: "tachyon_legacy_migration_" + stage + ": " + e.message };
+	}
+}
+
 function apply_connections(product, args) {
 	if (product != "forkop" && product != "prokop" && product != "podkop" && product != "tachyon")
 		return { ok: false, error: "неизвестный продукт" };
@@ -1491,4 +1570,4 @@ function apply_connections(product, args) {
 	}
 }
 
-return { precheck, verify, service_action, reload, apply_uci, apply_connections, cleanup_json_outbounds, restore_section_options, list_connections, manage_connection, set_podkop_outbound, select_proxy, read_rules };
+return { precheck, verify, service_action, reload, apply_uci, apply_connections, cleanup_json_outbounds, restore_section_options, list_connections, manage_connection, set_podkop_outbound, select_proxy, read_rules, migrate_legacy_tachyon_subscriptions };
