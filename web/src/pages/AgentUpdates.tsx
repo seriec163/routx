@@ -4,7 +4,7 @@ import { api, errorMessage } from '../lib/api';
 import type { RouterRecord } from '../lib/types';
 import { useApi } from '../lib/useApi';
 
-const SELF_UPDATE_MIN = '1.2.4';
+const SELF_UPDATE_MIN = '1.5.0';
 
 function versionAtLeast(value: string | null | undefined, min: string): boolean {
   if (!value) return false;
