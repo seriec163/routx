@@ -132,6 +132,12 @@ function handle_command(cmd) {
 					// поэтому их пакеты удаляем заранее.
 					command += "if command -v opkg >/dev/null 2>&1; then opkg remove --force-depends podkop luci-app-podkop tachyon-core >/dev/null 2>&1 || true; fi; ";
 					command += "if command -v apk >/dev/null 2>&1; then apk del podkop luci-app-podkop tachyon-core >/dev/null 2>&1 || true; fi; ";
+					// Остатки Tachyon занимают место, которого не хватает
+					// установщику sing-box на роутерах с малым overlay.
+					command += "rm -rf /etc/tachyon /etc/tachyon-core /usr/share/tachyon-core /usr/lib/tachyon /usr/lib/tachyon-core; ";
+					// Prokop сам управляет sing-box; отдельный автозапуск
+					// от Podkop нужно погасить, иначе старт будет отклонён.
+					command += "/etc/init.d/sing-box stop >/dev/null 2>&1 || true; /etc/init.d/sing-box disable >/dev/null 2>&1 || true; ubus call service delete '{ \"name\": \"sing-box\" }' >/dev/null 2>&1 || true; ";
 					command += "wget -qO- https://asofwar.github.io/prokop/install.sh | sh -s -- --lang ru --confirm-legacy-migration";
 				} else {
 					// Forkop не умеет удалять Podkop/Prokop, делаем это сами.
