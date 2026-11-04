@@ -1192,9 +1192,11 @@ function restore_section_options(product, args) {
 	let restored = [];
 	let allowed = [
 		"community_lists", "rule_set", "rule_set_with_subnets", "domain",
-		"domain_suffix", "domain_keyword", "domain_regex", "user_domains",
-		"user_domains_text", "user_subnets", "user_subnets_text",
-		"local_domain_lists", "local_subnet_lists", "fully_routed_ips"
+		"domain_suffix", "domain_keyword", "domain_regex", "domain_ip_lists",
+		"user_domains", "user_domains_text", "user_subnets", "user_subnets_text",
+		"local_domain_lists", "local_subnet_lists", "fully_routed_ips",
+		"enable_udp_over_tcp", "mixed_proxy_enabled", "resolve_real_ip_for_routing",
+		"user_domain_list_type", "user_subnet_list_type"
 	];
 	for (let key in allowed) {
 		if (options[key] == null)
@@ -1202,12 +1204,16 @@ function restore_section_options(product, args) {
 		cursor.set(product, section, key, options[key]);
 		push(restored, key);
 	}
-	cursor.set(product, section, "enabled", "1");
+	let label = util.as_string(args.label);
+	if (label != "")
+		cursor.set(product, section, "label", label);
+	let enabled = args.enabled == null ? "1" : util.as_string(args.enabled);
+	cursor.set(product, section, "enabled", enabled == "0" ? "0" : "1");
 	if (product == "podkop") {
-		cursor.set(product, section, "connection_type", "proxy");
-		cursor.set(product, section, "proxy_config_type", "selector");
+		cursor.set(product, section, "connection_type", util.as_string(args.connection_type) != "" ? util.as_string(args.connection_type) : "proxy");
+		cursor.set(product, section, "proxy_config_type", util.as_string(args.proxy_config_type) != "" ? util.as_string(args.proxy_config_type) : "selector");
 	} else {
-		cursor.set(product, section, "action", "connection");
+		cursor.set(product, section, "action", util.as_string(args.action) != "" ? util.as_string(args.action) : "connection");
 	}
 	if (cursor.commit(product) == null)
 		return { ok: false, error: "uci commit failed" };
@@ -1215,6 +1221,258 @@ function restore_section_options(product, args) {
 	if (!reload_res.ok)
 		return { ok: false, error: reload_res.error };
 	return { ok: true, section: section, restored: restored };
+}
+
+const PRODUCT_MIGRATION_FILE = util.STATE_DIR + "/product-migration.json";
+const MIGRATION_OPTIONS = [
+	"community_lists", "rule_set", "rule_set_with_subnets", "domain",
+	"domain_suffix", "domain_keyword", "domain_regex", "domain_ip_lists",
+	"user_domains", "user_domains_text", "user_subnets", "user_subnets_text",
+	"local_domain_lists", "local_subnet_lists", "fully_routed_ips",
+	"enable_udp_over_tcp", "mixed_proxy_enabled", "resolve_real_ip_for_routing",
+	"user_domain_list_type", "user_subnet_list_type"
+];
+
+function migration_append_list(target, value) {
+	if (type(value) == "array") {
+		for (let item in value) {
+			let text = util.as_string(item);
+			if (text != "")
+				push(target, text);
+		}
+	} else {
+		let text = util.as_string(value);
+		if (text != "")
+			push(target, text);
+	}
+}
+
+function capture_product_config(from, to) {
+	let cursor = uci.cursor();
+	let all = cursor.get_all(from);
+	if (type(all) != "object")
+		return { ok: true, sections: 0, subscriptions: 0, links: 0 };
+	let sections = [];
+	let subscription_count = 0;
+	let link_count = 0;
+	for (let sname in all) {
+		let sect = all[sname];
+		if (type(sect) != "object" || sect[".type"] != "section")
+			continue;
+		let section = util.as_string(sect[".name"]) != "" ? util.as_string(sect[".name"]) : sname;
+		if (match(section, SECTION_RE) == null)
+			continue;
+		let item = {
+			name: section,
+			label: util.as_string(sect.label),
+			enabled: util.as_string(sect.enabled),
+			action: util.as_string(sect.action),
+			connection_type: util.as_string(sect.connection_type),
+			proxy_config_type: util.as_string(sect.proxy_config_type),
+			options: {},
+			subscriptions: [],
+			links: []
+		};
+		for (let key in MIGRATION_OPTIONS) {
+			if (sect[key] != null)
+				item.options[key] = sect[key];
+		}
+		for (let key in [ "selector_proxy_links", "proxy_links", "urltest_proxy_links", "proxy_string" ]) {
+			if (sect[key] != null) {
+				migration_append_list(item.links, sect[key]);
+			}
+		}
+		for (let other in all) {
+			let child = all[other];
+			if (type(child) != "object")
+				continue;
+			if (child[".type"] == "subscription_url" && util.as_string(child.section) == section) {
+				if (util.as_string(child.url) != "") {
+					push(item.subscriptions, {
+						url: util.as_string(child.url),
+						label: util.as_string(child.name),
+						update_enabled: util.as_string(child.subscription_update_enabled),
+						update_interval: util.as_string(child.subscription_update_interval),
+						download_via_proxy: util.as_string(child.download_via_proxy_enabled)
+					});
+					subscription_count++;
+				}
+			}
+			if (child[".type"] != "outbound_source" || util.as_string(child.section) != section)
+				continue;
+			let source_type = lc(util.as_string(child.source_type));
+			if (source_type == "subscription") {
+				if (util.as_string(child.url) != "") {
+					push(item.subscriptions, {
+						url: util.as_string(child.url),
+						label: util.as_string(child.name),
+						update_enabled: util.as_string(child.subscription_update_enabled),
+						update_interval: util.as_string(child.subscription_update_interval),
+						download_via_proxy: util.as_string(child.download_via_proxy_enabled)
+					});
+					subscription_count++;
+				}
+			} else if (source_type == "proxy_links") {
+				migration_append_list(item.links, child.proxy_links);
+			}
+		}
+		item.links = util.dedupe(item.links);
+		link_count += length(item.links);
+		push(sections, item);
+	}
+	let model = { from: from, to: to, sections: sections };
+	util.mkdir_p(util.STATE_DIR, 0700);
+	if (!util.write_atomic(PRODUCT_MIGRATION_FILE, util.json_string(model) + "\n", 0600))
+		return { ok: false, error: "migration_file_failed" };
+	return { ok: true, sections: length(sections), subscriptions: subscription_count, links: link_count };
+}
+
+function apply_product_config(to) {
+	let text = util.read_file(PRODUCT_MIGRATION_FILE, "");
+	if (trim(text) == "")
+		return { ok: true, applied: 0, subscriptions: 0, links: 0 };
+	let model = util.json_parse(text);
+	if (type(model) != "object" || type(model.sections) != "array")
+		return { ok: false, error: "invalid_migration_file" };
+	if (util.as_string(model.to) != "" && util.as_string(model.to) != to)
+		return { ok: true, applied: 0, subscriptions: 0, links: 0, skipped: true };
+	if (!util.file_exists("/etc/config/" + to))
+		util.write_atomic("/etc/config/" + to, "\n", 0600);
+	let cursor = uci.cursor();
+	let applied = 0;
+	let subscriptions = 0;
+	let links = 0;
+	let warnings = [];
+	for (let item in model.sections) {
+		let section = util.as_string(item.name);
+		if (match(section, SECTION_RE) == null)
+			continue;
+		if (cursor.get(to, section) == null)
+			cursor.set(to, section, "section");
+		if (util.as_string(item.label) != "")
+			cursor.set(to, section, "label", item.label);
+		if (util.as_string(item.enabled) != "")
+			cursor.set(to, section, "enabled", item.enabled);
+		if (to == "podkop") {
+			cursor.set(to, section, "connection_type", util.as_string(item.connection_type) != "" ? item.connection_type : "proxy");
+			cursor.set(to, section, "proxy_config_type", util.as_string(item.proxy_config_type) != "" ? item.proxy_config_type : "selector");
+		} else {
+			cursor.set(to, section, "action", util.as_string(item.action) != "" ? item.action : "connection");
+		}
+		for (let key in MIGRATION_OPTIONS) {
+			if (item.options[key] != null)
+				cursor.set(to, section, key, item.options[key]);
+		}
+
+		if (to == "tachyon") {
+			let refs = [];
+			let existing = cursor.get(to, section, "outbound_source_refs");
+			if (type(existing) == "array") {
+				for (let ref in existing) {
+					let value = util.as_string(ref);
+					if (value != "")
+						push(refs, value);
+				}
+			} else if (existing != null) {
+				push(refs, util.as_string(existing));
+			}
+			let sub_index = 0;
+			for (let sub in item.subscriptions) {
+				sub_index++;
+				let source = "src_sub_" + replace(section, /[^A-Za-z0-9_]/g, "_");
+				if (sub_index > 1)
+					source += "_" + sub_index;
+				cursor.delete(to, source);
+				cursor.set(to, source, "outbound_source");
+				cursor.set(to, source, "section", section);
+				cursor.set(to, source, "enabled", "1");
+				cursor.set(to, source, "name", util.as_string(sub.label) != "" ? sub.label : "Подписка");
+				cursor.set(to, source, "source_type", "subscription");
+				cursor.set(to, source, "url", sub.url);
+				cursor.set(to, source, "subscription_update_enabled", util.as_string(sub.update_enabled) != "" ? sub.update_enabled : "1");
+				cursor.set(to, source, "subscription_update_interval", util.as_string(sub.update_interval) != "" ? sub.update_interval : "1h");
+				cursor.set(to, source, "download_via_proxy_enabled", util.as_string(sub.download_via_proxy) != "" ? sub.download_via_proxy : "0");
+				cursor.set(to, source, "prefix_nodes", "0");
+				cursor.set(to, source, "include_urltest_groups", "1");
+				push(refs, source);
+				subscriptions++;
+			}
+			if (length(item.links) > 0) {
+				let source = "src_links_" + replace(section, /[^A-Za-z0-9_]/g, "_");
+				cursor.delete(to, source);
+				cursor.set(to, source, "outbound_source");
+				cursor.set(to, source, "section", section);
+				cursor.set(to, source, "enabled", "1");
+				cursor.set(to, source, "name", "Ссылки");
+				cursor.set(to, source, "source_type", "proxy_links");
+				cursor.set(to, source, "proxy_links", item.links);
+				push(refs, source);
+				links += length(item.links);
+			}
+			refs = util.dedupe(refs);
+			if (length(refs) > 0) {
+				cursor.delete(to, section, "outbound_source_refs");
+				cursor.set(to, section, "outbound_source_refs", refs);
+			}
+		} else if (to == "forkop" || to == "prokop") {
+			let sub_index = 0;
+			for (let sub in item.subscriptions) {
+				sub_index++;
+				let name = "sub_" + replace(section, /[^A-Za-z0-9_]/g, "_");
+				if (sub_index > 1)
+					name += "_" + sub_index;
+				cursor.delete(to, name);
+				cursor.set(to, name, "subscription_url");
+				cursor.set(to, name, "section", section);
+				cursor.set(to, name, "name", util.as_string(sub.label) != "" ? sub.label : "Подписка");
+				cursor.set(to, name, "url", sub.url);
+				cursor.set(to, name, "subscription_update_enabled", util.as_string(sub.update_enabled) != "" ? sub.update_enabled : "1");
+				cursor.set(to, name, "subscription_update_interval", util.as_string(sub.update_interval) != "" ? sub.update_interval : "1h");
+				cursor.set(to, name, "download_via_proxy_enabled", util.as_string(sub.download_via_proxy) != "" ? sub.download_via_proxy : "0");
+				subscriptions++;
+			}
+			if (length(item.links) > 0) {
+				cursor.set(to, section, "selector_proxy_links", item.links);
+				links += length(item.links);
+			}
+		} else if (to == "podkop") {
+			if (length(item.links) > 0) {
+				cursor.set(to, section, "connection_type", "proxy");
+				cursor.set(to, section, "proxy_config_type", "selector");
+				cursor.set(to, section, "selector_proxy_links", item.links);
+				links += length(item.links);
+			}
+			if (length(item.subscriptions) > 0) {
+				let sub_index = 0;
+				for (let sub in item.subscriptions) {
+					sub_index++;
+					let name = "sub_" + replace(section, /[^A-Za-z0-9_]/g, "_");
+					if (sub_index > 1)
+						name += "_" + sub_index;
+					cursor.set(to, name, "subscription_url");
+					cursor.set(to, name, "section", section);
+					cursor.set(to, name, "name", util.as_string(sub.label) != "" ? sub.label : "Подписка");
+					cursor.set(to, name, "url", sub.url);
+					push(warnings, "podkop_subscription:" + section);
+				}
+				subscriptions += length(item.subscriptions);
+			}
+		}
+		applied++;
+	}
+	if (cursor.commit(to) == null)
+		return { ok: false, error: "uci commit failed" };
+	let reload_res = reload(to);
+	if (!reload_res.ok)
+		push(warnings, "reload:" + reload_res.error);
+	try { fs.unlink(PRODUCT_MIGRATION_FILE); } catch (e) {}
+	return {
+		ok: true,
+		applied: applied,
+		subscriptions: subscriptions,
+		links: links,
+		warnings: warnings
+	};
 }
 
 function apply_tachyon_subscription(section, subscriptions, args) {
@@ -1570,4 +1828,4 @@ function apply_connections(product, args) {
 	}
 }
 
-return { precheck, verify, service_action, reload, apply_uci, apply_connections, cleanup_json_outbounds, restore_section_options, list_connections, manage_connection, set_podkop_outbound, select_proxy, read_rules, migrate_legacy_tachyon_subscriptions };
+return { precheck, verify, service_action, reload, apply_uci, apply_connections, cleanup_json_outbounds, restore_section_options, capture_product_config, apply_product_config, list_connections, manage_connection, set_podkop_outbound, select_proxy, read_rules, migrate_legacy_tachyon_subscriptions };

@@ -2000,8 +2000,7 @@ export async function productSwitch(ctx: HandlerContext, job: JobRow): Promise<J
     [routerId],
   );
   const managed = stateRow.rows[0]?.managed ?? {};
-  const restoreOptions: Record<string, unknown> = {};
-  for (const key of [
+  const allowedOptions = [
     'community_lists',
     'rule_set',
     'rule_set_with_subnets',
@@ -2009,6 +2008,7 @@ export async function productSwitch(ctx: HandlerContext, job: JobRow): Promise<J
     'domain_suffix',
     'domain_keyword',
     'domain_regex',
+    'domain_ip_lists',
     'user_domains',
     'user_domains_text',
     'user_subnets',
@@ -2016,9 +2016,44 @@ export async function productSwitch(ctx: HandlerContext, job: JobRow): Promise<J
     'local_domain_lists',
     'local_subnet_lists',
     'fully_routed_ips',
-  ]) {
-    const value = managed[`section.${section}.${key}`];
-    if (value !== undefined && value !== null) restoreOptions[key] = value;
+    'enable_udp_over_tcp',
+    'mixed_proxy_enabled',
+    'resolve_real_ip_for_routing',
+    'user_domain_list_type',
+    'user_subnet_list_type',
+  ];
+  const sectionOptions = new Map<string, Record<string, unknown>>();
+  const sectionMeta = new Map<
+    string,
+    {
+      enabled?: string;
+      label?: string;
+      action?: string;
+      connection_type?: string;
+      proxy_config_type?: string;
+    }
+  >();
+  for (const [key, value] of Object.entries(managed)) {
+    const match = /^section\.([A-Za-z0-9_.-]{1,64})\.(.+)$/.exec(key);
+    if (!match) continue;
+    const name = match[1]!;
+    const option = match[2]!;
+    if (
+      option === 'enabled' ||
+      option === 'label' ||
+      option === 'action' ||
+      option === 'connection_type' ||
+      option === 'proxy_config_type'
+    ) {
+      const meta = sectionMeta.get(name) ?? {};
+      meta[option] = String(value ?? '');
+      sectionMeta.set(name, meta);
+      continue;
+    }
+    if (!allowedOptions.includes(option)) continue;
+    const options = sectionOptions.get(name) ?? {};
+    options[option] = value;
+    sectionOptions.set(name, options);
   }
   await setJobPhase(ctx, job.id, 'product_switch', 10);
   const raw = await runCommand(
@@ -2039,21 +2074,41 @@ export async function productSwitch(ctx: HandlerContext, job: JobRow): Promise<J
     [routerId, product, productVersion],
   );
 
-  let restoreWarning: string | null = null;
-  if (Object.keys(restoreOptions).length > 0) {
+  const restoreWarnings: string[] = [];
+  for (const [name, options] of sectionOptions) {
+    const meta = sectionMeta.get(name) ?? {};
+    if (
+      Object.keys(options).length === 0 &&
+      !meta.enabled &&
+      !meta.label &&
+      !meta.action &&
+      !meta.connection_type
+    ) {
+      continue;
+    }
     try {
       await runCommand(
         ctx,
         job,
         'restore_section_options',
-        { section, options: restoreOptions },
+        {
+          section: name,
+          options,
+          enabled: meta.enabled ?? null,
+          label: meta.label ?? null,
+          action: meta.action ?? null,
+          connection_type: meta.connection_type ?? null,
+          proxy_config_type: meta.proxy_config_type ?? null,
+        },
         180_000,
       );
     } catch (error) {
-      restoreWarning =
-        error instanceof Error ? error.message : 'не удалось перенести настройки секции';
+      restoreWarnings.push(
+        `${name}: ${error instanceof Error ? error.message : 'не удалось перенести настройки секции'}`,
+      );
     }
   }
+  const restoreWarning = restoreWarnings.length > 0 ? restoreWarnings.join('; ') : null;
 
   // После смены продукта возвращаем подключения RoutX уже в формате нового
   // продукта: подписку для Forkop/Tachyon, импортированные ссылки для Podkop.
@@ -2073,6 +2128,7 @@ export async function productSwitch(ctx: HandlerContext, job: JobRow): Promise<J
     install_output: asString(raw.install_output) || null,
     removed_products: Array.isArray(raw.removed_products) ? raw.removed_products : [],
     installed_products: Array.isArray(raw.installed_products) ? raw.installed_products : [],
+    migration: raw.migration ?? null,
     restore_job_id: restoreJob.id,
     restore_warning: restoreWarning,
   };

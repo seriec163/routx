@@ -113,6 +113,9 @@ function handle_command(cmd) {
 			if (version != "" && match(version, /^[0-9]+([.][0-9]+){2,3}$/) == null)
 				return { status: "failed", error: { code: "invalid_product_version", message: "Некорректная версия продукта" } };
 			let current = platform.detect_product();
+			let captured = { ok: true, sections: 0, subscriptions: 0, links: 0 };
+			if (current != "unknown" && current != "conflict")
+				captured = ops.capture_product_config(current, target);
 			let before = platform.installed_products(true);
 			let command = "";
 			if (target == "tachyon") {
@@ -158,6 +161,9 @@ function handle_command(cmd) {
 				}
 			}
 			let res = runner.run([ "sh", "-c", command ], 1800);
+			let applied_migration = { ok: true, applied: 0, subscriptions: 0, links: 0, warnings: [] };
+			if (captured.ok && int(captured.sections) > 0)
+				applied_migration = ops.apply_product_config(target);
 			if (target == "tachyon") {
 				let cleanup = ops.cleanup_json_outbounds("tachyon");
 				if (cleanup.ok && cleanup.removed > 0)
@@ -193,6 +199,7 @@ function handle_command(cmd) {
 				requested_version: version,
 				removed_products: removed,
 				installed_products: after,
+				migration: applied_migration,
 				install_output: util.truncate_text(util.mask_secrets(runner.error_text(res)), 2000)
 			} };
 		}
@@ -437,6 +444,14 @@ function run() {
 			warn("tachyon legacy subscription migration: " + util.as_string(migrated.error) + "\n");
 		else if (int(migrated.migrated) > 0)
 			warn("tachyon legacy subscriptions migrated: " + migrated.migrated + "\n");
+	}
+
+	// Если агент перезапустился посреди смены продукта, применяем
+	// сохранённую миграцию секций и источников.
+	if (product != "unknown" && product != "conflict") {
+		let pending = ops.apply_product_config(product);
+		if (pending.ok && int(pending.applied) > 0)
+			warn("pending product migration applied: " + pending.applied + " sections\n");
 	}
 
 	write_status(cfg, product);
