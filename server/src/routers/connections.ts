@@ -383,6 +383,7 @@ export async function registerRouterConnectionRoutes(
           name: z.string().regex(/^[A-Za-z0-9_.-]{1,64}$/).optional(),
           hash: z.string().regex(/^[a-f0-9]{64}$/i).optional(),
           value: z.string().trim().min(8).max(8192).optional(),
+          subscription_id: z.string().uuid().optional(),
           section: z.string().regex(/^[A-Za-z0-9_.-]{1,64}$/).optional(),
         })
         .strict()
@@ -395,7 +396,9 @@ export async function registerRouterConnectionRoutes(
         )
         .refine(
           (value) =>
-            value.action === 'replace' ? Boolean(value.value) : !value.value,
+            value.action === 'replace'
+              ? Boolean(value.value || value.subscription_id)
+              : !value.value && !value.subscription_id,
           { message: 'Для замены нужно новое значение, для удаления оно не требуется' },
         )
         .parse(request.body);
@@ -403,15 +406,20 @@ export async function registerRouterConnectionRoutes(
       const router = await getRouterForMutation(pool, auth, params.id);
       assertOnline(router);
 
-      if (body.value) {
+      let replacement = body.value ?? '';
+      if (body.subscription_id) {
+        const catalog = await loadAccessibleSubscription(pool, auth, body.subscription_id);
+        replacement = decryptSecret(catalog.secret_enc, masterKey);
+      }
+      if (replacement) {
         if (body.kind === 'subscription') {
-          if (!SUBSCRIPTION_RE.test(body.value)) {
+          if (!SUBSCRIPTION_RE.test(replacement)) {
             throw badRequest(
               'invalid_subscription',
               'Ссылка на подписку должна начинаться с http:// или https://',
             );
           }
-        } else if (!VLESS_RE.test(body.value)) {
+        } else if (!VLESS_RE.test(replacement)) {
           throw badRequest(
             'invalid_link',
             'Поддерживаются ссылки vless://, vmess://, trojan://, ss://, ssr://, hysteria2://, hy2://, tuic://, anytls://, socks://',
@@ -420,11 +428,11 @@ export async function registerRouterConnectionRoutes(
       }
 
       let editId: string | null = null;
-      if (body.action === 'replace' && body.value) {
+      if (body.action === 'replace' && replacement) {
         editId = uuidv7();
         await pool.query(
           'insert into connection_edits (id, router_id, secret_enc) values ($1,$2,$3)',
-          [editId, router.id, encryptSecret(body.value, masterKey)],
+          [editId, router.id, encryptSecret(replacement, masterKey)],
         );
       }
 
@@ -661,11 +669,12 @@ export async function registerRouterConnectionRoutes(
           label: z.string().trim().min(1).max(120).optional(),
           value: z.string().trim().min(8).max(8192).optional(),
           secret: z.string().trim().min(10).max(4096).optional(),
+          subscription_id: z.string().uuid().optional(),
           enabled: z.boolean().optional(),
         })
         .strict()
-        .refine((value) => !(value.value && value.secret), {
-          message: 'Укажите ссылку или компактный секрет, но не оба сразу',
+        .refine((value) => [value.value, value.secret, value.subscription_id].filter(Boolean).length <= 1, {
+          message: 'Укажите ссылку, компактный секрет или подписку из каталога',
         })
         .parse(request.body);
       assertOnline(await getRouterForMutation(pool, auth, params.id));
@@ -685,7 +694,18 @@ export async function registerRouterConnectionRoutes(
       }
       const compactSecret =
         body.secret ?? (body.value?.startsWith('rc1.') ? body.value : null);
-      if (compactSecret) {
+      if (body.subscription_id) {
+        if (row.kind !== 'subscription') {
+          throw badRequest('invalid_connection_kind', 'Подписку можно заменить только подпиской');
+        }
+        const catalog = await loadAccessibleSubscription(pool, auth, body.subscription_id);
+        const url = decryptSecret(catalog.secret_enc, masterKey);
+        values.push(encryptSecret(validateValue('subscription', url), masterKey));
+        sets.push(`secret_enc = $${values.length}`);
+        sets.push('compact_secret = null');
+        values.push(body.subscription_id);
+        sets.push(`subscription_id = $${values.length}`);
+      } else if (compactSecret) {
         const nextLabel = body.label ?? row.label;
         values.push(
           encryptSecret(

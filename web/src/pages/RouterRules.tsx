@@ -2249,7 +2249,7 @@ function ConnectionModal(props: {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!isPodkop && (editing || kind !== 'subscription')) return;
+    if (!isPodkop && kind !== 'subscription') return;
     void api<{ items: CatalogSubscription[] }>('/api/v1/subscriptions')
       .then((response) => setCatalog(response.items))
       .catch(() => undefined);
@@ -2316,11 +2316,19 @@ function ConnectionModal(props: {
     setJob(null);
     try {
       if (editing) {
-        if (value.trim() === '') throw new Error('Вставьте новую ссылку');
+        if (!catalogId && value.trim() === '') {
+          throw new Error('Выберите подписку из сохранённых или вставьте новую ссылку');
+        }
         if (editing.managed && editing.id) {
           const response = await api<{ job: Job }>(
             `/api/v1/routers/${props.routerId}/connections/${editing.id}`,
-            { method: 'PATCH', body: { label: label.trim() || editing.label, value: value.trim() } },
+            {
+              method: 'PATCH',
+              body: {
+                label: label.trim() || editing.label,
+                ...(catalogId ? { subscription_id: catalogId } : { value: value.trim() }),
+              },
+            },
           );
           const job = await waitWithProgress(response.job);
           if (job.status !== 'success') throw new Error(job.error?.message ?? 'Не удалось заменить');
@@ -2334,8 +2342,8 @@ function ConnectionModal(props: {
                 kind: editing.kind === 'subscription' ? 'subscription' : 'link',
                 name: editing.name ?? undefined,
                 hash: editing.hash ?? undefined,
-                value: value.trim(),
                 section: props.rule.section,
+                ...(catalogId ? { subscription_id: catalogId } : { value: value.trim() }),
               },
             },
           );
@@ -2433,8 +2441,11 @@ function ConnectionModal(props: {
           placeholder={kind === 'subscription' ? 'Подписка' : 'VLESS'}
         />
       </Field>
-      {!editing && kind === 'subscription' && !isPodkop ? (
-        <Field label="Подписка из каталога" hint="Или вставьте URL ниже.">
+      {kind === 'subscription' && !isPodkop ? (
+        <Field
+          label={editing ? 'Подписка из сохранённых' : 'Подписка из каталога'}
+          hint="Или вставьте URL ниже."
+        >
           <Select value={catalogId} onChange={setCatalogId}>
             <option value="">Не выбирать</option>
             {catalog.map((item) => (
@@ -2449,7 +2460,7 @@ function ConnectionModal(props: {
         label={editing ? 'Новая ссылка' : kind === 'subscription' ? 'URL подписки' : 'VLESS-ссылка'}
         hint={
           editing
-            ? 'Текущее значение показано маской. Вставьте новое целиком.'
+            ? 'Текущее значение показано маской. Выберите сохранённую подписку выше или вставьте новую ссылку.'
             : kind === 'subscription'
               ? 'https://…'
               : 'vless://…, vmess://…, trojan://…, ss://…, hysteria2://…'
@@ -2459,7 +2470,7 @@ function ConnectionModal(props: {
           value={value}
           onChange={setValue}
           placeholder={kind === 'subscription' ? 'https://…' : 'vless://…'}
-          disabled={Boolean(!editing && kind === 'subscription' && catalogId)}
+          disabled={Boolean(kind === 'subscription' && catalogId)}
         />
       </Field>
     </Modal>
