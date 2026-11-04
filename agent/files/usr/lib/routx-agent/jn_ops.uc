@@ -1589,10 +1589,29 @@ function tachyon_rule_set_url(value) {
 
 function tachyon_community_list(value) {
 	let id = lc(util.as_string(value));
-	if (id == "facebook" || id == "instagram" || id == "whatsapp")
+	// Forkop 2.x имена -> имена, которые понимает Tachyon (COMMUNITY_SERVICES).
+	if (id == "facebook" || id == "instagram")
 		return "meta";
-	if (id == "twitter")
-		return "x";
+	if (id == "x")
+		return "twitter";
+	if (id == "gemini" || id == "ai")
+		return "google_ai";
+	if (id == "chatgpt")
+		return "openai";
+	if (id == "claude")
+		return "anthropic";
+	if (id == "ads")
+		return "ads_hagezi_pro";
+	if (id == "ru_blocked_geo")
+		return "geoblock";
+	if (id == "ru_blocked_rkn")
+		return "ru_blocked";
+	if (id == "ru_only")
+		return "russia_inside";
+	if (id == "ru_blocked_all")
+		return "russia_outside";
+	if (id == "ua_blocked")
+		return "ukraine_inside";
 	return util.as_string(value);
 }
 

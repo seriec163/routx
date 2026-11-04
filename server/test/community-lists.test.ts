@@ -70,6 +70,27 @@ describe('community lists', () => {
     expect(result.dropped).toEqual([]);
   });
 
+  it('maps Forkop 2.x lists to Tachyon community services', () => {
+    const result = normalizeCommunityLists(
+      ['facebook', 'instagram', 'whatsapp', 'x', 'gemini', 'chatgpt', 'claude', 'ads', 'ru_blocked_geo'],
+      'tachyon',
+      '1.7.12',
+    );
+    expect(result.lists).toEqual([
+      'meta',
+      'whatsapp',
+      'twitter',
+      'google_ai',
+      'openai',
+      'anthropic',
+      'ads_hagezi_pro',
+      'geoblock',
+    ]);
+    expect(result.dropped).toEqual([]);
+    const native = normalizeCommunityLists(['openai', 'anthropic'], 'tachyon', '1.7.12');
+    expect(native.lists).toEqual(['openai', 'anthropic']);
+  });
+
   it('detects Forkop 2.x by version', () => {
     expect(isForkop2('forkop', '2.0.0')).toBe(true);
     expect(isForkop2('forkop', 'v2.1.0')).toBe(true);

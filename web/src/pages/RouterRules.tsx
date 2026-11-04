@@ -100,6 +100,8 @@ const SERVICE_ICONS: Record<string, string> = {
   russia_inside: '🇷🇺',
   russia_outside: '🇷🇺',
   ukraine_inside: '🇺🇦',
+  openai: '🤖',
+  anthropic: '🅰',
 };
 
 const TRANSLIT: Record<string, string> = {

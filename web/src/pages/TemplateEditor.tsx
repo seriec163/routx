@@ -61,6 +61,8 @@ const SERVICE_ICONS: Record<string, string> = {
   russia_inside: '🇷🇺',
   russia_outside: '🇷🇺',
   ukraine_inside: '🇺🇦',
+  openai: '🤖',
+  anthropic: '🅰',
 };
 
 const RESOURCE_EDIT_KEYS = [

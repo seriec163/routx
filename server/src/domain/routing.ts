@@ -38,6 +38,13 @@ export const ROUTING_SERVICES: RoutingService[] = [
   { id: 'ukraine_inside', label: 'Украина' },
 ];
 
+/** Tachyon: имена из COMMUNITY_SERVICES, включая openai/anthropic. */
+export const TACHYON_SERVICES: RoutingService[] = [
+  ...ROUTING_SERVICES,
+  { id: 'openai', label: 'OpenAI / ChatGPT' },
+  { id: 'anthropic', label: 'Anthropic / Claude' },
+];
+
 /** Полный каталог Forkop 2.x: без дублей со старым каталогом. */
 export const FORKOP2_SERVICES: RoutingService[] = [
   { id: 'ru_blocked_all', label: 'RU Blocked (All)' },

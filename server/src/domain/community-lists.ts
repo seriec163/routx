@@ -111,6 +111,15 @@ export function isForkop20(
   return match != null && Number(match[1]) === 2 && Number(match[2]) === 0;
 }
 
+const TACHYON_EXTRA: Record<string, string> = {
+  ai: 'google_ai',
+  chatgpt: 'openai',
+  claude: 'anthropic',
+  ru_blocked_rkn: 'ru_blocked',
+};
+
+const TACHYON_NATIVE_LISTS = new Set(['openai', 'anthropic', 'ru_blocked', 'whatsapp']);
+
 function forkop2Set(version: string | null | undefined): Set<string> {
   return isForkop20('forkop', version) ? FORKOP2_200_LISTS : FORKOP2_LISTS;
 }
@@ -134,6 +143,15 @@ export function normalizeCommunityLists(
       if (id === '') continue;
       if (LEGACY_SERVICE_IDS.has(id)) {
         if (!result.includes(id)) result.push(id);
+        continue;
+      }
+      if (product === 'tachyon' && TACHYON_NATIVE_LISTS.has(id)) {
+        if (!result.includes(id)) result.push(id);
+        continue;
+      }
+      if (product === 'tachyon' && TACHYON_EXTRA[id]) {
+        const mapped = TACHYON_EXTRA[id];
+        if (!result.includes(mapped)) result.push(mapped);
         continue;
       }
       const mapped = FORKOP2_TO_LEGACY[id];
