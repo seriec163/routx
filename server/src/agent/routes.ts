@@ -219,23 +219,76 @@ product_version() {
 
 remove_product() {
   remove_name="$1"
-  echo "Удаляю $(product_label "$remove_name") ..." >&2
-  if [ -x "/etc/init.d/$remove_name" ]; then
-    "/etc/init.d/$remove_name" stop >/dev/null 2>&1 || true
-    "/etc/init.d/$remove_name" disable >/dev/null 2>&1 || true
-  fi
+  echo "Удаляю $(product_label "$remove_name") со всеми остатками..." >&2
+
+  for remove_svc in "$remove_name" "$remove_name-killswitch" "$remove_name-torrserver-direct"; do
+    if [ -x "/etc/init.d/$remove_svc" ]; then
+      "/etc/init.d/$remove_svc" stop >/dev/null 2>&1 || true
+      "/etc/init.d/$remove_svc" disable >/dev/null 2>&1 || true
+    fi
+  done
+
   for remove_pkg in $(product_packages "$remove_name"); do
     pkg_del "$remove_pkg"
   done
-  rm -f "/usr/bin/$remove_name" "/etc/init.d/$remove_name" 2>/dev/null || true
-  if [ -f "/etc/config/$remove_name" ]; then
-    mv "/etc/config/$remove_name" "/etc/config/$remove_name.routx-removed-$(date +%Y%m%d-%H%M%S)" 2>/dev/null ||
-      rm -f "/etc/config/$remove_name"
+
+  # Удаляем nft-таблицы, в имени которых есть продукт.
+  if command -v nft >/dev/null 2>&1; then
+    nft list tables 2>/dev/null | grep -i "$remove_name" | while read -r _ remove_family remove_table; do
+      if [ -n "$remove_family" ] && [ -n "$remove_table" ]; then
+        nft delete table "$remove_family" "$remove_table" >/dev/null 2>&1 || true
+      fi
+    done
   fi
-  if [ "$remove_name" = "prokop" ] && command -v nft >/dev/null 2>&1; then
-    nft delete table inet ProkopConfigRestoreDpiGuard >/dev/null 2>&1 || true
+
+  # Конфиги, состояние, библиотеки и файлы LuCI.
+  case "$remove_name" in
+    tachyon)
+      rm -rf /etc/tachyon /etc/tachyon-core /etc/config/tachyon-core \
+        /usr/share/tachyon-core /usr/lib/tachyon /usr/lib/tachyon-core \
+        /www/luci-static/resources/view/tachyon 2>/dev/null || true
+      ;;
+    forkop)
+      rm -rf /etc/forkop /etc/forkop-backups /usr/share/forkop /usr/lib/forkop \
+        /www/luci-static/resources/view/forkop 2>/dev/null || true
+      ;;
+    prokop)
+      rm -rf /etc/prokop /etc/prokop-backups /etc/prokop-forkop-migration \
+        /usr/share/prokop /usr/lib/prokop /www/luci-static/resources/view/prokop 2>/dev/null || true
+      ;;
+    podkop)
+      rm -rf /etc/podkop /usr/share/podkop /usr/lib/podkop \
+        /www/luci-static/resources/view/podkop 2>/dev/null || true
+      ;;
+  esac
+  rm -rf "/etc/config/$remove_name" "/etc/config/$remove_name-opkg" 2>/dev/null || true
+  rm -rf "/etc/config/$remove_name".routx-removed-* 2>/dev/null || true
+  rm -f "/usr/bin/$remove_name" "/etc/init.d/$remove_name" 2>/dev/null || true
+  rm -f "/usr/share/luci/menu.d/luci-app-$remove_name.json" \
+    "/usr/share/rpcd/acl.d/luci-app-$remove_name.json" 2>/dev/null || true
+  rm -f /etc/uci-defaults/*"$remove_name"* 2>/dev/null || true
+  rm -f /usr/lib/lua/luci/i18n/"$remove_name".* 2>/dev/null || true
+  rm -f /etc/rc.d/*"$remove_name"* 2>/dev/null || true
+  if [ -f /etc/crontabs/root ]; then
+    sed -i "/$remove_name/d" /etc/crontabs/root 2>/dev/null || true
+  fi
+  if [ -f /etc/iproute2/rt_tables ]; then
+    sed -i "/[[:space:]]$remove_name$/d" /etc/iproute2/rt_tables 2>/dev/null || true
   fi
   REMOVED="$REMOVED $remove_name"
+}
+
+remove_generic_sing_box() {
+  echo "Удаляю общий sing-box, оставшийся от других продуктов..." >&2
+  for remove_pkg in sing-box sing-box-tiny sing-box-extended; do
+    pkg_del "$remove_pkg"
+  done
+  if [ -x /etc/init.d/sing-box ]; then
+    /etc/init.d/sing-box stop >/dev/null 2>&1 || true
+    /etc/init.d/sing-box disable >/dev/null 2>&1 || true
+  fi
+  rm -rf /etc/sing-box /etc/config/sing-box /usr/share/sing-box /usr/lib/sing-box \
+    /etc/init.d/sing-box 2>/dev/null || true
 }
 
 has_podkop() {
@@ -305,6 +358,9 @@ if [ "$FOUND" -gt 1 ]; then
     [ "$found_name" = "$KEEP" ] && continue
     remove_product "$found_name"
   done
+  if [ "$KEEP" = "tachyon" ]; then
+    remove_generic_sing_box
+  fi
   PRODUCT="$KEEP"
   REMAIN=0
   has_prokop && REMAIN=$((REMAIN + 1))
