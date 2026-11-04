@@ -1604,8 +1604,10 @@ function migrate_tachyon_lists() {
 	let changed = 0;
 	for (let sname in all) {
 		let sect = all[sname];
-		if (type(sect) != "object" || sect[".type"] != "section")
+		if (type(sect) != "object")
 			continue;
+		// Обрабатываем и обычные section, и сгенерированные condition-секции
+		// (cond_*): Tachyon хранит копию community_lists и rule_set в них.
 		for (let key in [ "rule_set", "rule_set_with_subnets", "community_lists" ]) {
 			let raw = cursor.get("tachyon", sname, key);
 			if (raw == null)
