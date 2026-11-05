@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { DiffView } from '../components/diff';
 import { ServicePicker } from '../components/ServicePicker';
+import { ServiceInfoButton, ServiceTooltip } from '../components/ServiceTooltip';
 import {
   Button,
   ConfirmDialog,
@@ -106,6 +107,19 @@ const SERVICE_ICONS: Record<string, string> = {
   anthropic: '🅰',
 };
 
+const SERVICE_GROUP_ORDER = [
+  'ai',
+  'media',
+  'social',
+  'gaming',
+  'tech',
+  'infra',
+  'regional',
+  'direct',
+  'block',
+  'other',
+  'internal',
+];
 const TRANSLIT: Record<string, string> = {
   а: 'a', б: 'b', в: 'v', г: 'g', д: 'd', е: 'e', ё: 'e', ж: 'zh', з: 'z',
   и: 'i', й: 'y', к: 'k', л: 'l', м: 'm', н: 'n', о: 'o', п: 'p', р: 'r',
@@ -899,8 +913,29 @@ function RuleCard(props: {
   onToggle: () => void;
 }) {
   const { rule } = props;
-  const serviceMap = new Map(props.services.map((item) => [item.id, item.label]));
+  const serviceById = new Map(props.services.map((item) => [item.id, item]));
   const selected = asStringList(rule.resources.community_lists);
+  const selectedGroups = new Map<
+    string,
+    { id: string; label: string; icon: string; items: string[] }
+  >();
+  for (const id of selected) {
+    const service = serviceById.get(id);
+    const groupId = service?.group ?? 'other';
+    const entry = selectedGroups.get(groupId) ?? {
+      id: groupId,
+      label: service?.group_label ?? 'Разное',
+      icon: service?.group_icon ?? '•',
+      items: [],
+    };
+    entry.items.push(id);
+    selectedGroups.set(groupId, entry);
+  }
+  const orderedGroups = [...selectedGroups.values()].sort(
+    (a, b) =>
+      (SERVICE_GROUP_ORDER.indexOf(a.id) + 1 || 999) -
+      (SERVICE_GROUP_ORDER.indexOf(b.id) + 1 || 999),
+  );
   const canHaveConnections = CONNECTION_ACTIONS.has(rule.action);
   const domains = Array.isArray(rule.resources.domain)
     ? rule.resources.domain.map(String)
@@ -966,20 +1001,56 @@ function RuleCard(props: {
           {selected.length === 0 && domains.length === 0 && manualCount === 0 ? (
             <p className="muted-text small">Не выбраны — правило применяется ко всему трафику.</p>
           ) : (
-            <div className="chip-row">
-              {selected.map((id) => (
-                <span key={id} className="chip">
-                  {SERVICE_ICONS[id] ? <span aria-hidden="true">{SERVICE_ICONS[id]}</span> : null}
-                  {serviceMap.get(id) ?? id}
-                </span>
+            <div className="resource-groups">
+              {orderedGroups.map((group) => (
+                <div key={group.id} className="resource-group">
+                  <p className="resource-group-title">
+                    <span aria-hidden="true">{group.icon}</span> {group.label}
+                  </p>
+                  <div className="chip-row">
+                    {group.items.map((id) => {
+                      const service = serviceById.get(id);
+                      const icon = SERVICE_ICONS[id] ?? service?.group_icon ?? '•';
+                      if (!service) {
+                        return (
+                          <span key={id} className="chip">
+                            <span aria-hidden="true">{icon}</span> {id}
+                          </span>
+                        );
+                      }
+                      return (
+                        <ServiceTooltip
+                          key={id}
+                          service={service}
+                          className="service-chip-tooltip"
+                        >
+                          <span className="chip chip-service">
+                            <span aria-hidden="true">{icon}</span>
+                            {service.label}
+                            <ServiceInfoButton service={service} />
+                          </span>
+                        </ServiceTooltip>
+                      );
+                    })}
+                  </div>
+                </div>
               ))}
-              {domains.map((domain) => (
-                <span key={domain} className="chip chip-muted" title={domain}>
-                  {domain.length > 34 ? `${domain.slice(0, 34)}…` : domain}
-                </span>
-              ))}
-              {manualCount > 0 ? (
-                <span className="chip chip-muted">свои адреса: {manualCount}</span>
+              {domains.length > 0 || manualCount > 0 ? (
+                <div className="resource-group">
+                  <p className="resource-group-title">
+                    <span aria-hidden="true">✎</span> Свои адреса
+                  </p>
+                  <div className="chip-row">
+                    {domains.map((domain) => (
+                      <span key={domain} className="chip chip-muted" title={domain}>
+                        {domain.length > 34 ? `${domain.slice(0, 34)}…` : domain}
+                      </span>
+                    ))}
+                    {manualCount > 0 ? (
+                      <span className="chip chip-muted">свои адреса: {manualCount}</span>
+                    ) : null}
+                  </div>
+                </div>
               ) : null}
             </div>
           )}

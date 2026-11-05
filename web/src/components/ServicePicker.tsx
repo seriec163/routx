@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react';
 import type { RoutingGroup, RoutingService } from '../lib/types';
+import { ServiceInfoButton, ServiceTooltip } from './ServiceTooltip';
 
 const POPULAR_ICONS: Record<string, string> = {
   youtube: '▶',
@@ -95,11 +96,80 @@ export function ServicePicker(props: {
     });
   }, [props.services, activeGroup, query]);
 
+  const grouped = useMemo(() => {
+    const byGroup = new Map<string, RoutingService[]>();
+    for (const service of filtered) {
+      const key = service.group ?? 'other';
+      const list = byGroup.get(key) ?? [];
+      list.push(service);
+      byGroup.set(key, list);
+    }
+    const ordered = groups
+      .filter((group) => byGroup.has(group.id))
+      .map((group) => ({ group, services: byGroup.get(group.id)! }));
+    if (byGroup.has('other') && !ordered.some((item) => item.group.id === 'other')) {
+      ordered.push({
+        group: { id: 'other', label: 'Разное', icon: '•' },
+        services: byGroup.get('other')!,
+      });
+    }
+    return ordered;
+  }, [filtered, groups]);
+
   const selectedSet = new Set(props.selected);
 
   function toggle(id: string): void {
     props.onChange(
       selectedSet.has(id) ? props.selected.filter((item) => item !== id) : [...props.selected, id],
+    );
+  }
+
+  function renderCard(service: RoutingService) {
+    const active = selectedSet.has(service.id);
+    const icon = POPULAR_ICONS[service.id] ?? service.group_icon ?? '•';
+    return (
+      <ServiceTooltip key={service.id} service={service} className="service-card-wrap">
+        <div
+          className={`service-card ${active ? 'service-card-on' : ''}`}
+          role="button"
+          tabIndex={0}
+          aria-pressed={active}
+          onClick={() => toggle(service.id)}
+          onKeyDown={(event) => {
+            if (event.key === 'Enter' || event.key === ' ') {
+              event.preventDefault();
+              toggle(service.id);
+            }
+          }}
+        >
+          <span className="service-card-head">
+            <span className="service-card-icon" aria-hidden="true">
+              {icon}
+            </span>
+            <span className="service-card-title">{service.label}</span>
+            <span className="service-card-actions">
+              <ServiceInfoButton service={service} />
+              <span className="service-card-check" aria-hidden="true">
+                {active ? '✓' : ''}
+              </span>
+            </span>
+          </span>
+          {service.description ? (
+            <span className="service-card-desc">{service.description}</span>
+          ) : null}
+          <span className="service-card-meta">
+            <span className={`service-pill service-pill-${service.delivery ?? 'native'}`}>
+              {deliveryLabel(service)}
+            </span>
+            <span className="service-pill service-pill-action">
+              {actionLabel(service.recommended_action)}
+            </span>
+            {countLabel(service) ? (
+              <span className="service-pill service-pill-count">{countLabel(service)}</span>
+            ) : null}
+          </span>
+        </div>
+      </ServiceTooltip>
     );
   }
 
@@ -156,46 +226,19 @@ export function ServicePicker(props: {
       {filtered.length === 0 ? (
         <p className="muted-text small">По запросу «{query}» ничего не найдено.</p>
       ) : (
-        <div className="service-picker-grid">
-          {filtered.map((service) => {
-            const active = selectedSet.has(service.id);
-            const icon =
-              POPULAR_ICONS[service.id] ?? service.group_icon ?? '•';
-            return (
-              <button
-                key={service.id}
-                type="button"
-                className={`service-card ${active ? 'service-card-on' : ''}`}
-                onClick={() => toggle(service.id)}
-                title={service.title ?? service.label}
-                aria-pressed={active}
-              >
-                <span className="service-card-head">
-                  <span className="service-card-icon" aria-hidden="true">
-                    {icon}
-                  </span>
-                  <span className="service-card-title">{service.label}</span>
-                  <span className="service-card-check" aria-hidden="true">
-                    {active ? '✓' : ''}
-                  </span>
+        <div className="service-picker-sections">
+          {grouped.map(({ group, services }) => (
+            <section key={group.id} className="service-picker-section">
+              <div className="service-group-heading">
+                <span className="service-group-heading-icon" aria-hidden="true">
+                  {group.icon}
                 </span>
-                {service.description ? (
-                  <span className="service-card-desc">{service.description}</span>
-                ) : null}
-                <span className="service-card-meta">
-                  <span className={`service-pill service-pill-${service.delivery ?? 'native'}`}>
-                    {deliveryLabel(service)}
-                  </span>
-                  <span className="service-pill service-pill-action">
-                    {actionLabel(service.recommended_action)}
-                  </span>
-                  {countLabel(service) ? (
-                    <span className="service-pill service-pill-count">{countLabel(service)}</span>
-                  ) : null}
-                </span>
-              </button>
-            );
-          })}
+                <h4>{group.label}</h4>
+                <span className="service-group-heading-count">{services.length}</span>
+              </div>
+              <div className="service-picker-grid">{services.map(renderCard)}</div>
+            </section>
+          ))}
         </div>
       )}
 
@@ -203,8 +246,8 @@ export function ServicePicker(props: {
         <div className="service-picker-selected">
           {props.selected.map((id) => {
             const service = props.services.find((item) => item.id === id);
-            return (
-              <span key={id} className="service-selected-chip">
+            const chip = (
+              <span className="service-selected-chip">
                 {service?.label ?? id}
                 <button
                   type="button"
@@ -214,6 +257,13 @@ export function ServicePicker(props: {
                   ×
                 </button>
               </span>
+            );
+            return service ? (
+              <ServiceTooltip key={id} service={service} className="service-selected-tooltip">
+                {chip}
+              </ServiceTooltip>
+            ) : (
+              <span key={id}>{chip}</span>
             );
           })}
         </div>
