@@ -1755,6 +1755,9 @@ export async function sectionDelete(ctx: HandlerContext, job: JobRow): Promise<J
     await setJobPhase(ctx, job.id, 'verify', 80);
     const raw = await runCommand(ctx, job, 'read_state', {}, 60_000);
     await saveState(ctx.pool, routerId, raw, 'section_delete');
+    // read_state не отдаёт список секций с подписками; старый кэш sections
+    // иначе продолжит показывать удалённую секцию.
+    await ctx.pool.query('update router_state set sections = null where router_id = $1', [routerId]);
     await ctx.pool.query('update routers set last_error = null, updated_at = now() where id = $1', [
       routerId,
     ]);
