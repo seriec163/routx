@@ -1,3 +1,5 @@
+import { TACHYON_CATALOG } from './tachyon-catalog.js';
+
 /**
  * Каталог ресурсов Prokop/Forkop для шаблонов и ручного ввода.
  * Источник: Prokop `prokop/files/usr/lib/singbox/rulesets.uc`
@@ -38,13 +40,6 @@ export const ROUTING_SERVICES: RoutingService[] = [
   { id: 'ukraine_inside', label: 'Украина' },
 ];
 
-/** Tachyon: имена из COMMUNITY_SERVICES, включая openai/anthropic. */
-export const TACHYON_SERVICES: RoutingService[] = [
-  ...ROUTING_SERVICES,
-  { id: 'openai', label: 'OpenAI / ChatGPT' },
-  { id: 'anthropic', label: 'Anthropic / Claude' },
-];
-
 /** Полный каталог Forkop 2.x: без дублей со старым каталогом. */
 export const FORKOP2_SERVICES: RoutingService[] = [
   { id: 'ru_blocked_all', label: 'RU Blocked (All)' },
@@ -78,7 +73,7 @@ export const FORKOP2_SERVICES: RoutingService[] = [
 ];
 
 const ROUTING_SERVICE_IDS = new Set(
-  [...ROUTING_SERVICES, ...FORKOP2_SERVICES].map((item) => item.id),
+  [...ROUTING_SERVICES, ...FORKOP2_SERVICES, ...TACHYON_CATALOG].map((item) => item.id),
 );
 
 export { ROUTING_SERVICE_IDS };

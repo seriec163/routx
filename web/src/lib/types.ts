@@ -356,9 +356,36 @@ export interface RouterSectionsResponse {
   };
 }
 
+export interface RoutingGroup {
+  id: string;
+  label: string;
+  icon: string;
+}
+
 export interface RoutingService {
   id: string;
   label: string;
+  title?: string;
+  description?: string;
+  note?: string;
+  group?: string;
+  group_label?: string;
+  group_icon?: string;
+  kind?: string;
+  recommended_action?: string;
+  counts?: {
+    domains: number;
+    subnets: number;
+    domain: number;
+    domain_suffix: number;
+    domain_keyword: number;
+    domain_regex: number;
+    ipv4_cidr: number;
+    ipv6_cidr: number;
+  };
+  native?: boolean;
+  delivery?: 'native' | 'rule_set' | 'domains' | 'unsupported';
+  url?: string | null;
 }
 
 export interface RoutingAction {

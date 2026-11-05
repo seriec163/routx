@@ -14,11 +14,13 @@ import {
   TextInput,
   useToast,
 } from '../components/ui';
+import { ServicePicker } from '../components/ServicePicker';
 import { api, errorMessage } from '../lib/api';
 import { formatDate } from '../lib/format';
 import { navigate } from '../lib/router';
 import type {
   RoutingAction,
+  RoutingGroup,
   RoutingService,
   TemplateFull,
   TemplateRevision,
@@ -101,7 +103,11 @@ export function TemplateEditorPage({ id }: { id: string }) {
   const { me } = useSession();
   const template = useApi<{ template: TemplateFull }>(`/api/v1/templates/${id}`);
   const revisions = useApi<{ items: TemplateRevision[] }>(`/api/v1/templates/${id}/revisions`);
-  const catalog = useApi<{ services: RoutingService[]; actions: RoutingAction[] }>(
+  const catalog = useApi<{
+    services: RoutingService[];
+    groups?: RoutingGroup[];
+    actions: RoutingAction[];
+  }>(
     '/api/v1/settings/routing-catalog',
   );
 
@@ -241,12 +247,6 @@ export function TemplateEditorPage({ id }: { id: string }) {
   useEffect(() => {
     if (advancedOpen) setAdvancedText(settingsPreview);
   }, [advancedOpen, settingsPreview]);
-
-  function toggleService(id: string): void {
-    setServices((current) =>
-      current.includes(id) ? current.filter((entry) => entry !== id) : [...current, id],
-    );
-  }
 
   function setting(option: string): string {
     return asText(settings[option]);
@@ -441,22 +441,12 @@ export function TemplateEditorPage({ id }: { id: string }) {
           subtitle="Необязательно. Если ничего не выбрать, ресурсы задаются в правиле на роутере. Выбранные здесь сервисы и домены добавляются в правило вместе с действием."
         >
           <Field label="Сервисы">
-            <div className="chip-grid">
-              {serviceList.map((service) => {
-                const active = services.includes(service.id);
-                return (
-                  <button
-                    key={service.id}
-                    type="button"
-                    className={`chip-toggle ${active ? 'chip-toggle-on' : ''}`}
-                    onClick={() => toggleService(service.id)}
-                  >
-                    <span aria-hidden="true">{SERVICE_ICONS[service.id] ?? '•'}</span>
-                    {service.label}
-                  </button>
-                );
-              })}
-            </div>
+            <ServicePicker
+              services={serviceList}
+              groups={catalog.data?.groups}
+              selected={services}
+              onChange={setServices}
+            />
           </Field>
 
           <div className="grid-2">

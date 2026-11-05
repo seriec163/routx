@@ -95,6 +95,21 @@ function get_proxies(product, timeout) {
 	return legacy(product, [ "clash_api", "get_proxies" ], timeout);
 }
 
+function latency_argv(product, tag, timeout_ms, target) {
+	let timeout = as_string(timeout_ms == null ? "5000" : timeout_ms);
+	let url = target == null || target == "" ? DEFAULT_TARGET : as_string(target);
+	if (is_forkop_v2(product)) {
+		return [
+			"/usr/bin/forkop", "clash_api", "GET",
+			"/proxies/" + encode(tag) + "/delay?url=" + encode(url) + "&timeout=" + encode(timeout)
+		];
+	}
+	let args = [ "/usr/bin/" + product, "clash_api", "get_proxy_latency", tag, timeout ];
+	if (target != null && target != "")
+		push(args, as_string(target));
+	return args;
+}
+
 function proxy_latency(product, tag, timeout_ms, target) {
 	let timeout = as_string(timeout_ms == null ? "5000" : timeout_ms);
 	let url = target == null || target == "" ? DEFAULT_TARGET : as_string(target);
@@ -148,5 +163,5 @@ function proxy_exit_ip(product, tag, timeout_ms) {
 
 return {
 	DEFAULT_TARGET, is_forkop_v2, encode,
-	get_proxies, proxy_latency, group_latency, set_group_proxy, proxy_exit_ip
+	get_proxies, latency_argv, proxy_latency, group_latency, set_group_proxy, proxy_exit_ip
 };

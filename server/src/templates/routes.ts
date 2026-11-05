@@ -7,7 +7,6 @@ import { badRequest, notFound } from '../lib/errors.js';
 import { uuidv7 } from '../lib/ids.js';
 import { loadSettings } from '../settings.js';
 import { getRouter } from '../routers/service.js';
-import { isForkop2 } from '../domain/community-lists.js';
 import {
   buildPlan,
   presetFromPayload,
@@ -478,20 +477,20 @@ export async function registerTemplateRoutes(app: FastifyInstance, ctx: RouteCon
     const query = z
       .object({ router_id: z.string().uuid().optional() })
       .parse(request.query ?? {});
-    const { ROUTING_ACTIONS, ROUTING_SERVICES, TACHYON_SERVICES, FORKOP2_SERVICES } =
-      await import('../domain/routing.js');
-    let services = ROUTING_SERVICES;
+    const { ROUTING_ACTIONS } = await import('../domain/routing.js');
+    const { CATALOG_GROUPS, catalogForRouter } = await import('../domain/list-catalog.js');
+    let product: string | null = null;
+    let version: string | null = null;
     if (query.router_id) {
       const router = await getRouter(pool, auth, query.router_id);
-      if (isForkop2(router.product, router.product_version)) {
-        services = FORKOP2_SERVICES;
-      } else if (router.product === 'tachyon') {
-        services = TACHYON_SERVICES;
-      }
+      product = router.product;
+      version = router.product_version;
     }
     return {
-      services,
+      services: catalogForRouter(product ?? 'prokop', version),
+      groups: CATALOG_GROUPS,
       actions: ROUTING_ACTIONS,
+      product: product ?? 'prokop',
     };
   });
 

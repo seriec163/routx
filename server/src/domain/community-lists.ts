@@ -1,102 +1,27 @@
 /**
- * Встроенные списки Forkop 2.x отличаются от Prokop/Forkop 1.x.
- * Старые шаблоны и правила хранят привычные ID (meta, twitter, google_ai),
- * а Forkop 2.x знает facebook/instagram/whatsapp, x и gemini. Здесь
- * приводим списки к тому набору, который понимает установленный продукт.
+ * Списки сообществ RoutX.
+ *
+ * Источник истины — Dushnilin/tachyon-lists. Внутри храним канонические ID
+ * Tachyon, а для конкретного продукта раскладываем их:
+ * - Tachyon — нативно;
+ * - Forkop 2.x — в родные имена (facebook/x/gemini/...) либо rule-set JSON;
+ * - Prokop/Forkop 1.x — нативно либо rule-set SRS;
+ * - Podkop — нативно либо domains/subnets из tachyon-lists.
  */
 
-import { ROUTING_SERVICES } from './routing.js';
-import { PODKOP_COMMUNITY_SERVICES } from './podkop.js';
+import { isIP } from 'node:net';
+import {
+  canonicalListId,
+  domainsUrl,
+  nativeListIds,
+  ruleSetUrl,
+  subnetsUrl,
+} from './list-catalog.js';
 
-const LEGACY_SERVICE_IDS = new Set(ROUTING_SERVICES.map((item) => item.id));
-
-const FORKOP2_LISTS = new Set([
-  'ru_blocked_all',
-  'ru_blocked_rkn',
-  'ru_blocked_geo',
-  'ru_only',
-  'ua_blocked',
-  'ai',
-  'chatgpt',
-  'claude',
-  'cloudflare',
-  'digitalocean',
-  'discord',
-  'facebook',
-  'gemini',
-  'github',
-  'google_play',
-  'hetzner',
-  'instagram',
-  'ovh',
-  'roblox',
-  'spotify',
-  'supercell',
-  'telegram',
-  'tiktok',
-  'twitch',
-  'whatsapp',
-  'x',
-  'youtube',
-  'ads',
-]);
-
-// В Forkop 2.0.0 этих списков ещё нет; они появились в следующих релизах.
-const FORKOP2_200_LISTS = new Set(
-  [...FORKOP2_LISTS].filter((id) => !['digitalocean', 'hetzner', 'ovh'].includes(id)),
-);
-
-const LEGACY_TO_FORKOP2: Record<string, string[]> = {
-  youtube: ['youtube'],
-  discord: ['discord'],
-  telegram: ['telegram'],
-  meta: ['facebook', 'instagram', 'whatsapp'],
-  twitter: ['x'],
-  tiktok: ['tiktok'],
-  google_ai: ['gemini'],
-  google_play: ['google_play'],
-  cloudflare: ['cloudflare'],
-  digitalocean: ['digitalocean'],
-  hetzner: ['hetzner'],
-  ovh: ['ovh'],
-  github: ['github'],
-  roblox: ['roblox'],
-  supercell: ['supercell'],
-  ads_hagezi_pro: ['ads'],
-  block: ['ads'],
-  russia_inside: ['ru_only'],
-  russia_outside: ['ru_blocked_all'],
-  ukraine_inside: ['ua_blocked'],
-  geoblock: ['ru_blocked_geo'],
-};
-
-const FORKOP2_TO_LEGACY: Record<string, string> = {
-  youtube: 'youtube',
-  discord: 'discord',
-  telegram: 'telegram',
-  facebook: 'meta',
-  instagram: 'meta',
-  whatsapp: 'meta',
-  x: 'twitter',
-  tiktok: 'tiktok',
-  gemini: 'google_ai',
-  ai: 'google_ai',
-  google_play: 'google_play',
-  cloudflare: 'cloudflare',
-  digitalocean: 'digitalocean',
-  hetzner: 'hetzner',
-  ovh: 'ovh',
-  github: 'github',
-  roblox: 'roblox',
-  supercell: 'supercell',
-  ads: 'ads_hagezi_pro',
-  ru_only: 'russia_inside',
-  ru_blocked_all: 'russia_outside',
-  ru_blocked_geo: 'geoblock',
-  ua_blocked: 'ukraine_inside',
-};
-
-export function isForkop2(product: string | null | undefined, version: string | null | undefined): boolean {
+export function isForkop2(
+  product: string | null | undefined,
+  version: string | null | undefined,
+): boolean {
   if (product !== 'forkop') return false;
   const match = /^v?(\d+)/.exec(String(version ?? '').trim());
   return match != null && Number(match[1]) >= 2;
@@ -111,103 +36,40 @@ export function isForkop20(
   return match != null && Number(match[1]) === 2 && Number(match[2]) === 0;
 }
 
-const TACHYON_EXTRA: Record<string, string> = {
-  ai: 'google_ai',
-  chatgpt: 'openai',
-  claude: 'anthropic',
-  ru_blocked_rkn: 'ru_blocked',
-};
-
-const TACHYON_NATIVE_LISTS = new Set(['openai', 'anthropic', 'ru_blocked', 'whatsapp']);
-
-function forkop2Set(version: string | null | undefined): Set<string> {
-  return isForkop20('forkop', version) ? FORKOP2_200_LISTS : FORKOP2_LISTS;
-}
-
 export interface NormalizedLists {
   lists: string[];
   dropped: string[];
 }
 
-/** Legacy/Prokop ID → набор списков Forkop 2.x. */
+/** Приводит любые исторические имена к каноническим ID tachyon-lists. */
 export function normalizeCommunityLists(
   lists: readonly string[],
-  product: string | null | undefined,
-  version: string | null | undefined,
+  _product: string | null | undefined,
+  _version: string | null | undefined,
 ): NormalizedLists {
   const result: string[] = [];
   const dropped: string[] = [];
-  if (!isForkop2(product, version)) {
-    for (const raw of lists) {
-      const id = String(raw).trim();
-      if (id === '') continue;
-      if (LEGACY_SERVICE_IDS.has(id)) {
-        if (!result.includes(id)) result.push(id);
-        continue;
-      }
-      if (product === 'tachyon' && TACHYON_NATIVE_LISTS.has(id)) {
-        if (!result.includes(id)) result.push(id);
-        continue;
-      }
-      if (product === 'tachyon' && TACHYON_EXTRA[id]) {
-        const mapped = TACHYON_EXTRA[id];
-        if (!result.includes(mapped)) result.push(mapped);
-        continue;
-      }
-      const mapped = FORKOP2_TO_LEGACY[id];
-      if (!mapped) {
-        dropped.push(id);
-        continue;
-      }
-      if (!result.includes(mapped)) result.push(mapped);
-    }
-    return { lists: result, dropped };
-  }
-  const allowed = forkop2Set(version);
   for (const raw of lists) {
     const id = String(raw).trim();
     if (id === '') continue;
-    if (allowed.has(id)) {
-      if (!result.includes(id)) result.push(id);
+    const canonical = canonicalListId(id);
+    if (!canonical) {
+      if (!dropped.includes(id)) dropped.push(id);
       continue;
     }
-    const mapped = LEGACY_TO_FORKOP2[id];
-    if (!mapped) {
-      dropped.push(id);
-      continue;
-    }
-    const targets = mapped.filter((target) => allowed.has(target));
-    if (targets.length === 0) {
-      dropped.push(id);
-      continue;
-    }
-    for (const target of targets) {
-      if (!result.includes(target)) result.push(target);
-    }
+    if (!result.includes(canonical)) result.push(canonical);
   }
   return { lists: result, dropped };
 }
 
-/** Приводит список к ID, которые понимает каталог интерфейса. */
+/** Канонические ID для интерфейса (каталог тоже канонический). */
 export function displayCommunityLists(
   lists: readonly string[],
   product: string | null | undefined,
   version: string | null | undefined,
 ): string[] {
-  const result: string[] = [];
-  for (const raw of lists) {
-    const id = String(raw).trim();
-    if (id === '') continue;
-    const mapped = isForkop2(product, version) ? id : FORKOP2_TO_LEGACY[id] ?? id;
-    if (!result.includes(mapped)) result.push(mapped);
-  }
-  return result;
+  return normalizeCommunityLists(lists, product, version).lists;
 }
-
-const LIST_BASE = 'https://github.com/ushan0v/forkop-lists/releases/latest/download';
-const LIST_CACHE_TTL_MS = 6 * 60 * 60 * 1000;
-const MAX_FALLBACK_DOMAINS = 12000;
-const MAX_FALLBACK_SUBNETS = 3000;
 
 interface ListEntries {
   domains: string[];
@@ -215,81 +77,74 @@ interface ListEntries {
 }
 
 const listCache = new Map<string, { at: number; entries: ListEntries }>();
+const LIST_CACHE_TTL_MS = 6 * 60 * 60 * 1000;
+const MAX_FALLBACK_DOMAINS = 20000;
+const MAX_FALLBACK_SUBNETS = 5000;
 
-function assetTargets(id: string): string[] {
-  if (FORKOP2_LISTS.has(id)) return [id];
-  return (LEGACY_TO_FORKOP2[id] ?? []).filter((target) => FORKOP2_LISTS.has(target));
-}
-
-function listUrl(asset: string): string {
-  return `${LIST_BASE}/${asset.replace(/_/g, '-')}.json`;
-}
-
-function extractEntries(value: unknown): ListEntries {
-  const domains: string[] = [];
-  const subnets: string[] = [];
-  const seen = new Set<string>();
-  const add = (target: string[], item: unknown): void => {
-    const text = String(item ?? '').trim();
-    if (text === '' || seen.has(text)) return;
-    seen.add(text);
-    target.push(text);
-  };
-  const rules =
-    value && typeof value === 'object' && Array.isArray((value as { rules?: unknown }).rules)
-      ? ((value as { rules: unknown[] }).rules ?? [])
-      : [];
-  for (const rule of rules) {
-    if (!rule || typeof rule !== 'object') continue;
-    const item = rule as Record<string, unknown>;
-    for (const [key, target] of [
-      ['domain', domains],
-      ['domain_suffix', domains],
-      ['domain_keyword', domains],
-      ['domain_regex', domains],
-      ['ip_cidr', subnets],
-      ['ip', subnets],
-    ] as const) {
-      const values = item[key];
-      if (!Array.isArray(values)) continue;
-      for (const entry of values) {
-        if (key === 'domain') add(target, `full:${String(entry).trim()}`);
-        else if (key === 'domain_keyword') add(target, `keyword:${String(entry).trim()}`);
-        else if (key === 'domain_regex') add(target, `regex:${String(entry).trim()}`);
-        else add(target, entry);
-      }
-    }
-    if (domains.length >= MAX_FALLBACK_DOMAINS && subnets.length >= MAX_FALLBACK_SUBNETS) break;
-  }
-  return {
-    domains: domains.slice(0, MAX_FALLBACK_DOMAINS),
-    subnets: subnets.slice(0, MAX_FALLBACK_SUBNETS),
-  };
-}
-
-async function fetchListEntries(asset: string): Promise<ListEntries> {
-  const cached = listCache.get(asset);
-  if (cached && Date.now() - cached.at < LIST_CACHE_TTL_MS) return cached.entries;
-
+async function fetchText(url: string): Promise<string | null> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 20_000);
   try {
-    const response = await fetch(listUrl(asset), {
+    const response = await fetch(url, {
       redirect: 'follow',
       signal: controller.signal,
       headers: {
         'user-agent': 'RoutX/1.0 list fallback',
-        accept: 'application/json, */*',
+        accept: 'text/plain, */*',
       },
     });
+    if (response.status === 404) return null;
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
-    const body = await response.json();
-    const entries = extractEntries(body);
-    listCache.set(asset, { at: Date.now(), entries });
-    return entries;
+    return await response.text();
   } finally {
     clearTimeout(timer);
   }
+}
+
+function classifyLine(raw: string): { kind: 'domain' | 'subnet'; value: string } | null {
+  const line = raw.trim();
+  if (line === '' || line.startsWith('#') || line.startsWith('//')) return null;
+  const value = line.replace(/^\+\./, '.').replace(/^\./, '');
+  if (value === '') return null;
+  const address = value.includes('/') ? value.split('/')[0]! : value;
+  if (isIP(address) !== 0) return { kind: 'subnet', value };
+  return { kind: 'domain', value };
+}
+
+async function fetchListEntries(id: string): Promise<ListEntries> {
+  const cached = listCache.get(id);
+  if (cached && Date.now() - cached.at < LIST_CACHE_TTL_MS) return cached.entries;
+
+  const [domainsText, subnetsText] = await Promise.all([
+    fetchText(domainsUrl(id)),
+    fetchText(subnetsUrl(id)),
+  ]);
+  if (domainsText == null && subnetsText == null) {
+    throw new Error(`list ${id} not found`);
+  }
+  const domains: string[] = [];
+  const subnets: string[] = [];
+  for (const text of [domainsText, subnetsText]) {
+    if (!text) continue;
+    for (const line of text.split(/\r?\n/)) {
+      const entry = classifyLine(line);
+      if (!entry) continue;
+      const target = entry.kind === 'subnet' ? subnets : domains;
+      if (!target.includes(entry.value)) target.push(entry.value);
+      if (
+        domains.length >= MAX_FALLBACK_DOMAINS &&
+        subnets.length >= MAX_FALLBACK_SUBNETS
+      ) {
+        break;
+      }
+    }
+  }
+  const entries = {
+    domains: domains.slice(0, MAX_FALLBACK_DOMAINS),
+    subnets: subnets.slice(0, MAX_FALLBACK_SUBNETS),
+  };
+  listCache.set(id, { at: Date.now(), entries });
+  return entries;
 }
 
 export interface ListResolution {
@@ -300,22 +155,9 @@ export interface ListResolution {
   dropped: string[];
 }
 
-function nativeForId(
-  product: string | null | undefined,
-  version: string | null | undefined,
-  id: string,
-): boolean {
-  const mapped = normalizeCommunityLists([id], product, version).lists;
-  if (mapped.length === 0) return false;
-  if (product === 'podkop') return mapped.every((item) => PODKOP_COMMUNITY_SERVICES.has(item));
-  return true;
-}
-
 /**
- * Универсальная замена встроенных списков:
- * - продукт знает список — оставляем ID;
- * - продукт умеет rule_set — добавляем URL списка;
- * - Podkop не умеет URL — скачиваем JSON и переносим адреса в user_domains/user_subnets.
+ * Раскладывает канонические списки под конкретный продукт.
+ * Всё, что продукт не знает нативно, уходит в rule-set или domains/subnets.
  */
 export async function resolveCommunityLists(
   lists: readonly string[],
@@ -323,43 +165,35 @@ export async function resolveCommunityLists(
   version: string | null | undefined,
 ): Promise<ListResolution> {
   const normalized = normalizeCommunityLists(lists, product, version);
-  const native =
-    product === 'podkop'
-      ? normalized.lists.filter((id) => PODKOP_COMMUNITY_SERVICES.has(id))
-      : [...normalized.lists];
+  const native: string[] = [];
   const ruleSets: string[] = [];
   const domains: string[] = [];
   const subnets: string[] = [];
-  const dropped: string[] = [];
-  const assets = new Set<string>();
+  const dropped = [...normalized.dropped];
   const isPodkop = product === 'podkop';
 
-  for (const raw of lists) {
-    const id = String(raw).trim();
-    if (id === '') continue;
-    if (nativeForId(product, version, id)) continue;
-
-    const targets = assetTargets(id);
-    if (targets.length === 0) {
-      if (!dropped.includes(id)) dropped.push(id);
+  for (const id of normalized.lists) {
+    const nativeIds = nativeListIds(id, product, version);
+    if (nativeIds.length > 0) {
+      for (const nativeId of nativeIds) {
+        if (!native.includes(nativeId)) native.push(nativeId);
+      }
       continue;
     }
-    for (const target of targets) assets.add(target);
-  }
 
-  for (const asset of assets) {
-    if (!isPodkop) {
-      const url = listUrl(asset);
-      if (!ruleSets.includes(url)) ruleSets.push(url);
+    if (isPodkop) {
+      try {
+        const entries = await fetchListEntries(id);
+        for (const item of entries.domains) if (!domains.includes(item)) domains.push(item);
+        for (const item of entries.subnets) if (!subnets.includes(item)) subnets.push(item);
+      } catch {
+        if (!dropped.includes(id)) dropped.push(id);
+      }
       continue;
     }
-    try {
-      const entries = await fetchListEntries(asset);
-      for (const item of entries.domains) if (!domains.includes(item)) domains.push(item);
-      for (const item of entries.subnets) if (!subnets.includes(item)) subnets.push(item);
-    } catch {
-      if (!dropped.includes(asset)) dropped.push(asset);
-    }
+
+    const url = ruleSetUrl(product, version, id);
+    if (!ruleSets.includes(url)) ruleSets.push(url);
   }
 
   return { native, ruleSets, domains, subnets, dropped };

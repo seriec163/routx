@@ -447,22 +447,55 @@ function site_probe(product, targets) {
 		tag = type(info) == "object" ? util.as_string(info.now) : "";
 	}
 
-	for (let target in urls) {
-		if (tag == "") {
+	if (tag == "") {
+		for (let target in urls)
 			push(results, { target: target, ok: false, latency_ms: null, error: "vpn_unavailable" });
-			continue;
+		return { ok: true, results: results };
+	}
+
+	// Все проверки запускаем параллельно: последовательный обход 8 адресов
+	// с таймаутом 5 с давал до 40 с ожидания в PWA.
+	let dir = util.RUN_DIR + "/siteprobe-" + util.random_hex(6);
+	util.mkdir_p(dir, 0700);
+	let script = "";
+	for (let i = 0; i < length(urls); i++) {
+		let argv = product_api.latency_argv(product, tag, "2500", urls[i]);
+		let cmd = "";
+		for (let arg in argv)
+			cmd += (cmd == "" ? "" : " ") + util.shell_quote(arg);
+		script += "timeout 8 " + cmd +
+			" >" + util.shell_quote(dir + "/" + i + ".out") +
+			" 2>" + util.shell_quote(dir + "/" + i + ".err") + " &\n";
+	}
+	script += "wait\n";
+	let proc = fs.popen("sh -c " + util.shell_quote(script), "r");
+	if (proc != null)
+		proc.close();
+
+	for (let i = 0; i < length(urls); i++) {
+		let target = urls[i];
+		let raw = util.read_file(dir + "/" + i + ".out", "");
+		let parsed = util.json_parse(raw);
+		let value = parsed;
+		if (product_api.is_forkop_v2(product)) {
+			if (type(parsed) == "object" && int(parsed.status) >= 200 && int(parsed.status) < 300)
+				value = util.json_parse(util.as_string(parsed.body));
+			else
+				value = null;
 		}
-		let res = product_api.proxy_latency(product, tag, "5000", target);
-		if (res.ok && res.value.success !== false && measured(res.value.delay))
-			push(results, { target: target, ok: true, latency_ms: res.value.delay });
+		if (type(value) == "object" && value.success !== false && measured(value.delay))
+			push(results, { target: target, ok: true, latency_ms: value.delay });
 		else
 			push(results, {
 				target: target,
 				ok: false,
 				latency_ms: null,
-				error: res.ok ? util.as_string(res.value.error) : res.error
+				error: type(value) == "object"
+					? (util.as_string(value.error) || "access_failed")
+					: "check_failed"
 			});
 	}
+	run.run([ "rm", "-rf", dir ], 5);
 
 	return { ok: true, results: results };
 }

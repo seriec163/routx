@@ -19,6 +19,37 @@ interface SiteResult {
 
 const MAX_SITES = 8;
 const STORAGE_PREFIX = 'rc.mobile.sites.';
+const RESULTS_PREFIX = 'rc.mobile.site-results.';
+const RESULTS_TTL_MS = 60_000;
+
+interface CachedResults {
+  at: number;
+  results: Record<string, SiteResult>;
+}
+
+function loadResults(routerId: string | null): CachedResults | null {
+  if (!routerId) return null;
+  try {
+    const raw = window.localStorage.getItem(`${RESULTS_PREFIX}${routerId}`);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as Partial<CachedResults>;
+    if (!parsed || typeof parsed.at !== 'number' || !parsed.results) return null;
+    return { at: parsed.at, results: parsed.results };
+  } catch {
+    return null;
+  }
+}
+
+function saveResults(routerId: string, results: Record<string, SiteResult>): void {
+  try {
+    window.localStorage.setItem(
+      `${RESULTS_PREFIX}${routerId}`,
+      JSON.stringify({ at: Date.now(), results } satisfies CachedResults),
+    );
+  } catch {
+    // localStorage может быть недоступен — не критично.
+  }
+}
 
 const DEFAULT_SITES: Site[] = [
   { id: 'instagram', label: 'Instagram', url: 'https://www.instagram.com/' },
@@ -144,6 +175,7 @@ export function SiteStatusCard({
         }
       }
       setResults(next);
+      saveResults(routerId, next);
     } catch (caught) {
       toast.error(errorMessage(caught));
     } finally {
@@ -155,6 +187,9 @@ export function SiteStatusCard({
   useEffect(() => {
     if (!routerId || !online || checkedOnce.current) return;
     checkedOnce.current = true;
+    const cached = loadResults(routerId);
+    if (cached) setResults(cached.results);
+    if (cached && Date.now() - cached.at < RESULTS_TTL_MS) return;
     void checkSites(sites);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [routerId, online]);

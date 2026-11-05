@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { DiffView } from '../components/diff';
+import { ServicePicker } from '../components/ServicePicker';
 import {
   Button,
   ConfirmDialog,
@@ -30,6 +31,7 @@ import type {
   RouterRecord,
   RouterState,
   RoutingAction,
+  RoutingGroup,
   RoutingService,
   TemplateFull,
   TemplateListItem,
@@ -202,7 +204,11 @@ export function RouterRulesPanel(props: {
   onChanged: () => void;
 }) {
   const toast = useToast();
-  const catalog = useApi<{ services: RoutingService[]; actions: RoutingAction[] }>(
+  const catalog = useApi<{
+    services: RoutingService[];
+    groups?: RoutingGroup[];
+    actions: RoutingAction[];
+  }>(
     `/api/v1/settings/routing-catalog?router_id=${encodeURIComponent(props.routerId)}`,
   );
   const templates = useApi<{ items: TemplateListItem[] }>('/api/v1/templates');
@@ -709,6 +715,7 @@ export function RouterRulesPanel(props: {
           rule={editor.rule}
           actions={actions}
           services={services}
+          groups={catalog.data?.groups}
           templates={templates.data?.items ?? []}
           routerId={props.routerId}
           product={props.router.product}
@@ -1055,6 +1062,7 @@ function RuleEditorModal(props: {
   rule: RuleView | null;
   actions: RoutingAction[];
   services: RoutingService[];
+  groups?: RoutingGroup[];
   templates: TemplateListItem[];
   routerId: string;
   product: string;
@@ -1234,12 +1242,6 @@ function RuleEditorModal(props: {
     } finally {
       setTemplateBusy(false);
     }
-  }
-
-  function toggleService(id: string): void {
-    setSelectedServices((current) =>
-      current.includes(id) ? current.filter((item) => item !== id) : [...current, id],
-    );
   }
 
   function addSubscription(): void {
@@ -1538,22 +1540,12 @@ function RuleEditorModal(props: {
       </Field>
 
       <Field label="Ресурсы" hint="Выберите сервисы, чей трафик попадёт в это правило.">
-        <div className="chip-grid">
-          {props.services.map((service) => {
-            const active = selectedServices.includes(service.id);
-            return (
-              <button
-                key={service.id}
-                type="button"
-                className={`chip-toggle ${active ? 'chip-toggle-on' : ''}`}
-                onClick={() => toggleService(service.id)}
-              >
-                <span aria-hidden="true">{SERVICE_ICONS[service.id] ?? '•'}</span>
-                {service.label}
-              </button>
-            );
-          })}
-        </div>
+        <ServicePicker
+          services={props.services}
+          groups={props.groups}
+          selected={selectedServices}
+          onChange={setSelectedServices}
+        />
       </Field>
 
       {isPodkop ? (
