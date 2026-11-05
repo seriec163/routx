@@ -377,18 +377,39 @@ function fetch_ip_singbox(tag) {
 	return valid_ip(value) ? value : "";
 }
 
-function curl_ip(proxy) {
+function curl_argv(proxy, url) {
 	let argv = [ "/usr/bin/curl", "-fsS", "--max-time", proxy == null ? "8" : "10" ];
 	if (proxy != null) {
 		push(argv, "-x", proxy.url);
 		if (proxy.user != "")
 			push(argv, "-U", proxy.user + ":" + proxy.pass);
 	}
-	push(argv, "https://api.ipify.org");
-	let res = run.run(argv, 15);
-	if (!res.ok)
+	push(argv, url);
+	return argv;
+}
+
+function parse_trace_ip(text) {
+	let value = "";
+	for (let line in split(util.as_string(text), "\n")) {
+		if (substr(line, 0, 3) == "ip=")
+			value = trim(substr(line, 3));
+	}
+	return valid_ip(value) ? value : "";
+}
+
+function curl_ip(proxy) {
+	// 1.1.1.1/cdn-cgi/trace не требует DNS — это важно для роутеров,
+	// у которых локальный резолвер не отдаёт ответы самому роутеру.
+	let res = run.run(curl_argv(proxy, "https://1.1.1.1/cdn-cgi/trace"), 15);
+	if (res.ok) {
+		let value = parse_trace_ip(res.stdout);
+		if (value != "")
+			return value;
+	}
+	let fallback = run.run(curl_argv(proxy, "https://api.ipify.org"), 15);
+	if (!fallback.ok)
 		return "";
-	let value = trim(util.as_string(res.stdout));
+	let value = trim(util.as_string(fallback.stdout));
 	return valid_ip(value) ? value : "";
 }
 
