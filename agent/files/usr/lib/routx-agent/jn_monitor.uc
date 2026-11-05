@@ -297,13 +297,15 @@ function valid_ip(value) {
 	return index(value, ":") > 0 && match(value, /^[0-9a-f:]+$/i) != null;
 }
 
-function load_sing_box_config() {
-	let paths = [
-		"/etc/sing-box/config.json",
-		"/etc/forkop/sing-box/config.json",
-		"/etc/prokop/sing-box/config.json",
-		"/etc/tachyon-core/config.json"
-	];
+function load_sing_box_config(product) {
+	let paths = [];
+	if (product == "tachyon")
+		push(paths, "/etc/tachyon-core/config.json");
+	else if (product == "forkop")
+		push(paths, "/etc/forkop/sing-box/config.json");
+	else if (product == "prokop")
+		push(paths, "/etc/prokop/sing-box/config.json");
+	push(paths, "/etc/sing-box/config.json");
 	for (let path in paths) {
 		if (!util.file_exists(path))
 			continue;
@@ -363,7 +365,7 @@ function write_ipcheck_config(cfg) {
 	return true;
 }
 
-function fetch_ip(tag) {
+function fetch_ip_singbox(tag) {
 	let res = run.run([
 		"/usr/bin/sing-box", "tools", "fetch", "api.ipify.org",
 		"-c", IPCHECK_DIR + "/config.json", "-D", IPCHECK_DIR,
@@ -375,30 +377,98 @@ function fetch_ip(tag) {
 	return valid_ip(value) ? value : "";
 }
 
-// Публичный IP напрямую и через VPN. Конфиг sing-box копируется во временный
-// каталог 0700, потому что в нём есть секреты; после проверки он удаляется.
+function curl_ip(proxy) {
+	let argv = [ "/usr/bin/curl", "-fsS", "--max-time", proxy == null ? "8" : "10" ];
+	if (proxy != null) {
+		push(argv, "-x", proxy.url);
+		if (proxy.user != "")
+			push(argv, "-U", proxy.user + ":" + proxy.pass);
+	}
+	push(argv, "https://api.ipify.org");
+	let res = run.run(argv, 15);
+	if (!res.ok)
+		return "";
+	let value = trim(util.as_string(res.stdout));
+	return valid_ip(value) ? value : "";
+}
+
+function proxy_inbound(cfg) {
+	let list = type(cfg.inbounds) == "array" ? cfg.inbounds : [];
+	let preferred = [ "service-mixed-in", "mixed-in", "mixed", "http-in", "socks-in" ];
+	for (let tag in preferred) {
+		for (let inbound in list) {
+			if (type(inbound) != "object")
+				continue;
+			if (util.as_string(inbound.tag) != tag)
+				continue;
+			if (inbound.type == "mixed" || inbound.type == "http" || inbound.type == "socks")
+				return inbound;
+		}
+	}
+	for (let inbound in list) {
+		if (type(inbound) != "object")
+			continue;
+		if (inbound.type != "mixed" && inbound.type != "http" && inbound.type != "socks")
+			continue;
+		if (int(inbound.listen_port) > 0)
+			return inbound;
+	}
+	return null;
+}
+
+function proxy_url(inbound) {
+	if (type(inbound) != "object")
+		return null;
+	let port = int(inbound.listen_port);
+	if (port <= 0)
+		return null;
+	let scheme = inbound.type == "socks" ? "socks5h" : "http";
+	let host = util.as_string(inbound.listen);
+	if (host == "" || host == "0.0.0.0" || host == "::")
+		host = "127.0.0.1";
+	let user = "";
+	let pass = "";
+	if (type(inbound.users) == "array" && length(inbound.users) > 0) {
+		user = util.as_string(inbound.users[0].username);
+		pass = util.as_string(inbound.users[0].password);
+	}
+	return { url: scheme + "://" + host + ":" + port, user: user, pass: pass };
+}
+
+function curl_vpn_ip(cfg) {
+	let inbound = proxy_inbound(cfg);
+	if (inbound == null)
+		return "";
+	let proxy = proxy_url(inbound);
+	if (proxy == null)
+		return "";
+	return curl_ip(proxy);
+}
+
+// Публичный IP напрямую и через VPN. Для Tachyon `sing-box` — это
+// tachyon-core без команды `tools fetch`, поэтому используем curl:
+// напрямую и через локальный mixed/http/socks inbound. Старый способ
+// оставлен как fallback для продуктов, где `tools fetch` ещё есть.
 function current_ips(product, force) {
 	let now = util.now_epoch();
 	if (!force && ip_cache.at > 0 && now - ip_cache.at < IP_CHECK_TTL)
 		return ip_cache;
 
-	let cfg = load_sing_box_config();
-	if (cfg == null) {
-		ip_cache = { at: now, direct: "", vpn: "" };
-		return ip_cache;
-	}
-	let direct_tag = has_outbound(cfg, "direct-out") ? "direct-out"
-		: (has_outbound(cfg, "bypass-out") ? "bypass-out" : "");
-	let vpn_tag = vpn_outbound(cfg);
-	let direct = "";
+	let cfg = load_sing_box_config(product);
+	let direct = curl_ip(null);
 	let vpn = "";
+	let direct_tag = "";
+	let vpn_tag = "";
 
-	if (write_ipcheck_config(cfg)) {
-		if (direct_tag != "")
-			direct = fetch_ip(direct_tag);
+	if (cfg != null) {
+		direct_tag = has_outbound(cfg, "direct-out") ? "direct-out"
+			: (has_outbound(cfg, "bypass-out") ? "bypass-out" : "");
+		vpn_tag = vpn_outbound(cfg);
+		vpn = curl_vpn_ip(cfg);
+
 		// Forkop 2.x умеет отдавать exit-IP через Clash API. Это надёжнее,
 		// чем запуск второго sing-box: адрес точно соответствует выбранному серверу.
-		if (product_api.is_forkop_v2(product)) {
+		if (vpn == "" && product_api.is_forkop_v2(product)) {
 			let proxies = product_api.get_proxies(product, 20);
 			if (proxies.ok && type(proxies.value.proxies) == "object") {
 				let group = pick_group(proxies.value.proxies, enabled_sections(product));
@@ -411,9 +481,14 @@ function current_ips(product, force) {
 				}
 			}
 		}
-		if (vpn == "" && vpn_tag != "")
-			vpn = fetch_ip(vpn_tag);
-		run.run([ "rm", "-rf", IPCHECK_DIR ], 5);
+
+		if ((direct == "" || vpn == "") && write_ipcheck_config(cfg)) {
+			if (direct == "" && direct_tag != "")
+				direct = fetch_ip_singbox(direct_tag);
+			if (vpn == "" && vpn_tag != "")
+				vpn = fetch_ip_singbox(vpn_tag);
+			run.run([ "rm", "-rf", IPCHECK_DIR ], 5);
+		}
 	}
 
 	ip_cache = { at: now, direct: direct, vpn: vpn };
