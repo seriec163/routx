@@ -2928,12 +2928,25 @@ details.advanced[open] > summary {
   display: flex;
   align-items: center;
   gap: 7px;
-  padding-bottom: 6px;
+  width: 100%;
+  padding: 0 0 6px;
+  border: 0;
   border-bottom: 1px solid var(--border);
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  font: inherit;
 }
 
-.service-group-heading h4 {
-  margin: 0;
+button.service-group-heading {
+  cursor: pointer;
+}
+
+button.service-group-heading:hover .service-group-heading-title {
+  color: var(--text);
+}
+
+.service-group-heading-title {
   font-size: 12px;
   font-weight: 600;
   letter-spacing: 0.02em;
@@ -2950,6 +2963,13 @@ details.advanced[open] > summary {
   color: var(--faint);
   font-size: 11px;
   font-variant-numeric: tabular-nums;
+}
+
+.service-group-chevron {
+  flex: 0 0 auto;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1;
 }
 
 .service-selected-tooltip,

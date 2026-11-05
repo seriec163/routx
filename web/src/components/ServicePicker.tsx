@@ -2,6 +2,28 @@ import { useMemo, useState } from 'react';
 import type { RoutingGroup, RoutingService } from '../lib/types';
 import { ServiceInfoButton, ServiceTooltip } from './ServiceTooltip';
 
+const POPULAR_IDS = [
+  'russia_inside',
+  'geoblock',
+  'youtube',
+  'discord',
+  'telegram',
+  'ai_all',
+  'openai',
+  'meta',
+  'twitter',
+  'spotify',
+  'steam',
+  'cloudflare',
+  'ru_whitelist',
+] as const;
+
+const POPULAR_GROUP: RoutingGroup = {
+  id: 'popular',
+  label: 'Популярные',
+  icon: '★',
+};
+
 const POPULAR_ICONS: Record<string, string> = {
   youtube: '▶',
   discord: '💬',
@@ -61,6 +83,7 @@ export function ServicePicker(props: {
 }) {
   const [query, setQuery] = useState('');
   const [activeGroup, setActiveGroup] = useState('all');
+  const [openGroups, setOpenGroups] = useState<Set<string>>(() => new Set(['popular']));
 
   const groups = useMemo(() => {
     if (props.groups && props.groups.length > 0) return props.groups;
@@ -85,20 +108,45 @@ export function ServicePicker(props: {
     return counts;
   }, [props.services]);
 
-  const filtered = useMemo(() => {
-    const needle = query.trim().toLowerCase();
-    return props.services.filter((service) => {
-      if (activeGroup !== 'all' && service.group !== activeGroup) return false;
+  const serviceById = useMemo(
+    () => new Map(props.services.map((service) => [service.id, service])),
+    [props.services],
+  );
+
+  const popularServices = useMemo(
+    () =>
+      POPULAR_IDS.map((id) => serviceById.get(id)).filter(
+        (service): service is RoutingService => service != null,
+      ),
+    [serviceById],
+  );
+
+  const searching = query.trim() !== '';
+  const needle = query.trim().toLowerCase();
+
+  const matches = useMemo(() => {
+    return (service: RoutingService): boolean => {
       if (needle === '') return true;
       return [service.id, service.label, service.title, service.description, service.note]
         .filter(Boolean)
         .some((value) => String(value).toLowerCase().includes(needle));
-    });
-  }, [props.services, activeGroup, query]);
+    };
+  }, [needle]);
 
-  const grouped = useMemo(() => {
+  const filtered = useMemo(() => {
+    const base =
+      activeGroup === 'popular'
+        ? popularServices
+        : props.services.filter(
+            (service) => activeGroup === 'all' || service.group === activeGroup,
+          );
+    return base.filter(matches);
+  }, [activeGroup, matches, popularServices, props.services]);
+
+  const themeGroups = useMemo(() => {
     const byGroup = new Map<string, RoutingService[]>();
     for (const service of filtered) {
+      if (service.group === 'popular') continue;
       const key = service.group ?? 'other';
       const list = byGroup.get(key) ?? [];
       list.push(service);
@@ -116,12 +164,35 @@ export function ServicePicker(props: {
     return ordered;
   }, [filtered, groups]);
 
+  const grouped = useMemo(() => {
+    if (activeGroup === 'popular') {
+      return filtered.length > 0
+        ? [{ group: POPULAR_GROUP, services: filtered }]
+        : [];
+    }
+    if (activeGroup !== 'all') return themeGroups;
+    if (searching) return themeGroups;
+    return [
+      { group: POPULAR_GROUP, services: popularServices },
+      ...themeGroups,
+    ];
+  }, [activeGroup, filtered, popularServices, searching, themeGroups]);
+
   const selectedSet = new Set(props.selected);
 
   function toggle(id: string): void {
     props.onChange(
       selectedSet.has(id) ? props.selected.filter((item) => item !== id) : [...props.selected, id],
     );
+  }
+
+  function toggleGroup(id: string): void {
+    setOpenGroups((current) => {
+      const next = new Set(current);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
   }
 
   function renderCard(service: RoutingService) {
@@ -173,6 +244,8 @@ export function ServicePicker(props: {
     );
   }
 
+  const canCollapse = !searching && activeGroup === 'all';
+
   return (
     <div className="service-picker">
       <div className="service-picker-toolbar">
@@ -202,6 +275,18 @@ export function ServicePicker(props: {
         <button
           type="button"
           role="tab"
+          aria-selected={activeGroup === 'popular'}
+          className={`service-group-tab ${
+            activeGroup === 'popular' ? 'service-group-tab-on' : ''
+          }`}
+          onClick={() => setActiveGroup('popular')}
+        >
+          <span aria-hidden="true">★</span> Популярные
+          <span>{popularServices.length}</span>
+        </button>
+        <button
+          type="button"
+          role="tab"
           aria-selected={activeGroup === 'all'}
           className={`service-group-tab ${activeGroup === 'all' ? 'service-group-tab-on' : ''}`}
           onClick={() => setActiveGroup('all')}
@@ -214,7 +299,9 @@ export function ServicePicker(props: {
             type="button"
             role="tab"
             aria-selected={activeGroup === group.id}
-            className={`service-group-tab ${activeGroup === group.id ? 'service-group-tab-on' : ''}`}
+            className={`service-group-tab ${
+              activeGroup === group.id ? 'service-group-tab-on' : ''
+            }`}
             onClick={() => setActiveGroup(group.id)}
           >
             <span aria-hidden="true">{group.icon}</span> {group.label}
@@ -227,25 +314,47 @@ export function ServicePicker(props: {
         <p className="muted-text small">По запросу «{query}» ничего не найдено.</p>
       ) : (
         <div className="service-picker-sections">
-          {grouped.map(({ group, services }) => (
-            <section key={group.id} className="service-picker-section">
-              <div className="service-group-heading">
+          {grouped.map(({ group, services }) => {
+            const open = !canCollapse || openGroups.has(group.id);
+            const heading = (
+              <>
                 <span className="service-group-heading-icon" aria-hidden="true">
                   {group.icon}
                 </span>
-                <h4>{group.label}</h4>
+                <span className="service-group-heading-title">{group.label}</span>
                 <span className="service-group-heading-count">{services.length}</span>
-              </div>
-              <div className="service-picker-grid">{services.map(renderCard)}</div>
-            </section>
-          ))}
+                {canCollapse ? (
+                  <span className="service-group-chevron" aria-hidden="true">
+                    {open ? '▾' : '▸'}
+                  </span>
+                ) : null}
+              </>
+            );
+            return (
+              <section key={group.id} className="service-picker-section">
+                {canCollapse ? (
+                  <button
+                    type="button"
+                    className={`service-group-heading ${open ? 'service-group-heading-open' : ''}`}
+                    onClick={() => toggleGroup(group.id)}
+                    aria-expanded={open}
+                  >
+                    {heading}
+                  </button>
+                ) : (
+                  <div className="service-group-heading">{heading}</div>
+                )}
+                {open ? <div className="service-picker-grid">{services.map(renderCard)}</div> : null}
+              </section>
+            );
+          })}
         </div>
       )}
 
       {props.selected.length > 0 ? (
         <div className="service-picker-selected">
           {props.selected.map((id) => {
-            const service = props.services.find((item) => item.id === id);
+            const service = serviceById.get(id);
             const chip = (
               <span className="service-selected-chip">
                 {service?.label ?? id}
