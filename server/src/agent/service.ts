@@ -10,6 +10,7 @@ export const MUTATING_OPS = new Set([
   'apply_uci',
   'apply_connections',
   'manage_connection',
+  'delete_section',
   'reload',
   'snapshot_create',
   'snapshot_restore',

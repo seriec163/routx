@@ -349,6 +349,93 @@ export async function registerRouterConnectionRoutes(
     };
   });
 
+  app.delete(
+    '/api/v1/routers/:id/sections/:section',
+    { config: { rateLimit: { max: 20, timeWindow: '1 minute' } } },
+    async (request, reply) => {
+      const auth = requireUser(request);
+      const params = z
+        .object({
+          id: z.string().uuid(),
+          section: z.string().regex(/^[A-Za-z0-9_.-]{1,64}$/),
+        })
+        .parse(request.params);
+      const router = await getRouterForMutation(pool, auth, params.id);
+      assertOnline(router);
+
+      const managedSection = await resolveRouterSection(pool, router.id);
+      if (managedSection === params.section) {
+        throw badRequest(
+          'section_managed',
+          'Это основная секция роутера. Сначала сделайте основной другую секцию.',
+        );
+      }
+
+      const state = await pool.query<{ managed: Record<string, unknown> | null }>(
+        'select managed from router_state where router_id = $1',
+        [router.id],
+      );
+      const managed = state.rows[0]?.managed ?? {};
+      const prefix = `section.${params.section}.`;
+      if (String(managed[`${prefix}enabled`] ?? '1') !== '0') {
+        throw badRequest('section_not_empty', 'Удалять можно только выключенные секции');
+      }
+      const allowed = new Set([
+        'enabled',
+        'label',
+        'action',
+        'connection_type',
+        'proxy_config_type',
+      ]);
+      for (const path of Object.keys(managed)) {
+        if (!path.startsWith(prefix)) continue;
+        const option = path.slice(prefix.length);
+        if (!allowed.has(option)) {
+          throw badRequest('section_not_empty', 'В секции есть настройки, списки или ресурсы');
+        }
+      }
+      for (const [path, value] of Object.entries(managed)) {
+        if (
+          (path.startsWith('subscription_url.') || path.startsWith('outbound_source.')) &&
+          path.endsWith('.section') &&
+          value === params.section
+        ) {
+          throw badRequest('section_not_empty', 'В секции есть подписка или подключение');
+        }
+      }
+      const connections = await pool.query(
+        'select 1 from router_connections where router_id = $1 and section = $2 limit 1',
+        [router.id, params.section],
+      );
+      if ((connections.rowCount ?? 0) > 0) {
+        throw badRequest('section_not_empty', 'В секции есть подключения RoutX');
+      }
+
+      const job = await enqueueJob(pool, {
+        type: 'section_delete',
+        routerId: router.id,
+        requestedBy: auth.userId,
+        timeoutSeconds: 300,
+        maxAttempts: 1,
+        payload: { section: params.section },
+      });
+      await audit(pool, {
+        actorId: auth.userId,
+        actorRole: auth.role,
+        action: 'router.section_delete',
+        targetType: 'router',
+        targetId: router.id,
+        routerId: router.id,
+        result: 'ok',
+        ip: request.ip,
+        userAgent: request.headers['user-agent'],
+        metadata: { section: params.section, job_id: job.id },
+      });
+      reply.code(202);
+      return { job: jobJson(job) };
+    },
+  );
+
   app.post(
     '/api/v1/routers/:id/connections/list',
     async (request, reply) => {

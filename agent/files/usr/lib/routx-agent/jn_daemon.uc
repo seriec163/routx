@@ -95,6 +95,11 @@ function handle_command(cmd) {
 			if (!res.ok) return { status: "failed", error: { code: "manage_connection_failed", message: res.error } };
 			return { status: "success", result: res };
 		}
+		if (op == "delete_section") {
+			let res = ops.delete_section(product, args);
+			if (!res.ok) return { status: "failed", error: { code: "delete_section_failed", message: res.error } };
+			return { status: "success", result: res };
+		}
 		if (op == "set_podkop_outbound") {
 			let res = ops.set_podkop_outbound(product, args);
 			if (!res.ok) return { status: "failed", error: { code: "podkop_outbound_failed", message: res.error } };

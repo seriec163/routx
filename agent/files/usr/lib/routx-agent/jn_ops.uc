@@ -637,6 +637,65 @@ function manage_podkop_connection(section, action, kind, value, args) {
 	return { ok: true, section: section, action: action, kind: kind, disabled: disabled };
 }
 
+function delete_section(product, args) {
+	if (product != "forkop" && product != "prokop" && product != "podkop" && product != "tachyon")
+		return { ok: false, error: "неизвестный продукт" };
+	let section = util.as_string(args.section);
+	if (match(section, SECTION_RE) == null)
+		return { ok: false, error: "invalid_section" };
+
+	let cursor = uci.cursor();
+	let sect = cursor.get_all(product, section);
+	if (type(sect) != "object" || sect[".type"] != "section")
+		return { ok: false, error: "section_missing" };
+	if (util.as_string(sect.enabled) != "0")
+		return { ok: false, error: "section_enabled" };
+
+	// Разрешаем только служебные поля секции. Любая настройка или ресурс
+	// означают, что секция не пустая.
+	for (let key in sect) {
+		if (key == "" || substr(key, 0, 1) == ".")
+			continue;
+		if (key == "enabled" || key == "label" || key == "action" ||
+		    key == "connection_type" || key == "proxy_config_type")
+			continue;
+		return { ok: false, error: "section_not_empty" };
+	}
+
+	// Дочерние объекты (подписки, outbound_source, section_interface и т.п.)
+	// удалять вместе с секцией нельзя без явного согласия пользователя.
+	let all = cursor.get_all(product);
+	if (type(all) == "object") {
+		for (let name in all) {
+			let item = all[name];
+			if (type(item) != "object" || name == section)
+				continue;
+			if (util.as_string(item.section) == section)
+				return { ok: false, error: "section_has_children" };
+		}
+	}
+
+	if (product == "tachyon") {
+		let res = run.run_product("tachyon", [ "delete_section", section ], 90);
+		if (!res.ok)
+			return { ok: false, error: run.error_text(res) };
+		return {
+			ok: true,
+			section: section,
+			deleted: true,
+			output: util.truncate_text(res.stdout, 2000)
+		};
+	}
+
+	cursor.delete(product, section);
+	if (cursor.commit(product) == null)
+		return { ok: false, error: "uci commit failed" };
+	let reload_res = reload(product);
+	if (!reload_res.ok)
+		return { ok: false, error: reload_res.error };
+	return { ok: true, section: section, deleted: true };
+}
+
 function manage_connection(product, args) {
 	if (product != "forkop" && product != "prokop" && product != "podkop" && product != "tachyon")
 		return { ok: false, error: "неизвестный продукт" };
@@ -2013,4 +2072,4 @@ function apply_connections(product, args) {
 	}
 }
 
-return { precheck, verify, service_action, reload, apply_uci, apply_connections, cleanup_json_outbounds, restore_section_options, capture_product_config, apply_product_config, list_connections, manage_connection, set_podkop_outbound, select_proxy, read_rules, migrate_legacy_tachyon_subscriptions, migrate_tachyon_lists };
+return { precheck, verify, service_action, reload, apply_uci, apply_connections, cleanup_json_outbounds, restore_section_options, capture_product_config, apply_product_config, list_connections, manage_connection, delete_section, set_podkop_outbound, select_proxy, read_rules, migrate_legacy_tachyon_subscriptions, migrate_tachyon_lists };

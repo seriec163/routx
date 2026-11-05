@@ -236,6 +236,10 @@ export function RouterRulesPanel(props: {
   } | null>(null);
   const [deleteBusy, setDeleteBusy] = useState(false);
   const [deleteJob, setDeleteJob] = useState<Job | null>(null);
+  const [deleteSectionTarget, setDeleteSectionTarget] = useState<RuleView | null>(null);
+  const [deleteSectionBusy, setDeleteSectionBusy] = useState(false);
+  const [deleteSectionJob, setDeleteSectionJob] = useState<Job | null>(null);
+  const [managedSection, setManagedSection] = useState(props.router.managed_section ?? '');
   const [toggleTarget, setToggleTarget] = useState<RuleView | null>(null);
   const liveLoaded = useRef(false);
 
@@ -258,6 +262,7 @@ export function RouterRulesPanel(props: {
       if (liveLoaded.current) return;
       setRules(response.rules ?? []);
       setSource(response.source ?? 'cache');
+      setManagedSection(response.managed_section ?? props.router.managed_section ?? '');
     } catch (caught) {
       setError(errorMessage(caught));
     } finally {
@@ -281,6 +286,7 @@ export function RouterRulesPanel(props: {
       liveLoaded.current = true;
       setRules(result.rules ?? []);
       setSource('live');
+      setManagedSection(result.managed_section ?? props.router.managed_section ?? '');
       // Обновляем карточку «Служба»: read_rules пишет health/service в состояние.
       props.onChanged();
     } catch (caught) {
@@ -320,6 +326,40 @@ export function RouterRulesPanel(props: {
     }
     setDeleteTarget({ rule, connection });
     setDeleteJob(null);
+  }
+
+  function requestDeleteSection(rule: RuleView): void {
+    if (rule.section === managedSection) {
+      toast.error('Нельзя удалить основную секцию роутера');
+      return;
+    }
+    setDeleteSectionTarget(rule);
+    setDeleteSectionJob(null);
+  }
+
+  async function deleteSection(): Promise<void> {
+    if (!deleteSectionTarget) return;
+    setDeleteSectionBusy(true);
+    try {
+      const started = await api<{ job: Job }>(
+        `/api/v1/routers/${props.routerId}/sections/${encodeURIComponent(deleteSectionTarget.section)}`,
+        { method: 'DELETE' },
+      );
+      setDeleteSectionJob(started.job);
+      const done = await waitForJob(started.job, 300_000);
+      if (done.status !== 'success') {
+        throw new Error(done.error?.message ?? 'Не удалось удалить секцию');
+      }
+      toast.success(`Секция «${deleteSectionTarget.label}» удалена`);
+      setDeleteSectionTarget(null);
+      await readLive();
+      props.onChanged();
+    } catch (caught) {
+      toast.error(errorMessage(caught));
+    } finally {
+      setDeleteSectionBusy(false);
+      setDeleteSectionJob(null);
+    }
   }
 
   async function toggleRule(): Promise<void> {
@@ -680,7 +720,9 @@ export function RouterRulesPanel(props: {
                 rule={rule}
                 services={services}
                 productLabel={productLabel}
+                isManaged={rule.section === managedSection}
                 onEdit={() => openEdit(rule)}
+                onDeleteSection={() => requestDeleteSection(rule)}
                 onAddConnection={() =>
                   setConnectionTarget({ rule, connection: null })
                 }
@@ -812,6 +854,31 @@ export function RouterRulesPanel(props: {
           }
         />
       ) : null}
+
+      {deleteSectionTarget ? (
+        <ConfirmDialog
+          title="Удалить пустую секцию?"
+          busy={deleteSectionBusy}
+          confirmLabel="Удалить"
+          onCancel={() => setDeleteSectionTarget(null)}
+          onConfirm={() => void deleteSection()}
+          message={
+            <>
+              <p>
+                Секция <strong>{deleteSectionTarget.label}</strong> будет удалена с роутера
+                вместе с её дочерними объектами. Перед удалением создаётся снимок; при ошибке
+                RoutX восстановит конфигурацию.
+              </p>
+              <p className="muted-text small">
+                Удалять можно только выключенные секции без подписок, ссылок и ресурсов.
+              </p>
+              {deleteSectionJob ? (
+                <JobProgress job={deleteSectionJob} label="Удаляем секцию" />
+              ) : null}
+            </>
+          }
+        />
+      ) : null}
     </div>
   );
 }
@@ -821,7 +888,9 @@ function RuleCard(props: {
   services: RoutingService[];
   productLabel: string;
   disabled: boolean;
+  isManaged: boolean;
   onEdit: () => void;
+  onDeleteSection: () => void;
   onAddConnection: () => void;
   onReplace: (connection: RuleConnectionView) => void;
   onDelete: (connection: RuleConnectionView) => void;
@@ -997,6 +1066,16 @@ function RuleCard(props: {
         <Button size="sm" variant="ghost" onClick={props.onToggle} disabled={props.disabled}>
           {rule.enabled ? 'Выключить' : 'Включить'}
         </Button>
+        {isEmptySection && !props.isManaged ? (
+          <Button
+            size="sm"
+            variant="ghost"
+            onClick={props.onDeleteSection}
+            disabled={props.disabled}
+          >
+            Удалить пустую
+          </Button>
+        ) : null}
       </footer>
     </article>
   );

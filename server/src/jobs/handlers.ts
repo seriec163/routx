@@ -1714,6 +1714,73 @@ export async function applyRouterConnections(ctx: HandlerContext, job: JobRow): 
   };
 }
 
+export async function sectionDelete(ctx: HandlerContext, job: JobRow): Promise<Json> {
+  const routerId = requireRouter(job);
+  const section = asString(job.payload.section) ?? '';
+  if (section === '' || !/^[A-Za-z0-9_.-]{1,64}$/.test(section)) {
+    throw new JobFailure('invalid_payload', 'Некорректное имя секции');
+  }
+  const routerResult = await ctx.pool.query<{ managed_section: string | null }>(
+    'select managed_section from routers where id = $1',
+    [routerId],
+  );
+  if ((routerResult.rows[0]?.managed_section ?? '') === section) {
+    throw new JobFailure('section_managed', 'Нельзя удалить основную секцию роутера');
+  }
+
+  await setJobPhase(ctx, job.id, 'snapshot', 10);
+  const snapshot = await runCommand(ctx, job, 'snapshot_create', { reason: 'section_delete' }, 90_000);
+  const snapshotRef =
+    asString(snapshot.external_id) ?? asString(snapshot.id) ?? `local-${Date.now()}`;
+  const snapshotId = uuidv7();
+  await ctx.pool.query(
+    `insert into router_snapshots
+       (id, router_id, kind, external_id, reason, sha256, size_bytes, product_version, expires_at)
+     values ($1,$2,$3,$4,'section_delete',$5,$6,$7, now() + ($8 || ' days')::interval)`,
+    [
+      snapshotId,
+      routerId,
+      asString(snapshot.kind) === 'native' ? 'native' : 'local',
+      snapshotRef,
+      asString(snapshot.sha256),
+      asNumber(snapshot.size_bytes),
+      asString(snapshot.product_version),
+      ctx.settings.retention.days,
+    ],
+  );
+
+  try {
+    await setJobPhase(ctx, job.id, 'delete', 40);
+    await runCommand(ctx, job, 'delete_section', { section }, 120_000);
+    await setJobPhase(ctx, job.id, 'verify', 80);
+    const raw = await runCommand(ctx, job, 'read_state', {}, 60_000);
+    await saveState(ctx.pool, routerId, raw, 'section_delete');
+    await ctx.pool.query('update routers set last_error = null, updated_at = now() where id = $1', [
+      routerId,
+    ]);
+    return { section, deleted: true, snapshot: snapshotRef, snapshot_id: snapshotId };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'не удалось удалить секцию';
+    let rollback = 'failed';
+    try {
+      await runCommand(
+        ctx,
+        job,
+        'snapshot_restore',
+        { snapshot: snapshotRef, kind: 'local' },
+        180_000,
+      );
+      rollback = 'ok';
+    } catch {
+      // Снимок остаётся в истории; сообщим пользователю, что откат не удался.
+    }
+    throw new JobFailure(
+      'section_delete_failed',
+      `${message} (${rollback === 'ok' ? 'изменения откачены из снимка' : 'требуется ручная проверка'})`,
+    );
+  }
+}
+
 export async function listConnections(ctx: HandlerContext, job: JobRow): Promise<Json> {
   const routerId = requireRouter(job);
   const section = await resolveRouterSection(ctx.pool, routerId, asString(job.payload.section));
@@ -2202,5 +2269,6 @@ export const HANDLERS: Record<string, JobHandler> = {
   connections_apply: applyRouterConnections,
   list_connections: listConnections,
   manage_connection: manageConnection,
+  section_delete: sectionDelete,
   reconcile,
 };

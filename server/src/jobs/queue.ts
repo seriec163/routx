@@ -31,6 +31,7 @@ export type JobType =
   | 'connections_apply'
   | 'list_connections'
   | 'manage_connection'
+  | 'section_delete'
   | 'rollout'
   | 'retention'
   | 'reconcile';
