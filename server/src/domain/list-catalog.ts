@@ -194,9 +194,13 @@ export function subnetsUrl(id: string): string {
 }
 
 function labelFromTitle(title: string, fallback: string): string {
-  const before = title.split(/\s+—\s+/)[0]?.trim() ?? '';
-  if (before !== '' && before.length <= 56) return before;
-  return fallback;
+  let before = title.split(/\s+—\s+/)[0]?.trim() ?? '';
+  before = before.replace(/\s*\((?:Block|Direct|Proxy)\)\s*$/i, '').trim();
+  if (before === '') return fallback;
+  if (before.length <= 56) return before;
+  const cut = before.slice(0, 54);
+  const index = cut.lastIndexOf(' ');
+  return `${(index > 24 ? cut.slice(0, index) : cut).trim()}…`;
 }
 
 function splitNote(description: string): { note: string; description: string } {
