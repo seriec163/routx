@@ -467,7 +467,7 @@ export async function updateRouterFromProbe(
         sing_box_version = coalesce($10, sing_box_version),
         sing_box_variant = coalesce($11, sing_box_variant),
         managed_section = case
-          when $3 = 'podkop' and (managed_section is null or managed_section = '' or managed_section = 'router_control')
+          when $3 = 'podkop' and (managed_section is null or managed_section = '')
             then 'main'
           else managed_section end,
         status = case

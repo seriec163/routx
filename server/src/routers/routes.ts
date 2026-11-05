@@ -801,7 +801,7 @@ export async function registerRouterRoutes(app: FastifyInstance, ctx: RouteConte
           typeof options.action === 'string' && CONNECTION_ACTIONS.has(options.action),
       )
       .map(([name]) => name);
-    const currentManaged = router.managed_section ?? 'router_control';
+    const currentManaged = router.managed_section ?? '';
     const targetManaged =
       connectionTargets.length === 1 ? connectionTargets[0]! : sectionMap[currentManaged];
     if (targetManaged && targetManaged !== currentManaged) {

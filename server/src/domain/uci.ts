@@ -406,6 +406,52 @@ export function creatableSections(payload: TemplatePayload): string[] {
 
 export const CONNECTION_ACTIONS = new Set(['connection', 'proxy', 'outbound', 'vpn']);
 
+export interface SectionState {
+  action: string;
+  enabled: boolean;
+}
+
+/** Разбирает `section.<name>.action/enabled` из состояния агента. */
+export function sectionStates(managed: Record<string, UciValue>): Map<string, SectionState> {
+  const sections = new Map<string, SectionState>();
+  for (const [path, value] of Object.entries(managed ?? {})) {
+    const match = /^section\.([A-Za-z0-9_.-]{1,64})\.(action|enabled)$/.exec(path);
+    if (!match) continue;
+    const name = match[1]!;
+    const entry = sections.get(name) ?? { action: '', enabled: true };
+    if (match[2] === 'action') entry.action = typeof value === 'string' ? value : '';
+    else entry.enabled = !(typeof value === 'string' && value === '0');
+    sections.set(name, entry);
+  }
+  return sections;
+}
+
+/**
+ * Выбирает основную секцию роутера без привязки к конкретному имени.
+ *
+ * Если текущая секция существует и включена — оставляем её. Если она пустая,
+ * выключенная или её больше нет, а на роутере ровно одна включённая секция
+ * с подключением, переключаемся на неё. При нескольких кандидатах ничего не
+ * меняем: решение должен принять пользователь.
+ */
+export function resolveManagedSection(
+  managed: Record<string, UciValue>,
+  current: string | null | undefined,
+): string | null {
+  const sections = sectionStates(managed);
+  const currentName = (current ?? '').trim();
+  if (sections.size === 0) return currentName || null;
+  const currentState = currentName ? sections.get(currentName) : undefined;
+  if (currentState?.enabled && CONNECTION_ACTIONS.has(currentState.action)) return currentName;
+
+  const candidates = [...sections.entries()]
+    .filter(([, state]) => state.enabled && CONNECTION_ACTIONS.has(state.action))
+    .map(([name]) => name);
+  if (candidates.length === 1) return candidates[0]!;
+  return currentName || null;
+}
+
+
 export interface SectionMappingResult {
   payload: TemplatePayload;
   sectionMap: Record<string, string>;
@@ -484,19 +530,57 @@ export function mapTemplateSections(
   for (const [path, value] of Object.entries(current)) {
     const section = /^section\.([A-Za-z0-9_.-]{1,64})\./.exec(path);
     if (section) existing.add(section[1]!);
-    const subscription = /^subscription_url\.[A-Za-z0-9_.-]{1,64}\.section$/.exec(path);
+    const subscription =
+      /^(?:subscription_url|outbound_source)\.[A-Za-z0-9_.-]{1,64}\.section$/.exec(path);
     if (subscription && typeof value === 'string' && value.trim() !== '') {
       subscriptionSections.add(value.trim());
     }
   }
 
-  function candidates(): string[] {
-    const withSubscriptions = [...subscriptionSections].filter((name) => existing.has(name));
+  function enabledConnectionSections(): string[] {
+    const enabled = (name: string): boolean => {
+      const value = current[`section.${name}.enabled`];
+      return value == null || String(value) !== '0';
+    };
+    const withSubscriptions = [...subscriptionSections].filter(
+      (name) => existing.has(name) && enabled(name),
+    );
     if (withSubscriptions.length > 0) return withSubscriptions;
     return [...existing].filter((name) => {
+      if (!enabled(name)) return false;
       const action = current[`section.${name}.action`];
       return typeof action === 'string' && CONNECTION_ACTIONS.has(action);
     });
+  }
+
+  const payloadConnections = Object.entries(payload.sections)
+    .filter(
+      ([, options]) =>
+        typeof options.action === 'string' && CONNECTION_ACTIONS.has(options.action),
+    )
+    .map(([name]) => name);
+
+  // Шаблон может ссылаться на выключенную/пустую секцию — типичный след
+  // старого имени router_control после смены продукта. Если на роутере ровно
+  // одна активная секция с подключением, переносим правило в неё, а не
+  // создаём/заполняем пустую.
+  if (payloadConnections.length === 1) {
+    const sourceName = payloadConnections[0]!;
+    const sourceEnabled = current[`section.${sourceName}.enabled`];
+    const sourceDisabled = sourceEnabled != null && String(sourceEnabled) === '0';
+    if (existing.has(sourceName) && sourceDisabled) {
+      const targets = enabledConnectionSections().filter((name) => name !== sourceName);
+      if (targets.length === 1) {
+        const target = targets[0]!;
+        return {
+          payload: applySectionMap(payload, { [sourceName]: target }),
+          sectionMap: { [sourceName]: target },
+          warnings: [
+            `Секция «${sourceName}» на роутере выключена; правило привязано к активной секции «${target}».`,
+          ],
+        };
+      }
+    }
   }
 
   const missing = Object.entries(payload.sections).filter(([name, options]) => {
@@ -515,7 +599,7 @@ export function mapTemplateSections(
   }
 
   const [sourceName, sourceOptions] = missing[0]!;
-  const options = candidates();
+  const options = enabledConnectionSections();
   if (options.length === 0) {
     throw badRequest(
       'section_without_connection',

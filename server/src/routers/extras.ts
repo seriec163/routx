@@ -4,6 +4,7 @@ import { z } from 'zod';
 import { audit } from '../audit.js';
 import { requireUser } from '../auth/service.js';
 import { isCommentLine, parseManualDomain } from '../domain/uci.js';
+import { resolveRouterSection } from '../domain/managed-section.js';
 import { badRequest } from '../lib/errors.js';
 import { getRouter } from './service.js';
 
@@ -63,8 +64,9 @@ export async function registerRouterExtrasRoutes(
     const auth = requireUser(request);
     const params = z.object({ id: z.string().uuid() }).parse(request.params);
     const router = await getRouter(pool, auth, params.id);
+    const managedSection = await resolveRouterSection(pool, router.id);
     return {
-      managed_section: router.managed_section ?? 'router_control',
+      managed_section: managedSection ?? '',
       extras: router.list_extras ?? {},
     };
   });

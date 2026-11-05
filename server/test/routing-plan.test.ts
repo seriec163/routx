@@ -3,6 +3,7 @@ import {
   buildPlan,
   computePlan,
   mapTemplateSections,
+  resolveManagedSection,
   templatePayloadSchema,
 } from '../src/domain/uci.js';
 
@@ -201,6 +202,31 @@ describe('план шаблона', () => {
 
     expect(mapped.sectionMap).toEqual({});
     expect(mapped.payload.sections.router_control).toBeDefined();
+  });
+
+  it('выбирает единственную включённую секцию вместо выключенного router_control', () => {
+    const current = {
+      'section.router_control.action': 'connection',
+      'section.router_control.enabled': '0',
+      'section.section_3d396b.action': 'connection',
+      'section.section_3d396b.enabled': '1',
+    };
+    expect(resolveManagedSection(current, 'router_control')).toBe('section_3d396b');
+    expect(resolveManagedSection(current, 'section_3d396b')).toBe('section_3d396b');
+    expect(resolveManagedSection(current, null)).toBe('section_3d396b');
+  });
+
+  it('переносит правило из выключенной секции в единственную активную', () => {
+    const mapped = mapTemplateSections(payload({ create_sections: [] }), {
+      'section.router_control.action': 'connection',
+      'section.router_control.enabled': '0',
+      'section.section_3d396b.action': 'connection',
+      'section.section_3d396b.enabled': '1',
+    });
+
+    expect(mapped.sectionMap).toEqual({ router_control: 'section_3d396b' });
+    expect(mapped.payload.sections.section_3d396b?.action).toBe('connection');
+    expect(mapped.payload.sections.router_control).toBeUndefined();
   });
 
   it('останавливает diff, если секции с подключением нет', () => {

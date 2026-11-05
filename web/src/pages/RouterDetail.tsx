@@ -650,7 +650,7 @@ export function RouterDetailPage({ id }: { id: string }) {
   } | null>(null);
   const [manageValue, setManageValue] = useState('');
   const [manageBusy, setManageBusy] = useState(false);
-  const [extraSection, setExtraSection] = useState('router_control');
+  const [extraSection, setExtraSection] = useState('');
   const [extraRuleSet, setExtraRuleSet] = useState('');
   const [extraDomainLists, setExtraDomainLists] = useState('');
   const [extraSubnetLists, setExtraSubnetLists] = useState('');
@@ -733,7 +733,7 @@ export function RouterDetailPage({ id }: { id: string }) {
   // секция: иначе в интерфейсе появляются «router_control» и «gga» одновременно.
   const sectionNames = routerSectionNames;
   const managedSectionName =
-    connections.data?.managed_section ?? router?.managed_section ?? 'router_control';
+    connections.data?.managed_section ?? router?.managed_section ?? routerSectionNames[0] ?? '';
   const sectionLabel = (name: string): string => {
     const raw = state?.managed?.[`section.${name}.label`];
     const label = typeof raw === 'string' ? raw.trim() : '';
@@ -748,11 +748,11 @@ export function RouterDetailPage({ id }: { id: string }) {
   };
   const sectionSubscriptionPaths = Object.entries(state?.managed ?? {}).filter(
     ([path, value]) =>
-      /^subscription_url\.[A-Za-z0-9_.-]{1,64}\.section$/.test(path) &&
+      /^(?:subscription_url|outbound_source)\.[A-Za-z0-9_.-]{1,64}\.section$/.test(path) &&
       value === managedSectionName,
   );
   const managedSubscriptionsOnRouter = sectionSubscriptionPaths.filter(([path]) =>
-    /^subscription_url\.rc_sub_/.test(path),
+    /^(?:subscription_url|outbound_source)\.rc_sub_/.test(path),
   ).length;
   const externalSubscriptionsOnRouter =
     sectionSubscriptionPaths.length - managedSubscriptionsOnRouter;
@@ -804,7 +804,7 @@ export function RouterDetailPage({ id }: { id: string }) {
 
   useEffect(() => {
     if (!extras.data) return;
-    const section = extras.data.managed_section || 'router_control';
+    const section = extras.data.managed_section || routerSectionNames[0] || '';
     setExtraSection(section);
     applyExtrasToForm(extras.data.extras[section]);
   }, [extras.data]);

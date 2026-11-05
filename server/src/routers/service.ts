@@ -60,7 +60,7 @@ export function routerJson(row: RouterRecord) {
     last_seen_at: row.last_seen_at?.toISOString() ?? null,
     last_error: row.last_error,
     monitoring_enabled: row.monitoring_enabled,
-    managed_section: row.managed_section ?? 'router_control',
+    managed_section: row.managed_section ?? '',
     archived_at: row.archived_at?.toISOString() ?? null,
     created_at: row.created_at.toISOString(),
     updated_at: row.updated_at.toISOString(),

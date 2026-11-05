@@ -9,6 +9,7 @@ import { uuidv7 } from '../lib/ids.js';
 import { enqueueJob, jobJson } from '../jobs/queue.js';
 import { fetchSubscription, isUnsupportedPodkopLink } from '../domain/subscription.js';
 import { assertOnline, getRouter, getRouterForMutation } from './service.js';
+import { resolveRouterSection } from '../domain/managed-section.js';
 import { loadAccessibleSubscription } from '../subscriptions/service.js';
 import {
   connectionSecretPreview,
@@ -328,8 +329,9 @@ export async function registerRouterConnectionRoutes(
       [params.id],
     );
 
+    const managedSection = await resolveRouterSection(pool, params.id);
     return {
-      managed_section: router.managed_section ?? 'router_control',
+      managed_section: managedSection ?? '',
       items: result.rows.map((row) => ({
         id: row.id,
         kind: row.kind,
@@ -363,7 +365,9 @@ export async function registerRouterConnectionRoutes(
         routerId: router.id,
         requestedBy: auth.userId,
         timeoutSeconds: 60,
-        payload: { section: body.section ?? router.managed_section ?? 'router_control' },
+        payload: {
+          section: body.section ?? (await resolveRouterSection(pool, router.id)) ?? '',
+        },
       });
       reply.code(202);
       return { job: jobJson(job) };
@@ -427,6 +431,7 @@ export async function registerRouterConnectionRoutes(
         }
       }
 
+      const section = body.section ?? (await resolveRouterSection(pool, router.id)) ?? '';
       let editId: string | null = null;
       if (body.action === 'replace' && replacement) {
         editId = uuidv7();
@@ -442,7 +447,7 @@ export async function registerRouterConnectionRoutes(
         requestedBy: auth.userId,
         timeoutSeconds: 600,
         payload: {
-          section: body.section ?? router.managed_section ?? 'router_control',
+          section,
           action: body.action,
           kind: body.kind,
           name: body.name ?? null,
@@ -466,7 +471,7 @@ export async function registerRouterConnectionRoutes(
           kind: body.kind,
           name: body.name ?? null,
           hash: body.hash ?? null,
-          section: body.section ?? router.managed_section ?? 'router_control',
+          section,
         },
       });
 
@@ -514,10 +519,7 @@ export async function registerRouterConnectionRoutes(
           );
         }
         const section =
-          body.section ??
-          (router.managed_section && router.managed_section !== 'router_control'
-            ? router.managed_section
-            : 'main');
+          body.section ?? (await resolveRouterSection(pool, router.id)) ?? 'main';
         const state = await pool.query<{ managed: Record<string, unknown> | null }>(
           'select managed from router_state where router_id = $1',
           [router.id],
@@ -590,7 +592,11 @@ export async function registerRouterConnectionRoutes(
           : validateValue(body.kind, body.value!);
       }
 
-      const section = body.section ?? router.managed_section ?? 'router_control';
+      const section =
+        body.section ?? (await resolveRouterSection(pool, router.id)) ?? '';
+      if (!section) {
+        throw badRequest('section_unknown', 'Не удалось определить секцию роутера');
+      }
       const id = uuidv7();
       const baseLabel = label;
       let inserted = false;
@@ -824,7 +830,8 @@ export async function registerRouterConnectionRoutes(
       [params.connectionId, params.id],
     );
     if ((removed.rowCount ?? 0) === 0) throw notFound('Подключение не найдено');
-    const section = removed.rows[0]?.section ?? 'router_control';
+    const section =
+      removed.rows[0]?.section || (await resolveRouterSection(pool, params.id)) || '';
 
     const job = await enqueueJob(pool, {
       type: 'connections_apply',
@@ -880,7 +887,13 @@ export async function registerRouterConnectionRoutes(
       }
 
       let sourceUrl = body.url ?? '';
-      let section = body.section ?? router.managed_section ?? 'main';
+      let section =
+        body.section ??
+        (await resolveRouterSection(pool, router.id)) ??
+        (router.product === 'podkop' ? 'main' : '');
+      if (!section) {
+        throw badRequest('section_unknown', 'Не удалось определить секцию роутера');
+      }
       let sourceConnectionId: string | null = null;
 
       if (body.subscription_id) {

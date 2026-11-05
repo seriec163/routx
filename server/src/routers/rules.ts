@@ -16,6 +16,7 @@ import {
 } from '../domain/uci.js';
 import { buildRuleViews, type AgentSection, type StoredConnection } from '../domain/rules.js';
 import { resolveCommunityLists } from '../domain/community-lists.js';
+import { resolveRouterSection } from '../domain/managed-section.js';
 
 interface RouteContext {
   pool: Pool;
@@ -127,7 +128,7 @@ export async function registerRouterRuleRoutes(
     return {
       rules,
       source: 'cache',
-      managed_section: router.managed_section ?? 'router_control',
+      managed_section: (await resolveRouterSection(pool, router.id)) ?? '',
       state_collected_at: state.rows[0]?.collected_at?.toISOString() ?? null,
     };
   });

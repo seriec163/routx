@@ -9,6 +9,7 @@ import {
   diffHash,
   applySectionMap,
   mapTemplateSections,
+  resolveManagedSection,
   sanitizeAgentState,
   stateHash,
   templatePayloadSchema,
@@ -20,6 +21,7 @@ import {
 } from '../domain/uci.js';
 import type { PlatformSettings } from '../settings.js';
 import { normalizeTemplateLists } from '../domain/community-lists.js';
+import { resolveRouterSection } from '../domain/managed-section.js';
 import { createCommand, waitForCommand } from '../agent/service.js';
 import { enqueueJob, isCancelRequested } from './queue.js';
 import type { JobRow } from './queue.js';
@@ -173,6 +175,22 @@ async function saveState(
       source,
     ],
   );
+
+  // Секции на роутере не обязаны называться router_control/main. Как только
+  // агент присылает состояние, выбираем реальную активную секцию и запоминаем
+  // её, чтобы дальше не создавать пустой дубль.
+  const current = await pool.query<{ managed_section: string | null }>(
+    'select managed_section from routers where id = $1',
+    [routerId],
+  );
+  const currentSection = current.rows[0]?.managed_section ?? null;
+  const resolved = resolveManagedSection(managed, currentSection);
+  if (resolved && resolved !== currentSection) {
+    await pool.query('update routers set managed_section = $2, updated_at = now() where id = $1', [
+      routerId,
+      resolved,
+    ]);
+  }
 
   return managed;
 }
@@ -1501,8 +1519,9 @@ export async function applyRouterConnections(ctx: HandlerContext, job: JobRow): 
   );
   const router = routerResult.rows[0];
   if (!router) throw new JobFailure('router_missing', 'Роутер не найден');
-  const defaultSection = router.managed_section || 'router_control';
   const requestedSection = asString(job.payload.section);
+  const defaultSection =
+    (await resolveRouterSection(ctx.pool, routerId, requestedSection)) ?? '';
 
   const result = await ctx.pool.query<{
     id: string;
@@ -1525,6 +1544,7 @@ export async function applyRouterConnections(ctx: HandlerContext, job: JobRow): 
     if (requestedSection && row.section !== requestedSection) continue;
     if (!row.enabled) continue;
     const section = row.section || defaultSection;
+    if (!section) continue;
     const group = bySection.get(section) ?? { links: [], subscriptions: [] };
     const value = decryptSecret(row.secret_enc, ctx.masterKey);
     if (row.kind === 'vless') {
@@ -1695,8 +1715,9 @@ export async function applyRouterConnections(ctx: HandlerContext, job: JobRow): 
 }
 
 export async function listConnections(ctx: HandlerContext, job: JobRow): Promise<Json> {
-  requireRouter(job);
-  const section = asString(job.payload.section) || 'router_control';
+  const routerId = requireRouter(job);
+  const section = await resolveRouterSection(ctx.pool, routerId, asString(job.payload.section));
+  if (!section) throw new JobFailure('section_unknown', 'Не удалось определить секцию роутера');
   return runCommand(ctx, job, 'list_connections', { section }, 30_000);
 }
 
@@ -1810,14 +1831,8 @@ export async function manageConnection(ctx: HandlerContext, job: JobRow): Promis
     throw new JobFailure('invalid_payload', 'Не указан тип подключения');
   }
 
-  const routerResult = await ctx.pool.query<{ managed_section: string | null }>(
-    'select managed_section from routers where id = $1',
-    [routerId],
-  );
-  const section =
-    asString(job.payload.section) ||
-    routerResult.rows[0]?.managed_section ||
-    'router_control';
+  const section = await resolveRouterSection(ctx.pool, routerId, asString(job.payload.section));
+  if (!section) throw new JobFailure('section_unknown', 'Не удалось определить секцию роутера');
   const name = asString(job.payload.name);
   const hash = asString(job.payload.hash);
   const editId = asString(job.payload.edit_id);
@@ -1994,12 +2009,20 @@ export async function productSwitch(ctx: HandlerContext, job: JobRow): Promise<J
     'select managed_section from routers where id = $1',
     [routerId],
   );
-  const section = routerRow.rows[0]?.managed_section || 'main';
   const stateRow = await ctx.pool.query<{ managed: Record<string, unknown> | null }>(
     'select managed from router_state where router_id = $1',
     [routerId],
   );
   const managed = stateRow.rows[0]?.managed ?? {};
+  const currentSection = routerRow.rows[0]?.managed_section ?? null;
+  const section =
+    resolveManagedSection(managed as Record<string, UciValue>, currentSection) ?? currentSection ?? '';
+  if (section && section !== currentSection) {
+    await ctx.pool.query('update routers set managed_section = $2, updated_at = now() where id = $1', [
+      routerId,
+      section,
+    ]);
+  }
   const allowedOptions = [
     'community_lists',
     'rule_set',
