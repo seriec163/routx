@@ -837,6 +837,13 @@ function RuleCard(props: {
     (connection) => connection.selectable && connection.proxy_tag,
   );
   const activeLink = selectableLinks.find((connection) => connection.active);
+  const isEmptySection =
+    !rule.enabled &&
+    Object.keys(rule.resources).length === 0 &&
+    rule.subscriptions.length === 0 &&
+    rule.links.length === 0 &&
+    rule.manual_domains.length === 0 &&
+    rule.manual_ips.length === 0;
 
   return (
     <article className={`rule-card ${rule.enabled ? '' : 'rule-card-off'}`}>
@@ -860,6 +867,7 @@ function RuleCard(props: {
             status={rule.enabled ? 'success' : 'neutral'}
             label={rule.enabled ? 'включено' : 'выключено'}
           />
+          {isEmptySection ? <StatusBadge status="neutral" label="пустая" /> : null}
         </div>
       </header>
 
