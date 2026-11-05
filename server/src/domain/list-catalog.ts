@@ -103,7 +103,7 @@ const FORKOP2_NATIVE = new Set([
 const FORKOP2_ASN_LISTS = new Set(['digitalocean', 'hetzner', 'ovh']);
 
 const FORKOP2_FROM_CANONICAL: Record<string, string[]> = {
-  meta: ['facebook', 'instagram', 'whatsapp'],
+  meta: ['facebook', 'instagram'],
   twitter: ['x'],
   google_ai: ['gemini'],
   openai: ['chatgpt'],

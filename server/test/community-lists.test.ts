@@ -69,7 +69,7 @@ describe('community lists', () => {
       'forkop',
       '2.0.0',
     );
-    expect(result.native).toEqual(['cloudflare', 'facebook', 'instagram', 'whatsapp']);
+    expect(result.native).toEqual(['cloudflare', 'facebook', 'instagram']);
     expect(result.ruleSets).toEqual([
       `${RELEASES}/digitalocean.json`,
       `${RELEASES}/hetzner.json`,

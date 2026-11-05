@@ -35,3 +35,4 @@ agent/dist/
 tmp_apk_root/
 tmp/
 .playwright-mcp/
+service-picker.png
