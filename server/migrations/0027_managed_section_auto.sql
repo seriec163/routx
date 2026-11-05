@@ -1,18 +1,23 @@
 -- Основная секция роутера не должна зависеть от имени router_control.
 --
--- 1) Если текущая managed_section выключена или отсутствует, а на роутере
---    ровно одна включённая секция с подключением — выбираем её.
--- 2) Убираем default/NOT NULL, чтобы новые роутеры не получали фиктивное
+-- 1) Убираем default/NOT NULL, чтобы новые роутеры не получали фиктивное
 --    имя до первого чтения состояния.
+-- 2) Если текущая managed_section выключена или отсутствует, а на роутере
+--    ровно одна включённая секция с подключением — выбираем её.
+-- 3) Если legacy-секции router_control на роутере нет — сбрасываем имя,
+--    чтобы первый же read_state выбрал реальную секцию.
+
+alter table routers alter column managed_section drop default;
+alter table routers alter column managed_section drop not null;
 
 with section_flags as (
   select rs.router_id,
-         substring(k from '^section\.([^.]+)\.') as name,
-         max(case when split_part(k, '.', 3) = 'action' then value end) as action,
-         max(case when split_part(k, '.', 3) = 'enabled' then value end) as enabled
+         substring(e.key from '^section\.([^.]+)\.') as name,
+         max(case when split_part(e.key, '.', 3) = 'action' then e.value end) as action,
+         max(case when split_part(e.key, '.', 3) = 'enabled' then e.value end) as enabled
     from router_state rs
-    cross join lateral jsonb_each_text(rs.managed) k
-   where k like 'section.%'
+    cross join lateral jsonb_each_text(rs.managed) as e(key, value)
+   where e.key like 'section.%'
    group by 1, 2
 ),
 enabled_sections as (
@@ -41,8 +46,6 @@ update routers r
         and coalesce(s.enabled, '1') <> '0'
    );
 
--- Если секции с legacy-именем router_control на роутере нет, хранить это
--- имя бессмысленно: сбрасываем, чтобы первый же read_state выбрал реальную.
 update routers r
    set managed_section = null,
        updated_at = now()
@@ -53,9 +56,6 @@ update routers r
       where rs.router_id = r.id
         and rs.managed ? 'section.router_control.action'
    );
-
-alter table routers alter column managed_section drop default;
-alter table routers alter column managed_section drop not null;
 
 update settings
    set value = '{"version": 27}'::jsonb, updated_at = now()
