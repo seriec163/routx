@@ -1649,7 +1649,7 @@ export function RouterDetailPage({ id }: { id: string }) {
         }
         actions={
           <>
-            {isAdmin && online ? (
+            {isAdmin ? (
               <>
                 <Button
                   variant="ghost"
@@ -1657,7 +1657,7 @@ export function RouterDetailPage({ id }: { id: string }) {
                   busy={productSwitchBusy}
                   disabled={!canMutate || productSwitchBusy}
                 >
-                  Пакет продукта
+                  Сменить продукт
                 </Button>
                 {router.product === 'tachyon' ||
                 router.product === 'forkop' ||
@@ -3214,7 +3214,7 @@ export function RouterDetailPage({ id }: { id: string }) {
 
       {productOpen ? (
         <Modal
-          title="Пакет продукта"
+          title="Смена продукта"
           onClose={() => setProductOpen(false)}
           footer={
             <Button variant="ghost" onClick={() => setProductOpen(false)} disabled={productSwitchBusy}>
