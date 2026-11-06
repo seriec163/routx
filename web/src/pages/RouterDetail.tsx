@@ -664,6 +664,7 @@ export function RouterDetailPage({ id }: { id: string }) {
   const assignments = detail.data?.assignments ?? [];
   const online = router?.status === 'online';
   const canMutate = router?.status === 'online';
+  const canSwitchProduct = router?.status === 'online' || router?.status === 'conflict';
 
   // При открытии вкладки выбираем установленный вариант; дальше выбор
   // принадлежит пользователю и не сбрасывается при обновлении состояния.
@@ -1655,7 +1656,7 @@ export function RouterDetailPage({ id }: { id: string }) {
                   variant="ghost"
                   onClick={() => void openProductManager()}
                   busy={productSwitchBusy}
-                  disabled={!canMutate || productSwitchBusy}
+                  disabled={!canSwitchProduct || productSwitchBusy}
                 >
                   Сменить продукт
                 </Button>
@@ -1667,7 +1668,7 @@ export function RouterDetailPage({ id }: { id: string }) {
                     variant="ghost"
                     onClick={() => void reinstallCurrent()}
                     busy={productSwitchBusy}
-                    disabled={!canMutate || productSwitchBusy}
+                    disabled={!canSwitchProduct || productSwitchBusy}
                   >
                     Переустановить
                   </Button>
@@ -1707,8 +1708,9 @@ export function RouterDetailPage({ id }: { id: string }) {
 
       {router.status === 'conflict' ? (
         <InfoBanner tone="warn">
-          На роутере обнаружено несколько продуктов (Forkop/Prokop/Podkop/Tachyon). Изменения запрещены: устраните конфликт
-          вручную, RoutX ничего не удаляет и не переустанавливает.
+          На роутере обнаружено несколько продуктов (Forkop/Prokop/Podkop/Tachyon). Обычные
+          изменения заблокированы, но можно нажать «Сменить продукт» и установить один продукт —
+          RoutX удалит остальные и попробует перенести настройки.
         </InfoBanner>
       ) : null}
       {router.status === 'unsupported' ? (

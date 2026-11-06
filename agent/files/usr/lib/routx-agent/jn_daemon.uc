@@ -19,9 +19,11 @@ function handle_command(cmd) {
 	let op = cmd.op;
 	let args = type(cmd.args) == "object" ? cmd.args : {};
 	let product = platform.detect_product();
-	if (product == "conflict")
+	// При конфликте продуктов разрешаем только явную смену продукта и probe:
+	// именно product_switch устраняет конфликт, удаляя лишние продукты.
+	if (product == "conflict" && op != "product_switch" && op != "product_probe" && op != "self_update")
 		return { status: "failed", error: { code: "product_conflict", message: "Оба продукта обнаружены" } };
-	if (product == "unknown")
+	if (product == "unknown" && op != "product_switch")
 		return { status: "failed", error: { code: "product_unknown", message: "Продукт не определён" } };
 
 	try {
@@ -119,8 +121,22 @@ function handle_command(cmd) {
 				return { status: "failed", error: { code: "invalid_product_version", message: "Некорректная версия продукта" } };
 			let current = platform.detect_product();
 			let captured = { ok: true, sections: 0, subscriptions: 0, links: 0 };
-			if (current != "unknown" && current != "conflict")
+			if (current != "unknown" && current != "conflict") {
 				captured = ops.capture_product_config(current, target);
+			} else if (current == "conflict") {
+				// Конфликт: пробуем сохранить настройки хотя бы одного
+				// продукта, кроме целевого, чтобы не потерять секции и подписки.
+				let found = platform.installed_products(true);
+				for (let item in found) {
+					if (item.product == target)
+						continue;
+					let candidate = ops.capture_product_config(item.product, target);
+					if (candidate.ok && (int(candidate.sections) > 0 || int(candidate.subscriptions) > 0 || int(candidate.links) > 0)) {
+						captured = candidate;
+						break;
+					}
+				}
+			}
 			let before = platform.installed_products(true);
 			let command = "";
 			if (target == "tachyon") {
@@ -128,6 +144,11 @@ function handle_command(cmd) {
 				// поэтому его пакеты и ядро убираем до установки.
 				command = "if command -v opkg >/dev/null 2>&1; then /etc/init.d/prokop stop >/dev/null 2>&1 || true; /etc/init.d/podkop stop >/dev/null 2>&1 || true; /etc/init.d/forkop stop >/dev/null 2>&1 || true; opkg remove --force-depends prokop luci-app-prokop luci-i18n-prokop-ru podkop luci-app-podkop forkop luci-app-forkop luci-i18n-forkop-ru sing-box-forkop sing-box sing-box-tiny >/dev/null 2>&1 || true; fi; ";
 				command += "if command -v apk >/dev/null 2>&1; then apk del prokop luci-app-prokop luci-i18n-prokop-ru podkop luci-app-podkop forkop luci-app-forkop luci-i18n-forkop-ru sing-box-forkop sing-box sing-box-tiny >/dev/null 2>&1 || true; fi; ";
+				// Если пакетный менеджер не смог удалить продукт, убираем
+				// оставшиеся бинарники/init-скрипты/конфиги, иначе detect_product
+				// снова увидит конфликт.
+				command += "rm -f /etc/init.d/prokop /etc/init.d/podkop /etc/init.d/forkop /usr/bin/prokop /usr/bin/podkop /usr/bin/forkop; ";
+				command += "rm -rf /etc/config/prokop /etc/config/podkop /etc/config/forkop /usr/lib/prokop /usr/lib/podkop /usr/lib/forkop /usr/share/prokop /usr/share/podkop /usr/share/forkop; ";
 				command += "wget -O /tmp/tachyon-setup.sh https://raw.githubusercontent.com/Dushnilin/tachyon/main/install.sh && sh /tmp/tachyon-setup.sh -y --tachyon-core";
 				if (version != "")
 					command += " --tag " + version;

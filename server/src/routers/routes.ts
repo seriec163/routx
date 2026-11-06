@@ -1044,8 +1044,18 @@ export async function registerRouterRoutes(app: FastifyInstance, ctx: RouteConte
         })
         .strict()
         .parse(request.body);
-      const router = await getRouterForMutation(pool, auth, params.id);
-      assertOnline(router);
+      const router = await getRouter(pool, auth, params.id);
+      if (router.archived_at) throw forbidden('Роутер архивирован');
+      // Смена продукта — единственная операция, которая может устранить
+      // конфликт «оба продукта обнаружены». Поэтому status=conflict разрешён.
+      if (router.status !== 'online' && router.status !== 'conflict') {
+        throw conflict(
+          'router_offline',
+          router.status === 'pending'
+            ? 'Роутер ещё не подключался к серверу'
+            : 'Роутер не в сети — команда не может быть доставлена',
+        );
+      }
 
       const job = await enqueueJob(pool, {
         type: 'product_switch',
