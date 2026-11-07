@@ -1,308 +1,238 @@
-# RoutX
+<p align="center">
+  <img src="./assets/readme/hero.svg" alt="RoutX — панель управления роутерами OpenWrt" width="100%">
+</p>
 
-Централизованное управление парком роутеров OpenWrt с продуктами
-**Tachyon**, **Forkop**, **Prokop** и **Podkop**: шаблоны конфигурации,
-подписки и подключения, мониторинг, диагностика, снимки с откатом, задания,
-обновление агентов и смена продукта на роутере.
+<p align="center">
+  <img alt="Node.js" src="https://img.shields.io/badge/Node.js-22.12%2B-339933?logo=node.js&logoColor=white">
+  <img alt="Docker" src="https://img.shields.io/badge/Docker-ready-2496ED?logo=docker&logoColor=white">
+  <img alt="PostgreSQL" src="https://img.shields.io/badge/PostgreSQL-16-4169E1?logo=postgresql&logoColor=white">
+  <img alt="OpenWrt" src="https://img.shields.io/badge/OpenWrt-24.10%20%7C%2025.12-00B5E2?logo=openwrt&logoColor=white">
+  <img alt="Agent" src="https://img.shields.io/badge/agent-1.5.44-3ddc9a">
+  <img alt="Schema" src="https://img.shields.io/badge/schema-27-8b5cf6">
+  <img alt="Tests" src="https://img.shields.io/badge/tests-84%20passed-3ddc9a">
+  <img alt="CI" src="https://img.shields.io/badge/CI-GitHub%20Actions-2088FF?logo=githubactions&logoColor=white">
+</p>
 
-RoutX не заменяет продукт на роутере без команды: он работает поверх
-установленного продукта и меняет его только при явной смене/переустановке
-из панели.
+<h1 align="center">RoutX</h1>
+
+<p align="center">
+  Централизованная панель для роутеров OpenWrt: установка и переключение
+  <b>Tachyon</b>, <b>Forkop</b>, <b>Prokop</b> и <b>Podkop</b>, подписки,
+  правила маршрутизации, мониторинг и PWA.
+</p>
+
+<p align="center">
+  <a href="#быстрый-старт">Быстрый старт</a> ·
+  <a href="#возможности">Возможности</a> ·
+  <a href="#архитектура">Архитектура</a> ·
+  <a href="#cli">CLI</a> ·
+  <a href="#документация">Документация</a>
+</p>
+
+> **Один роутер — один продукт.** RoutX ставит выбранный продукт, удаляет
+> остальные и переносит секции, списки, домены и подписки. Перед изменениями
+> создаётся снимок, при ошибке выполняется откат.
+
+---
 
 ## Возможности
 
-* **Один роутер — один продукт**: Tachyon, Forkop, Prokop или Podkop.
-* **Смена и переустановка продукта** из панели с переносом настроек,
-  списков, подписок и подключений.
-* **Каталог версий** из GitHub Releases. Для Tachyon можно выбрать версию;
-  Forkop, Prokop и Podkop ставятся официальным установщиком (последняя
-  версия).
-* **Список установленных пакетов** на роутере и удаление лишних пакетов.
-* **SSH-установщик RoutX** находит несколько продуктов, показывает версии и
-  пакеты, позволяет выбрать активный продукт и удаляет остальные вместе с
-  конфигами, состоянием и nft-таблицами.
-* **Подписки и VLESS**: Tachyon хранит подписку как native
-  `outbound_source`, Forkop/Prokop — как `subscription_url`, Podkop — как
-  отдельные ссылки.
-* **Шаблоны и правила**: встроенные списки, домены, подсети,
-  пользовательские списки, секции и действия.
-* **Мониторинг**: health, proxy health, задержка, direct/VPN IP, история.
-* **Диагностика** quick/full, отчёты и скачивание.
-* **Снимки и откат** перед изменениями.
-* **Асинхронные задания** с прогрессом, таймаутами и журналом.
-* **Обновление агентов** из панели для версий 1.5.0+; более старые —
-  один раз вручную.
-* **PWA и мобильный интерфейс**, push-уведомления, QR-вход.
+| | |
+|:--|:--|
+| 🧭 **Единый центр управления** | Все роутеры, продукты, версии и статусы в одной панели. |
+| 🚀 **Установка одной командой** | Docker Compose или нативный Node.js + PostgreSQL. CLI `routx` сам готовит `.env`, администратора и базу. |
+| 🔁 **Смена и переустановка продукта** | Выбор версии Tachyon, удаление старых пакетов, перенос настроек и автоматический откат. |
+| 📦 **Каталог tachyon-lists** | 143 списка с описаниями, группами и счётчиками. Для Tachyon — нативно, для Forkop — rule-set, для Prokop — SRS, для Podkop — домены и подсети. |
+| 🧩 **Правила без шаблонов** | Секции, домены, IP, community lists, подписки и прямые ссылки. |
+| 📊 **Мониторинг** | Задержка, живые узлы, direct/VPN IP, история и health-статусы. |
+| 🔐 **Безопасность** | Токены агентов, CSRF, rate limit, аудит, мастер-ключ, read-only контейнер. |
+| 📱 **PWA** | Мобильный интерфейс, push-уведомления, QR-вход и выбор ресурсов с описаниями. |
+| 🛠 **CLI `routx`** | `install`, `update`, `status`, `logs`, `restart`, `doctor`, `uninstall`. |
+
+---
+
+## Быстрый старт
+
+### Docker
+
+```sh
+curl -fsSL https://gitlab.com/artur.utenkov/router-control/-/raw/main/install.sh \
+  | sudo sh -s -- --docker --domain panel.example.com --tls-email admin@example.com
+```
+
+Без домена панель будет доступна на `http://127.0.0.1:3000`:
+
+```sh
+curl -fsSL https://gitlab.com/artur.utenkov/router-control/-/raw/main/install.sh \
+  | sudo sh -s -- --docker
+```
+
+### Без Docker (Debian / Ubuntu)
+
+```sh
+curl -fsSL https://gitlab.com/artur.utenkov/router-control/-/raw/main/install.sh \
+  | sudo sh -s -- --native --install-deps
+```
+
+`--install-deps` ставит Node.js 24, PostgreSQL, `psql`, создаёт базу и
+systemd-сервис. Если PostgreSQL уже есть:
+
+```sh
+curl -fsSL https://gitlab.com/artur.utenkov/router-control/-/raw/main/install.sh \
+  | sudo sh -s -- --native \
+      --db-url 'postgres://routx:password@127.0.0.1:5432/routx'
+```
+
+### Из клона репозитория
+
+```sh
+git clone https://gitlab.com/artur.utenkov/router-control.git
+cd router-control
+
+# Docker
+sudo ./scripts/routx install --docker --domain panel.example.com --tls-email admin@example.com
+
+# Или без Docker
+sudo ./scripts/routx install --native --install-deps
+```
+
+В конце установки CLI выведет адрес панели, e-mail и пароль первого
+администратора. Пароль показывается один раз — сохраните его.
+
+---
+
+## CLI
+
+После установки доступна команда `routx` (из `/usr/local/bin` или
+`/opt/routx/scripts/routx`).
+
+| Команда | Что делает |
+|:--|:--|
+| `routx install --docker` | Установка через Docker Compose |
+| `routx install --native` | Установка без Docker |
+| `routx update` | Обновление кода, сборка, миграции и перезапуск |
+| `routx status` | Режим, каталог, URL, состояние сервиса и `/readyz` |
+| `routx logs -f` | Логи приложения |
+| `routx restart` / `stop` / `start` | Управление сервисом |
+| `routx doctor` | Проверка `.env`, БД, Docker/PostgreSQL, порта и диска |
+| `routx uninstall [--purge]` | Удаление установки |
+| `routx version` | Версия CLI, приложения и git-коммита |
+
+Установка в другой каталог:
+
+```sh
+sudo ./scripts/routx install --docker --dir /srv/routx
+```
+
+---
+
+## Архитектура
+
+<p align="center">
+  <img src="./assets/readme/architecture.svg" alt="Архитектура RoutX" width="100%">
+</p>
+
+* **Панель** — Fastify + TypeScript, PostgreSQL, фоновые задания, аудит и SPA.
+* **Агент** — ucode на OpenWrt. Сам ходит на панель по long-poll, входящие
+  порты и открытый API на роутере не нужны.
+* **Продукты** — Tachyon, Forkop, Prokop и Podkop. RoutX управляет пакетами,
+  версиями, секциями, подписками и правилами.
+* **CLI** — один вход для Docker и нативного развёртывания, обновления и
+  диагностики.
+
+---
+
+## Поддерживаемые продукты
+
+| Продукт | Версии | Списки | Особенности |
+|:--|:--|:--|:--|
+| **Tachyon** | 1.7.x | 139 нативных + rule-set | Основной продукт, `tachyon-lists`, `.trs`, выбор версии |
+| **Forkop** | 2.x | нативные имена / JSON rule-set | `x`, `gemini`, `chatgpt`, `claude`, ASN-списки |
+| **Prokop** | 2.x | нативные / SRS rule-set | Совместим с Forkop 1.x, миграция секций |
+| **Podkop** | 0.7.x | нативные / домены и подсети | OpenWrt 24.10+, отдельные ссылки и outbound |
+
+При смене продукта RoutX:
+
+1. снимает снимок конфигурации;
+2. сохраняет секции, домены, списки, подписки и ссылки;
+3. удаляет пакеты и остатки старого продукта;
+4. устанавливает выбранный продукт и переносит настройки;
+5. проверяет версию и службу, при ошибке откатывается.
+
+---
+
+## Каталог списков
+
+RoutX использует [Dushnilin/tachyon-lists](https://github.com/Dushnilin/tachyon-lists)
+как источник истины:
+
+* 143 списка и 11 тематических групп;
+* поиск, описания, счётчики доменов и подсетей;
+* подсказка при наведении: что входит в список и куда его направлять;
+* группы «Популярные», «Нейросети», «Медиа», «Соцсети», «Игры»,
+  «Технологии», «Инфраструктура», «Регионы», «Напрямую», «Блокировки»;
+* обновление каталога: `node scripts/sync-tachyon-lists.mjs`.
+
+---
 
 ## Требования
 
-### Сервер с Docker
+| Режим | Минимум | Рекомендуется |
+|:--|:--|:--|
+| **Docker** | 2 ГБ RAM, 5 ГБ диска | 10 ГБ с запасом на образы и бэкапы |
+| **Без Docker** | Node.js 22.12+, PostgreSQL 16, 1–2 ГБ диска | 3–5 ГБ |
+| **Роутер** | OpenWrt 24.10 / 25.12, aarch64 | 128 МБ RAM, свободное место под продукт |
 
-* Docker 24+ и Docker Compose v2;
-* 2 ГБ RAM;
-* **5 ГБ свободного диска минимум, 10 ГБ рекомендуется с запасом** — под
-  Docker-образы, build cache, PostgreSQL, бэкапы и логи.
-* для HTTPS — домен и открытые порты 80/443 (Caddy).
+Docker-установка использует `postgres:16-alpine`, `caddy:2-alpine` и
+production-образ приложения. Нативная — systemd-сервис `routx`.
 
-### Сервер без Docker
+---
 
-* Node.js 22.12+ (рекомендуется 24 LTS);
-* PostgreSQL 16;
-* `npm` и стандартные build-инструменты;
-* **1 ГБ свободного диска минимум, 3–5 ГБ рекомендуется** — под Node.js,
-  `node_modules`, сборку, PostgreSQL и бэкапы;
-* reverse proxy (Caddy/nginx) для HTTPS, если нужен публичный доступ.
+## Безопасность
 
-### Роутер
+* Мастер-ключ шифрования секретов и токенов агентов.
+* Отдельный токен на каждый роутер, подпись запросов и защита от replay.
+* CSRF, secure-cookie, rate limit и аудит действий.
+* Агент не открывает входящие порты: только исходящий long-poll.
+* Docker-контейнер приложения работает read-only, с `no-new-privileges`.
+* Снимки перед изменениями и автоматический откат при ошибке.
+* Секреты не попадают в логи и диагностические отчёты.
 
-* OpenWrt 24.10.x (opkg) или 25.12+ (apk);
-* архитектура `aarch64_cortex-a53` или `aarch64_generic`;
-* установленный Tachyon/Forkop/Prokop/Podkop либо установка продукта через
-  установщик RoutX;
-* для Podkop — OpenWrt 24.10+ и достаточно свободного места (обычно 25+ МБ).
+---
 
-## Установка с Docker
-
-Примерный расход на небольшой парк:
-
-| Компонент | Размер |
-|---|---|
-| Образ приложения | ~220–340 МБ |
-| PostgreSQL + Caddy + базовые образы | ~500–800 МБ |
-| PostgreSQL с данными и историей | ~100 МБ на несколько роутеров, растёт с retention |
-| Docker build cache | 1–3 ГБ во время сборки, можно очистить `docker builder prune` |
-| Бэкапы и логи | зависит от retention и включается отдельно |
-
-Поэтому 5 ГБ обычно достаточно, а 10 ГБ — спокойный запас на обновления,
-пересборки и бэкапы.
-
-```sh
-git clone https://gitlab.com/artur.utenkov/router-control.git
-cd router-control
-cp .env.example .env
-```
-
-Сгенерируйте ключ шифрования:
-
-```sh
-node -e "console.log(require('crypto').randomBytes(32).toString('base64url'))"
-```
-
-В `.env` задайте как минимум:
-
-```dotenv
-NODE_ENV=production
-POSTGRES_PASSWORD=<длинный пароль без спецсимволов URL>
-RC_MASTER_KEY=<сгенерированный ключ, 32+ символа>
-RC_PUBLIC_URL=http://localhost:3000
-RC_BIND_ADDR=127.0.0.1
-RC_PORT=3000
-
-# Первый администратор (создаётся при старте)
-RC_BOOTSTRAP_EMAIL=admin@example.com
-RC_BOOTSTRAP_PASSWORD=<пароль не короче 12 символов>
-```
-
-Запуск:
-
-```sh
-docker compose up -d --build
-docker compose ps
-curl http://127.0.0.1:3000/healthz
-curl http://127.0.0.1:3000/readyz
-```
-
-Панель: `http://127.0.0.1:3000`. Контейнер `app` сам применяет миграции при
-старте.
-
-### HTTPS через Caddy
-
-Задайте в `.env`:
-
-```dotenv
-RC_PUBLIC_URL=https://routx.example.com
-RC_COOKIE_SECURE=true
-TRUST_PROXY=true
-RC_DOMAIN=routx.example.com
-RC_TLS_MODE=admin@example.com
-```
-
-И запустите с профилем `proxy`:
-
-```sh
-docker compose --profile proxy up -d --build
-```
-
-`RC_TLS_MODE=internal` подходит только для локальной проверки; для публичного
-домена указывайте e-mail для Let's Encrypt.
-
-### Обновление Docker-установки
-
-```sh
-git pull
-docker compose --profile proxy up -d --build
-```
-
-Тома `router-control_pgdata`, `router-control_rc_data`,
-`router-control_caddy_data` сохраняют базу, ключи и сертификаты.
-
-## Установка без Docker
-
-Примерный расход:
-
-| Компонент | Размер |
-|---|---|
-| Node.js 24 | ~100–150 МБ |
-| `node_modules` | ~180 МБ с dev-зависимостями, ~100 МБ после `npm prune --omit=dev` |
-| Собранные `server/dist` и `web/dist` | ~10–20 МБ |
-| PostgreSQL 16 + библиотеки | ~50–100 МБ |
-| Данные PostgreSQL | ~100 МБ на небольшой парк, растёт с историей |
-| Бэкапы, логи, npm cache | зависят от retention; обычно сотни МБ |
-
-То есть для небольшого парка достаточно **1–2 ГБ**, а 3–5 ГБ — спокойный
-запас на сборку и обновления.
-
-Нужны Node.js 22.12+ и PostgreSQL 16.
-
-```sh
-git clone https://gitlab.com/artur.utenkov/router-control.git
-cd router-control
-cp .env.example .env
-npm ci
-```
-
-В `.env` задайте:
-
-```dotenv
-NODE_ENV=production
-DATABASE_URL=postgres://router_control:<пароль>@127.0.0.1:5432/router_control
-RC_MASTER_KEY=<сгенерированный ключ, 32+ символа>
-RC_PUBLIC_URL=https://routx.example.com
-RC_COOKIE_SECURE=true
-TRUST_PROXY=true
-RC_BIND_ADDR=127.0.0.1
-RC_PORT=3000
-RC_BOOTSTRAP_EMAIL=admin@example.com
-RC_BOOTSTRAP_PASSWORD=<пароль не короче 12 символов>
-```
-
-Примените миграции и соберите проект:
-
-```sh
-npm run db:migrate
-npm run build
-```
-
-Запуск production-сервера:
-
-```sh
-npm run start
-```
-
-Сервер отдаёт API и собранную SPA из `web/dist`. Для HTTPS поставьте перед
-ним Caddy или nginx и проксируйте на `127.0.0.1:3000`.
-
-Для разработки:
-
-```sh
-# PostgreSQL должен быть запущен
-npm run dev
-# SPA: http://127.0.0.1:5173
-# API: http://127.0.0.1:3000
-```
-
-### Сборка пакетов агента без Docker
-
-```sh
-npm run agent:build
-```
-
-Пакеты появятся в `agent/dist/` и будут раздаваться панелью по адресам
-`/agent/routx-agent.ipk`, `/agent/routx-agent.apk`, `/agent/routx-agent.version`.
-
-### Обновление без Docker
-
-```sh
-git pull
-npm ci
-npm run db:migrate
-npm run build
-# перезапустите процесс routx (systemd/pm2/supervisor)
-```
-
-## Установка агента на роутер
-
-1. Добавьте роутер в панели.
-2. Скопируйте команду установки.
-3. Выполните её на роутере по SSH.
-
-Если на роутере уже есть несколько продуктов, установщик покажет:
-
-```text
-На роутере найдено несколько продуктов:
-  1) Forkop 1.0.5
-     пакеты: forkop luci-app-forkop luci-i18n-forkop-ru sing-box-forkop
-  2) Tachyon 1.7.12
-     пакеты: tachyon luci-app-tachyon luci-i18n-tachyon-ru tachyon-core
-Какой продукт оставить активным? [1]:
-```
-
-Выбранный продукт остаётся, остальные удаляются вместе с пакетами,
-конфигами, состоянием, LuCI-файлами, cron-заданиями и nft-таблицами.
-Для автоматического выбора:
-
-```sh
-wget -qO- https://routx.example.com/agent/install.sh | sh -s -- \
-  --server https://routx.example.com \
-  --token <token> \
-  --keep tachyon
-```
-
-Обновление агентов — на странице «Развёртывание и перенос». Агенты 1.5.0+
-обновляются из панели; более старые нужно один раз обновить вручную.
-
-## CI и пайплайны
-
-В репозитории есть:
-
-* `.gitlab-ci.yml` — `verify` (typecheck, тесты, сборка, миграции,
-  agent-пакеты) и `docker` (сборка образа);
-* `.github/workflows/ci.yml` — аналогичная проверка и runtime smoke-тест.
-
-Если GitLab показывает **«Before you can run pipelines, we need to verify
-your account»**, пайплайны блокируются настройками GitLab, а не кодом.
-Варианты:
-
-* подтвердить учётную запись GitLab;
-* запустить проверки локально:
+## Разработка
 
 ```sh
 npm ci
+npm run dev          # API :3000, SPA :5173
 npm run typecheck
-npm test
+npm test             # 84 теста
 npm run build
 npm run db:migrate
-npm run agent:build
+npm run agent:build  # пакеты агента в agent/dist
 ```
 
-* использовать GitHub Actions, если репозиторий зеркалируется на GitHub.
+Требуется PostgreSQL. Для разработки можно поднять только базу:
+
+```sh
+docker compose up -d db
+```
+
+---
 
 ## Документация
 
-* [`docs/runbooks/self-hosting.md`](docs/runbooks/self-hosting.md) — свой
-  сервер, домен, HTTPS, первый вход.
-* [`docs/runbooks/agent-packages.md`](docs/runbooks/agent-packages.md) —
-  установка, обновление и удаление агента, выбор активного продукта.
-* [`docs/runbooks/products-and-versions.md`](docs/runbooks/products-and-versions.md) —
-  продукты, версии, установленные пакеты и переустановка.
-* [`docs/runbooks/phase-1.md`](docs/runbooks/phase-1.md) — запуск и
-  диагностика.
-* [`docs/runbooks/backup-and-key-rotation.md`](docs/runbooks/backup-and-key-rotation.md) —
-  бэкапы и ротация ключа.
-* [`docs/architecture/ARCHITECTURE.md`](docs/architecture/ARCHITECTURE.md) —
-  архитектура.
-* [`docs/architecture/API.md`](docs/architecture/API.md) — API и протокол
-  агента.
+| Документ | О чём |
+|:--|:--|
+| [`docs/runbooks/self-hosting.md`](docs/runbooks/self-hosting.md) | Свой сервер, домен, HTTPS, первый вход |
+| [`docs/runbooks/agent-packages.md`](docs/runbooks/agent-packages.md) | Агент, установка, обновление, выбор продукта |
+| [`docs/runbooks/products-and-versions.md`](docs/runbooks/products-and-versions.md) | Продукты, версии, переустановка |
+| [`docs/runbooks/backup-and-key-rotation.md`](docs/runbooks/backup-and-key-rotation.md) | Бэкапы и ротация ключа |
+| [`docs/architecture/ARCHITECTURE.md`](docs/architecture/ARCHITECTURE.md) | Архитектура |
+| [`docs/architecture/API.md`](docs/architecture/API.md) | API и протокол агента |
+| [`docs/architecture/DATA_MODEL.md`](docs/architecture/DATA_MODEL.md) | Модель данных |
+
+---
 
 ## Структура репозитория
 
@@ -312,16 +242,14 @@ server/migrations/ SQL-миграции
 server/test/       Vitest
 web/               React + Vite SPA и PWA
 agent/             ucode-агент для OpenWrt и сборка пакетов
+scripts/routx      CLI установки и обслуживания
+install.sh         bootstrap-установщик одной командой
+assets/readme/     SVG для GitHub-страницы
 docs/              архитектура и runbook'и
-deploy/            примеры развёртывания, включая OpenWrt + Caddy
-.github/           GitHub Actions
-.gitlab-ci.yml     GitLab CI
-Dockerfile         production-образ
-docker-compose.yml PostgreSQL + app + Caddy (профиль proxy)
 ```
 
-## Лицензия
+---
 
-Файл лицензии в репозитории не добавлен. По умолчанию действует режим
-«все права защищены». Если нужна открытая лицензия, добавьте её явно
-(например, MIT или Apache-2.0).
+<p align="center">
+  <sub>RoutX · OpenWrt control plane · Tachyon / Forkop / Prokop / Podkop</sub>
+</p>
