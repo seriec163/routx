@@ -2,17 +2,22 @@
 # RoutX bootstrap installer.
 #
 # Использование:
-#   curl -fsSL https://gitlab.com/artur.utenkov/router-control/-/raw/main/install.sh \
-#     | sh -s -- --docker --domain panel.example.com --tls-email admin@example.com
+#   curl -fsSL https://raw.githubusercontent.com/seriec163/routx/main/install.sh \
+#     | sh
 #
-#   curl ... | sh -s -- --native --db-url 'postgres://routx:pass@127.0.0.1:5432/routx'
+#   curl ... | sh -s -- --dir /opt/routx --yes
+#
+#   curl ... | sh -s -- --domain panel.example.com --tls-email admin@example.com
+#
+# По умолчанию ставится нативная версия (Node.js + PostgreSQL, systemd).
+# Docker включается явно: sh -s -- --docker
 #
 # Скрипт только скачивает исходники в каталог установки и передаёт управление
 # scripts/routx install. Все параметры установки — у routx install.
 
 set -eu
 
-DEFAULT_REPO="https://gitlab.com/artur.utenkov/router-control.git"
+DEFAULT_REPO="https://github.com/seriec163/routx.git"
 DEFAULT_REF="main"
 REPO_URL="${ROUTX_REPO_URL:-$DEFAULT_REPO}"
 REF="${ROUTX_REF:-$DEFAULT_REF}"
@@ -28,6 +33,7 @@ usage() {
 RoutX bootstrap installer
 
 Скачивает RoutX в каталог и запускает `routx install`.
+По умолчанию — нативная установка (Node.js + PostgreSQL, systemd).
 
   --dir PATH        каталог установки (по умолчанию /opt/routx)
   --ref REF         ветка/тег (по умолчанию main)
@@ -36,8 +42,11 @@ RoutX bootstrap installer
   --help            эта справка
 
 Остальные параметры передаются в `routx install`, например:
+  --domain panel.example.com --tls-email admin@example.com
+  --install-deps --yes
   --docker --domain panel.example.com --tls-email admin@example.com
-  --native --db-url postgres://user:pass@127.0.0.1:5432/routx
+
+Без --domain установщик спросит домен в интерактивном режиме.
 
 Переменные окружения: ROUTX_DIR, ROUTX_REPO_URL, ROUTX_REF,
 ROUTX_ARCHIVE_URL.
@@ -108,7 +117,7 @@ if [ -z "$DIR" ]; then
 fi
 
 if [ -z "$ARCHIVE_URL" ]; then
-	ARCHIVE_URL="https://gitlab.com/artur.utenkov/router-control/-/archive/$REF/router-control-$REF.tar.gz"
+	ARCHIVE_URL="https://codeload.github.com/seriec163/routx/tar.gz/$REF"
 fi
 
 if [ -f "$DIR/package.json" ] && [ -f "$DIR/scripts/routx" ]; then

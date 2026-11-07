@@ -1,4 +1,4 @@
-# Свой сервер RoutX из GitLab
+# Свой сервер RoutX
 
 Репозиторий можно клонировать и развернуть отдельным инстансом. Это
 **не** подключение к уже работающей панели: у нового сервера будет своя
@@ -6,8 +6,9 @@
 
 ## Что нужно
 
-* Linux-хост или VPS с Docker 24+ и Compose v2;
-* 2 ГБ RAM и 10 ГБ диска (сборка Node.js требует памяти);
+* Linux-хост или VPS (Debian / Ubuntu — проще всего);
+* для Docker-режима — Docker 24+ и Compose v2, 2 ГБ RAM и 10 ГБ диска;
+* для нативного режима — Node.js 22.12+, PostgreSQL 16, 1–2 ГБ диска;
 * свой домен и DNS-запись `A`/`AAAA` на этот хост;
 * открытые порты **80** и **443**;
 * OpenWrt 24.10/25 на клиентском роутере с Forkop, Prokop или Podkop —
@@ -18,9 +19,29 @@
 
 ## Установка
 
+Самый быстрый способ — bootstrap-скрипт. Он скачает исходники с GitHub,
+запустит нативную установку и спросит домен:
+
 ```sh
-git clone https://gitlab.com/artur.utenkov/router-control.git
-cd router-control
+curl -fsSL https://raw.githubusercontent.com/seriec163/routx/main/install.sh | sudo sh
+```
+
+Без интерактивных вопросов:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/seriec163/routx/main/install.sh \
+  | sudo sh -s -- --domain routx.example.com --tls-email admin@example.com --yes
+```
+
+`--yes` автоматически ставит Node.js 24, PostgreSQL и `psql`, создаёт базу,
+настраивает Caddy и systemd-сервис. Для Docker-режима добавьте `--docker`.
+Если Caddy не нужен, укажите `--no-caddy`.
+
+### Из клона репозитория
+
+```sh
+git clone https://github.com/seriec163/routx.git
+cd routx
 cp .env.example .env
 ```
 
@@ -79,9 +100,15 @@ curl https://routx.example.com/healthz
 ## Обновление
 
 ```sh
-cd router-control
+cd routx
 git pull
 docker compose --profile proxy up -d --build
+```
+
+Или одной командой в любом режиме:
+
+```sh
+sudo routx update
 ```
 
 База и ключи хранятся в Docker-томах `router-control_pgdata` и
@@ -89,9 +116,8 @@ docker compose --profile proxy up -d --build
 
 ## Ограничения
 
-* Нет готового one-click установщика и публичного Docker-образа: образ
-  собирается локально из исходников. CI собирает образ, но не публикует
-  его в registry.
+* Нет публичного Docker-образа: образ собирается локально из исходников.
+  CI собирает образ, но не публикует его в registry.
 * Репозиторий не содержит `LICENSE`. Если вы хотите разрешить посторонним
   использовать и распространять код, добавьте лицензию (например, MIT или
   Apache-2.0). Без лицензии по умолчанию действует «все права защищены».

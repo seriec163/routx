@@ -6,7 +6,7 @@ set -eu
 
 CLI_VERSION="1.0.0"
 DEFAULT_DIR="${ROUTX_DIR:-/opt/routx}"
-DEFAULT_REPO="https://gitlab.com/artur.utenkov/router-control.git"
+DEFAULT_REPO="https://github.com/seriec163/routx.git"
 DEFAULT_REF="main"
 
 DIR="$DEFAULT_DIR"
@@ -25,12 +25,14 @@ DB_USER_ARG=""
 DB_PASSWORD_ARG=""
 NO_BUILD=0
 NO_SERVICE=0
+NO_CADDY=0
 INSTALL_DEPS=0
 FORCE_ENV=0
 WITH_PROXY=0
 YES=0
 PURGE=0
 FOLLOW=0
+CADDY_READY=0
 REF="$DEFAULT_REF"
 REPO_URL="$DEFAULT_REPO"
 ARCHIVE_URL=""
@@ -40,13 +42,62 @@ warn() { printf 'Внимание: %s\n' "$*" >&2; }
 info() { printf '%s\n' "$*"; }
 has() { command -v "$1" >/dev/null 2>&1; }
 
+prompt() {
+	__text="$1"
+	__default="${2:-}"
+	if (exec </dev/tty) 2>/dev/null; then
+		printf '%s' "$__text" > /dev/tty
+		IFS= read -r __answer < /dev/tty || __answer=""
+	else
+		printf '%s' "$__text" >&2
+		IFS= read -r __answer || __answer=""
+	fi
+	[ -n "$__answer" ] || __answer="$__default"
+	printf '%s' "$__answer"
+}
+
+confirm() {
+	__text="$1"
+	__default="${2:-y}"
+	__answer=$(prompt "$__text " "$__default")
+	case "$__answer" in
+		y|Y|yes|YES|да|Да|д) return 0 ;;
+		*) return 1 ;;
+	esac
+}
+
+ask_domain() {
+	[ -n "$DOMAIN" ] && return 0
+	[ -n "$PUBLIC_URL_ARG" ] && return 0
+	if [ "$FORCE_ENV" -eq 0 ] && [ -f "$ENV_FILE" ] && { [ -n "$(env_get RC_DOMAIN)" ] || [ -n "$(env_get RC_PUBLIC_URL)" ]; }; then
+		return 0
+	fi
+	[ "$YES" -eq 1 ] && return 0
+	__answer=$(prompt "Домен панели (например, panel.example.com; Enter — localhost): " "")
+	if [ -n "$__answer" ]; then
+		case "$__answer" in
+			*://*) __answer=$(printf '%s' "$__answer" | sed 's#^[A-Za-z][A-Za-z0-9+.-]*://##') ;;
+		esac
+		__answer=${__answer%%/*}
+		case "$__answer" in
+			*" "*) die "Некорректный домен" ;;
+		esac
+		DOMAIN="$__answer"
+	fi
+	if [ -n "$DOMAIN" ] && [ -z "$TLS_EMAIL" ]; then
+		__email=$(prompt "E-mail для Let's Encrypt (Enter — пропустить): " "")
+		[ -n "$__email" ] || return 0
+		TLS_EMAIL="$__email"
+	fi
+}
+
 usage() {
 	cat <<'EOF'
 RoutX CLI — установка и обслуживание панели RoutX.
 
 Использование:
-  routx install --docker [параметры]
-  routx install --native [параметры]
+  routx                    установить (нативно, спросит домен)
+  routx install [параметры]
   routx update
   routx status
   routx logs [-f]
@@ -56,14 +107,14 @@ RoutX CLI — установка и обслуживание панели RoutX.
   routx version
   routx help
 
-Команда install:
+Команда install (по умолчанию — нативная установка):
   --docker                 установить через Docker Compose
   --native                 установить без Docker (Node.js + PostgreSQL)
   --dir PATH               каталог установки (по умолчанию /opt/routx)
-  --domain HOST            публичный домен; включает Caddy в Docker
-  --tls-email EMAIL        e-mail для Let's Encrypt (Docker/Caddy)
+  --domain HOST            публичный домен; для native настраивает Caddy
+  --tls-email EMAIL        e-mail для Let's Encrypt
   --public-url URL         публичный адрес панели
-  --port PORT              внешний порт панели (по умолчанию 3000)
+  --port PORT              порт приложения (по умолчанию 3000)
   --bind ADDR              адрес прослушивания (по умолчанию 127.0.0.1)
   --admin-email EMAIL      e-mail первого администратора
   --admin-password PASS    пароль первого администратора
@@ -71,9 +122,10 @@ RoutX CLI — установка и обслуживание панели RoutX.
   --db-name NAME           имя локальной БД (native, по умолчанию router_control)
   --db-user USER           пользователь локальной БД (native)
   --db-password PASS       пароль локальной БД (native)
-  --with-proxy             поднять Caddy в Docker (то же, что --domain)
+  --with-proxy             поднять Caddy (Docker) / создать Caddyfile (native)
   --no-build               не пересобирать Docker-образ
   --no-service             не создавать systemd-сервис (native)
+  --no-caddy               не устанавливать и не настраивать Caddy (native)
   --install-deps           установить Node.js и PostgreSQL (Debian/Ubuntu)
   --force-env              пересоздать .env (старый сохраняется в .env.bak.*)
   --yes                    без интерактивных подтверждений
@@ -83,8 +135,9 @@ RoutX CLI — установка и обслуживание панели RoutX.
   ROUTX_ARCHIVE_URL.
 
 Примеры:
+  sudo routx
+  sudo routx install --domain panel.example.com --tls-email admin@example.com --yes
   sudo routx install --docker --domain panel.example.com --tls-email admin@example.com
-  sudo routx install --native --db-url 'postgres://routx:pass@127.0.0.1:5432/routx'
   routx status
   routx logs -f
 EOF
@@ -276,6 +329,14 @@ check_native() {
 		NEED_DEPS=1
 	fi
 	if [ "$NEED_DEPS" -eq 1 ]; then
+		if [ "$INSTALL_DEPS" -eq 0 ] && [ -f /etc/debian_version ] && [ "$YES" -eq 1 ]; then
+			INSTALL_DEPS=1
+		fi
+		if [ "$INSTALL_DEPS" -eq 0 ] && [ -f /etc/debian_version ] && [ "$YES" -eq 0 ]; then
+			if confirm "Не хватает Node.js/PostgreSQL. Установить зависимости Debian/Ubuntu? [Y/n]:" "y"; then
+				INSTALL_DEPS=1
+			fi
+		fi
 		if [ "$INSTALL_DEPS" -eq 1 ]; then
 			install_debian_deps
 		else
@@ -312,7 +373,7 @@ prepare_env() {
 	if [ -n "$DOMAIN" ]; then
 		PUBLIC_URL="https://$DOMAIN"
 	fi
-	if [ "$WITH_PROXY" -eq 1 ] && [ -z "$DOMAIN" ] && [ -z "$PUBLIC_URL_ARG" ] && [ -z "$(env_get RC_PUBLIC_URL)" ]; then
+	if [ "$MODE" = docker ] && [ "$WITH_PROXY" -eq 1 ] && [ -z "$DOMAIN" ] && [ -z "$PUBLIC_URL_ARG" ] && [ -z "$(env_get RC_PUBLIC_URL)" ]; then
 		PUBLIC_URL="https://localhost"
 	fi
 	[ -n "$PUBLIC_URL" ] || PUBLIC_URL="http://127.0.0.1:$PORT"
@@ -322,7 +383,7 @@ prepare_env() {
 		https://*) COOKIE_SECURE=true ;;
 	esac
 	TRUST="false"
-	if [ -n "$DOMAIN" ] || [ "$WITH_PROXY" -eq 1 ] || [ "$COOKIE_SECURE" = true ]; then
+	if [ -n "$DOMAIN" ] || [ "$COOKIE_SECURE" = true ] || { [ "$MODE" = docker ] && [ "$WITH_PROXY" -eq 1 ]; }; then
 		TRUST="true"
 	fi
 
@@ -368,13 +429,13 @@ prepare_env() {
 	set_env RC_PORT "$PORT"
 	set_env MIGRATE_ON_START false
 
-	if [ -n "$DOMAIN" ]; then
+	if [ "$MODE" = docker ] && [ -n "$DOMAIN" ]; then
 		set_env RC_DOMAIN "$DOMAIN"
 		set_env RC_TLS_MODE "${TLS_EMAIL:-internal}"
 		set_env COMPOSE_PROFILES proxy
 		WITH_PROXY=1
 	fi
-	if [ "$WITH_PROXY" -eq 1 ]; then
+	if [ "$MODE" = docker ] && [ "$WITH_PROXY" -eq 1 ]; then
 		set_env COMPOSE_PROFILES proxy
 	fi
 
@@ -407,6 +468,74 @@ write_master_key() {
 	mkdir -p "$DIR/data"
 	printf '%s\n' "$MASTER_KEY" > "$DIR/data/master.key"
 	chmod 600 "$DIR/data/master.key"
+}
+
+write_native_caddyfile() {
+	[ "$MODE" = native ] || return 0
+	[ -n "$DOMAIN" ] || [ "$WITH_PROXY" -eq 1 ] || return 0
+	__site="${DOMAIN:-localhost}"
+	printf '%s {\n\treverse_proxy 127.0.0.1:%s\n}\n' "$__site" "$PORT" > "$DIR/Caddyfile.routx"
+	chmod 644 "$DIR/Caddyfile.routx" 2>/dev/null || true
+}
+
+setup_caddy_native() {
+	[ "$MODE" = native ] || return 0
+	[ -n "$DOMAIN" ] || return 0
+	CADDY_READY=0
+	if [ "$NO_CADDY" -eq 1 ]; then
+		warn "Caddy не настраивался (--no-caddy). Конфиг: $DIR/Caddyfile.routx"
+		return 0
+	fi
+	if ! has caddy && [ -f /etc/debian_version ]; then
+		__sudo=""
+		if [ "$(id -u)" -ne 0 ] && has sudo && sudo -n true 2>/dev/null; then
+			__sudo="sudo"
+		fi
+		if [ "$(id -u)" -eq 0 ] || [ -n "$__sudo" ]; then
+			info "Устанавливаю Caddy для HTTPS..."
+			$__sudo apt-get update >/dev/null 2>&1 || true
+			$__sudo apt-get install -y caddy >/dev/null 2>&1 || warn "Не удалось установить Caddy через apt."
+		fi
+	fi
+	if ! has caddy; then
+		warn "Caddy не найден. HTTPS-конфиг готов: $DIR/Caddyfile.routx"
+		warn "Установите Caddy и добавьте строку: import $DIR/Caddyfile.routx"
+		return 0
+	fi
+	if [ "$(id -u)" -ne 0 ]; then
+		warn "Для настройки Caddy нужен root. Конфиг: $DIR/Caddyfile.routx"
+		return 0
+	fi
+	__main=/etc/caddy/Caddyfile
+	mkdir -p /etc/caddy 2>/dev/null || true
+	if [ ! -s "$__main" ]; then
+		{
+			if [ -n "$TLS_EMAIL" ]; then
+				printf '{\n\temail %s\n}\n\n' "$TLS_EMAIL"
+			fi
+			printf 'import %s\n' "$DIR/Caddyfile.routx"
+		} > "$__main"
+	elif ! grep -Fq "$DIR/Caddyfile.routx" "$__main" 2>/dev/null; then
+		printf '\nimport %s\n' "$DIR/Caddyfile.routx" >> "$__main"
+	fi
+	if ! caddy validate --config "$__main" --adapter caddyfile >/dev/null 2>&1; then
+		warn "Caddyfile не прошёл проверку. Исправьте /etc/caddy/Caddyfile вручную."
+		return 0
+	fi
+	if has systemctl && systemctl list-unit-files caddy.service 2>/dev/null | grep -q '^caddy\.service'; then
+		systemctl enable caddy >/dev/null 2>&1 || true
+		if systemctl is-active caddy >/dev/null 2>&1; then
+			systemctl reload caddy >/dev/null 2>&1 || systemctl restart caddy >/dev/null 2>&1 || true
+		else
+			systemctl restart caddy >/dev/null 2>&1 || true
+		fi
+		if systemctl is-active caddy >/dev/null 2>&1; then
+			CADDY_READY=1
+			info "Caddy запущен: https://$DOMAIN"
+			return 0
+		fi
+	fi
+	warn "Caddy установлен, но сервис не запущен. Проверьте: systemctl status caddy"
 }
 
 setup_postgres() {
@@ -591,6 +720,14 @@ print_summary() {
 		info "  сервис:  systemctl status routx"
 		info "  логи:    routx logs"
 	fi
+	if [ "$MODE" = native ] && [ -f "$DIR/Caddyfile.routx" ]; then
+		if [ "$CADDY_READY" -eq 1 ]; then
+			info "  HTTPS:   https://$DOMAIN (Caddy)"
+		else
+			info "  Caddy:   $DIR/Caddyfile.routx"
+			info "           подключите его в /etc/caddy/Caddyfile или используйте nginx"
+		fi
+	fi
 	info ""
 }
 
@@ -625,6 +762,7 @@ install_native() {
 		setup_postgres
 	fi
 	write_master_key
+	write_native_caddyfile
 
 	[ -f "$DIR/package.json" ] || die "В $DIR нет package.json. Запустите установку из репозитория."
 	cd "$DIR"
@@ -643,6 +781,7 @@ install_native() {
 	if [ "$NO_SERVICE" -eq 0 ] && has systemctl && [ "$(id -u)" -eq 0 ]; then
 		wait_ready || die "Панель не ответила на /readyz. Проверьте: journalctl -u routx -n 100"
 	fi
+	setup_caddy_native
 	install_cli_link
 	print_summary
 }
@@ -667,6 +806,7 @@ cmd_install() {
 			--with-proxy|--proxy) WITH_PROXY=1; shift ;;
 			--no-build) NO_BUILD=1; shift ;;
 			--no-service) NO_SERVICE=1; shift ;;
+			--no-caddy) NO_CADDY=1; shift ;;
 			--install-deps) INSTALL_DEPS=1; shift ;;
 			--force-env) FORCE_ENV=1; shift ;;
 			--yes|-y) YES=1; shift ;;
@@ -677,15 +817,11 @@ cmd_install() {
 
 	resolve_dir
 	if [ -z "$MODE" ]; then
-		if [ -f "$DIR/.routx-mode" ]; then
-			MODE=$(cat "$DIR/.routx-mode" 2>/dev/null || true)
-		elif has docker && { docker compose version >/dev/null 2>&1 || has docker-compose; }; then
-			MODE=docker
-		else
-			MODE=native
-		fi
+		MODE=$(cat "$DIR/.routx-mode" 2>/dev/null || true)
+		[ -n "$MODE" ] || MODE=native
 	fi
 	[ "$MODE" = docker ] || [ "$MODE" = native ] || die "Режим должен быть docker или native."
+	ask_domain
 	if [ "$MODE" = docker ]; then
 		install_docker
 	else
@@ -932,7 +1068,7 @@ cmd_version() {
 	fi
 }
 
-CMD="${1:-help}"
+CMD="${1:-install}"
 if [ $# -gt 0 ]; then
 	shift
 fi

@@ -10,7 +10,7 @@
   <img alt="Agent" src="https://img.shields.io/badge/agent-1.5.44-3ddc9a">
   <img alt="Schema" src="https://img.shields.io/badge/schema-27-8b5cf6">
   <img alt="Tests" src="https://img.shields.io/badge/tests-84%20passed-3ddc9a">
-  <img alt="CI" src="https://img.shields.io/badge/CI-GitHub%20Actions-2088FF?logo=githubactions&logoColor=white">
+  <img alt="Install" src="https://img.shields.io/badge/install-one--command-3ddc9a">
 </p>
 
 <h1 align="center">RoutX</h1>
@@ -53,47 +53,46 @@
 
 ## Быстрый старт
 
-### Docker
+Установка одной командой на Debian / Ubuntu. Скрипт скачает исходники с
+GitHub, запустит нативную установку и **спросит домен**:
 
 ```sh
-curl -fsSL https://gitlab.com/artur.utenkov/router-control/-/raw/main/install.sh \
+curl -fsSL https://raw.githubusercontent.com/seriec163/routx/main/install.sh | sudo sh
+```
+
+Можно ответить пустым вводом — тогда панель будет доступна на
+`http://127.0.0.1:3000`. Если домен указан, CLI создаст `.env` с HTTPS,
+установит и настроит Caddy, сгенерирует `Caddyfile.routx` и включит
+systemd-сервис. Отключить автоматический Caddy: `--no-caddy`.
+
+Полностью неинтерактивно:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/seriec163/routx/main/install.sh \
+  | sudo sh -s -- --domain panel.example.com --tls-email admin@example.com --yes
+```
+
+`--yes` разрешает автоматически поставить Node.js 24, PostgreSQL и `psql`,
+создать базу и systemd-сервис. Если зависимости уже есть, они не тронутся.
+
+### Docker (опционально)
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/seriec163/routx/main/install.sh \
   | sudo sh -s -- --docker --domain panel.example.com --tls-email admin@example.com
-```
-
-Без домена панель будет доступна на `http://127.0.0.1:3000`:
-
-```sh
-curl -fsSL https://gitlab.com/artur.utenkov/router-control/-/raw/main/install.sh \
-  | sudo sh -s -- --docker
-```
-
-### Без Docker (Debian / Ubuntu)
-
-```sh
-curl -fsSL https://gitlab.com/artur.utenkov/router-control/-/raw/main/install.sh \
-  | sudo sh -s -- --native --install-deps
-```
-
-`--install-deps` ставит Node.js 24, PostgreSQL, `psql`, создаёт базу и
-systemd-сервис. Если PostgreSQL уже есть:
-
-```sh
-curl -fsSL https://gitlab.com/artur.utenkov/router-control/-/raw/main/install.sh \
-  | sudo sh -s -- --native \
-      --db-url 'postgres://routx:password@127.0.0.1:5432/routx'
 ```
 
 ### Из клона репозитория
 
 ```sh
-git clone https://gitlab.com/artur.utenkov/router-control.git
-cd router-control
+git clone https://github.com/seriec163/routx.git
+cd routx
+
+# Нативная установка (по умолчанию)
+sudo ./scripts/routx install --domain panel.example.com --tls-email admin@example.com
 
 # Docker
 sudo ./scripts/routx install --docker --domain panel.example.com --tls-email admin@example.com
-
-# Или без Docker
-sudo ./scripts/routx install --native --install-deps
 ```
 
 В конце установки CLI выведет адрес панели, e-mail и пароль первого
@@ -106,10 +105,17 @@ sudo ./scripts/routx install --native --install-deps
 После установки доступна команда `routx` (из `/usr/local/bin` или
 `/opt/routx/scripts/routx`).
 
+```sh
+sudo routx                 # установка, спросит домен
+sudo routx install         # то же самое
+sudo routx install --docker
+```
+
 | Команда | Что делает |
 |:--|:--|
+| `routx` / `routx install` | Нативная установка, спрашивает домен |
 | `routx install --docker` | Установка через Docker Compose |
-| `routx install --native` | Установка без Docker |
+| `routx install --native --install-deps` | Нативная установка с зависимостями |
 | `routx update` | Обновление кода, сборка, миграции и перезапуск |
 | `routx status` | Режим, каталог, URL, состояние сервиса и `/readyz` |
 | `routx logs -f` | Логи приложения |
@@ -121,7 +127,7 @@ sudo ./scripts/routx install --native --install-deps
 Установка в другой каталог:
 
 ```sh
-sudo ./scripts/routx install --docker --dir /srv/routx
+sudo ./scripts/routx install --dir /srv/routx --domain panel.example.com
 ```
 
 ---
