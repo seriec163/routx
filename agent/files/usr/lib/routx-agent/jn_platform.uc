@@ -97,7 +97,16 @@ function package_installed(product) {
 		return false;
 	}
 	let apk = run.run([ "apk", "info", "-e", product ], 10);
-	return apk.ok;
+	if (!apk.ok)
+		return false;
+	// apk info -e <virtual> печатает имя пакета-провайдера. Tachyon
+	// объявляет виртуальные forkop/luci-app-forkop, поэтому проверяем
+	// именно точное имя, иначе получаем ложный конфликт продуктов.
+	for (let line in split(apk.stdout, "\n")) {
+		if (trim(line) == product)
+			return true;
+	}
+	return false;
 }
 
 function product_installed(product) {
@@ -149,8 +158,12 @@ function installed_packages() {
 	for (let product in PRODUCTS) {
 		for (let pkg in PRODUCT_PACKAGES[product]) {
 			let apk = run.run([ "apk", "info", "-e", pkg ], 10);
-			if (apk.ok)
-				installed[pkg] = true;
+			if (!apk.ok)
+				continue;
+			for (let line in split(apk.stdout, "\n")) {
+				if (trim(line) == pkg)
+					installed[pkg] = true;
+			}
 		}
 	}
 	return installed;
