@@ -494,7 +494,7 @@ setup_caddy_native() {
 		if [ "$(id -u)" -eq 0 ] || [ -n "$__sudo" ]; then
 			info "Устанавливаю Caddy для HTTPS..."
 			$__sudo apt-get update >/dev/null 2>&1 || true
-			$__sudo apt-get install -y caddy >/dev/null 2>&1 || warn "Не удалось установить Caddy через apt."
+			$__sudo DEBIAN_FRONTEND=noninteractive apt-get install -y caddy >/dev/null 2>&1 || warn "Не удалось установить Caddy через apt."
 		fi
 	fi
 	if ! has caddy; then
