@@ -11,6 +11,7 @@
   <img alt="Schema" src="https://img.shields.io/badge/schema-27-8b5cf6">
   <img alt="Tests" src="https://img.shields.io/badge/tests-84%20passed-3ddc9a">
   <img alt="Install" src="https://img.shields.io/badge/install-one--command-3ddc9a">
+  <img alt="License" src="https://img.shields.io/badge/license-Apache--2.0-3ddc9a">
 </p>
 
 <h1 align="center">RoutX</h1>
@@ -54,32 +55,45 @@
 ## Быстрый старт
 
 Установка одной командой на Debian / Ubuntu. Скрипт скачает исходники с
-GitHub, запустит нативную установку и **спросит домен**:
+GitHub, запустит нативную установку и откроет мастер:
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/seriec163/routx/main/install.sh | sudo sh
 ```
 
-Можно ответить пустым вводом — тогда панель будет доступна на
-`http://127.0.0.1:3000`. Если домен указан, CLI создаст `.env` с HTTPS,
-установит и настроит Caddy, сгенерирует `Caddyfile.routx` и включит
-systemd-сервис. Отключить автоматический Caddy: `--no-caddy`.
+Мастер спросит:
 
-Полностью неинтерактивно:
+1. **домен панели** — Enter оставит `localhost`;
+2. **e-mail для Let's Encrypt** — для HTTPS-сертификата, можно пропустить;
+3. **e-mail администратора** — по умолчанию `admin@ваш-домен`;
+4. **пароль администратора** — Enter сгенерирует надёжный пароль;
+5. **порт приложения** — по умолчанию `3000`;
+6. подтверждение установки.
+
+Если домен указан, CLI создаст `.env` с HTTPS, установит и настроит Caddy,
+сгенерирует `Caddyfile.routx` и включит systemd-сервис. Отключить
+автоматический Caddy: `--no-caddy`.
+
+Полностью неинтерактивно — для CI, Ansible и скриптов:
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/seriec163/routx/main/install.sh \
-  | sudo sh -s -- --domain panel.example.com --tls-email admin@example.com --yes
+  | sudo sh -s -- \
+      --domain panel.example.com \
+      --tls-email admin@example.com \
+      --admin-email admin@example.com \
+      --yes
 ```
 
-`--yes` разрешает автоматически поставить Node.js 24, PostgreSQL и `psql`,
-создать базу и systemd-сервис. Если зависимости уже есть, они не тронутся.
+`--yes` принимает значения по умолчанию: ставит Node.js 24, PostgreSQL и
+`psql`, создаёт базу, настраивает Caddy и systemd. Пароль администратора
+генерируется автоматически и показывается один раз в конце.
 
 ### Docker (опционально)
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/seriec163/routx/main/install.sh \
-  | sudo sh -s -- --docker --domain panel.example.com --tls-email admin@example.com
+  | sudo sh -s -- --docker
 ```
 
 ### Из клона репозитория
@@ -88,11 +102,11 @@ curl -fsSL https://raw.githubusercontent.com/seriec163/routx/main/install.sh \
 git clone https://github.com/seriec163/routx.git
 cd routx
 
-# Нативная установка (по умолчанию)
-sudo ./scripts/routx install --domain panel.example.com --tls-email admin@example.com
+# Нативная установка (по умолчанию), мастер спросит параметры
+sudo ./scripts/routx
 
 # Docker
-sudo ./scripts/routx install --docker --domain panel.example.com --tls-email admin@example.com
+sudo ./scripts/routx install --docker
 ```
 
 В конце установки CLI выведет адрес панели, e-mail и пароль первого
@@ -106,7 +120,7 @@ sudo ./scripts/routx install --docker --domain panel.example.com --tls-email adm
 `/opt/routx/scripts/routx`).
 
 ```sh
-sudo routx                 # установка, спросит домен
+sudo routx                 # мастер установки
 sudo routx install         # то же самое
 sudo routx install --docker
 ```
@@ -164,6 +178,24 @@ sudo ./scripts/routx install --dir /srv/routx --domain panel.example.com
 3. удаляет пакеты и остатки старого продукта;
 4. устанавливает выбранный продукт и переносит настройки;
 5. проверяет версию и службу, при ошибке откатывается.
+
+---
+
+## Экосистема проектов
+
+RoutX — панель управления, а сами продукты и списки развиваются в отдельных
+открытых проектах:
+
+| Проект | Что это | Исходники |
+|:--|:--|:--|
+| **Tachyon** | VPN/прокси-панель для OpenWrt на sing-box | [Dushnilin/tachyon](https://github.com/Dushnilin/tachyon) |
+| **Tachyon Lists** | 143 списка доменов и подсетей | [Dushnilin/tachyon-lists](https://github.com/Dushnilin/tachyon-lists) |
+| **Forkop** | Прокси-клиент для OpenWrt, форк Podkop | [ushan0v/forkop](https://github.com/ushan0v/forkop) |
+| **Prokop** | Прокси-клиент для OpenWrt, SRS-списки | [Asofwar/prokop](https://github.com/Asofwar/prokop) |
+| **Podkop** | VPN и прокси для OpenWrt | [itdoginfo/podkop](https://github.com/itdoginfo/podkop) |
+| **allow-domains** | Списки доменов для маршрутизации | [itdoginfo/allow-domains](https://github.com/itdoginfo/allow-domains) |
+| **sing-box** | Универсальное прокси-ядро | [SagerNet/sing-box](https://github.com/SagerNet/sing-box) |
+| **RoutX** | Панель управления роутерами | [seriec163/routx](https://github.com/seriec163/routx) |
 
 ---
 
@@ -256,6 +288,30 @@ docs/              архитектура и runbook'и
 
 ---
 
+## Лицензия
+
+RoutX распространяется по [Apache License 2.0](LICENSE): код можно свободно
+использовать, изменять и распространять, в том числе коммерчески.
+
+При распространении исходников, сборок или производных работ нужно сохранить
+уведомление об авторстве и **ссылку на оригинальный репозиторий**:
+[github.com/seriec163/routx](https://github.com/seriec163/routx). Подробности —
+в файле [NOTICE](NOTICE). Если вы используете RoutX в своём продукте,
+документации или публикации, поставьте ссылку на этот репозиторий.
+
+---
+
 <p align="center">
+  <sub><b>Проекты:</b>
+    <a href="https://github.com/Dushnilin/tachyon">Tachyon</a> ·
+    <a href="https://github.com/Dushnilin/tachyon-lists">Tachyon Lists</a> ·
+    <a href="https://github.com/ushan0v/forkop">Forkop</a> ·
+    <a href="https://github.com/Asofwar/prokop">Prokop</a> ·
+    <a href="https://github.com/itdoginfo/podkop">Podkop</a> ·
+    <a href="https://github.com/itdoginfo/allow-domains">allow-domains</a> ·
+    <a href="https://github.com/SagerNet/sing-box">sing-box</a> ·
+    <a href="https://github.com/seriec163/routx">RoutX</a>
+  </sub>
+  <br>
   <sub>RoutX · OpenWrt control plane · Tachyon / Forkop / Prokop / Podkop</sub>
 </p>

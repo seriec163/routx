@@ -66,28 +66,91 @@ confirm() {
 	esac
 }
 
-ask_domain() {
-	[ -n "$DOMAIN" ] && return 0
-	[ -n "$PUBLIC_URL_ARG" ] && return 0
+prompt_secret() {
+	__text="$1"
+	if (exec </dev/tty) 2>/dev/null; then
+		printf '%s' "$__text" > /dev/tty
+		__saved=""
+		if has stty; then
+			__saved=$(stty -g < /dev/tty 2>/dev/null || true)
+			stty -echo < /dev/tty 2>/dev/null || true
+		fi
+		IFS= read -r __answer < /dev/tty || __answer=""
+		if [ -n "$__saved" ]; then
+			stty "$__saved" < /dev/tty 2>/dev/null || stty echo < /dev/tty 2>/dev/null || true
+		elif has stty; then
+			stty echo < /dev/tty 2>/dev/null || true
+		fi
+		printf '\n' > /dev/tty
+	else
+		printf '%s' "$__text" >&2
+		IFS= read -r __answer || __answer=""
+	fi
+	printf '%s' "$__answer"
+}
+
+ask_interactive() {
+	[ "$YES" -eq 1 ] && return 0
 	if [ "$FORCE_ENV" -eq 0 ] && [ -f "$ENV_FILE" ] && { [ -n "$(env_get RC_DOMAIN)" ] || [ -n "$(env_get RC_PUBLIC_URL)" ]; }; then
 		return 0
 	fi
-	[ "$YES" -eq 1 ] && return 0
-	__answer=$(prompt "Домен панели (например, panel.example.com; Enter — localhost): " "")
-	if [ -n "$__answer" ]; then
-		case "$__answer" in
-			*://*) __answer=$(printf '%s' "$__answer" | sed 's#^[A-Za-z][A-Za-z0-9+.-]*://##') ;;
-		esac
-		__answer=${__answer%%/*}
-		case "$__answer" in
-			*" "*) die "Некорректный домен" ;;
-		esac
-		DOMAIN="$__answer"
+
+	info ""
+	info "RoutX — установка"
+	info "Нажмите Enter, чтобы принять значение в скобках."
+	info ""
+
+	if [ -z "$DOMAIN" ] && [ -z "$PUBLIC_URL_ARG" ]; then
+		__answer=$(prompt "Домен панели [localhost]: " "")
+		if [ -n "$__answer" ]; then
+			case "$__answer" in
+				*://*) __answer=$(printf '%s' "$__answer" | sed 's#^[A-Za-z][A-Za-z0-9+.-]*://##') ;;
+			esac
+			__answer=${__answer%%/*}
+			case "$__answer" in
+				*" "*) die "Некорректный домен" ;;
+			esac
+			DOMAIN="$__answer"
+		fi
 	fi
+
 	if [ -n "$DOMAIN" ] && [ -z "$TLS_EMAIL" ]; then
-		__email=$(prompt "E-mail для Let's Encrypt (Enter — пропустить): " "")
-		[ -n "$__email" ] || return 0
-		TLS_EMAIL="$__email"
+		TLS_EMAIL=$(prompt "E-mail для Let's Encrypt (Enter — пропустить): " "")
+	fi
+
+	if [ -z "$ADMIN_EMAIL_ARG" ]; then
+		__default_email=$(env_get RC_BOOTSTRAP_EMAIL)
+		if [ -z "$__default_email" ]; then
+			if [ -n "$DOMAIN" ]; then
+				__default_email="admin@$DOMAIN"
+			else
+				__default_email="admin@routx.local"
+			fi
+		fi
+		ADMIN_EMAIL_ARG=$(prompt "E-mail администратора [$__default_email]: " "$__default_email")
+	fi
+
+	if [ -z "$ADMIN_PASSWORD_ARG" ]; then
+		__answer=$(prompt_secret "Пароль администратора (Enter — сгенерировать): ")
+		while [ -n "$__answer" ] && [ "${#__answer}" -lt 12 ]; do
+			warn "Пароль должен быть не короче 12 символов."
+			__answer=$(prompt_secret "Пароль администратора (Enter — сгенерировать): ")
+		done
+		[ -n "$__answer" ] && ADMIN_PASSWORD_ARG="$__answer"
+	fi
+
+	if [ -z "$PORT_ARG" ] && [ -z "$(env_get RC_PORT)" ] && [ "$MODE" = native ]; then
+		PORT_ARG=$(prompt "Порт приложения [3000]: " "3000")
+	fi
+
+	info ""
+	info "  режим: ${MODE}"
+	[ -n "$DOMAIN" ] && info "  домен: $DOMAIN"
+	info "  админ: $ADMIN_EMAIL_ARG"
+	info ""
+	if ! confirm "Начать установку? [Y/n]:" "y"; then
+		info "Отменено."
+		exit 0
 	fi
 }
 
@@ -128,7 +191,10 @@ RoutX CLI — установка и обслуживание панели RoutX.
   --no-caddy               не устанавливать и не настраивать Caddy (native)
   --install-deps           установить Node.js и PostgreSQL (Debian/Ubuntu)
   --force-env              пересоздать .env (старый сохраняется в .env.bak.*)
-  --yes                    без интерактивных подтверждений
+  --yes                    без вопросов, значения по умолчанию
+
+Без --yes установщик интерактивно спросит домен, e-mail для Let's Encrypt,
+e-mail администратора, пароль и порт.
 
 Переменные окружения:
   ROUTX_DIR, ROUTX_MODE=docker|native, ROUTX_REPO_URL, ROUTX_REF,
@@ -821,7 +887,7 @@ cmd_install() {
 		[ -n "$MODE" ] || MODE=native
 	fi
 	[ "$MODE" = docker ] || [ "$MODE" = native ] || die "Режим должен быть docker или native."
-	ask_domain
+	ask_interactive
 	if [ "$MODE" = docker ]; then
 		install_docker
 	else

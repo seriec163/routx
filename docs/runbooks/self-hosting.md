@@ -20,7 +20,8 @@
 ## Установка
 
 Самый быстрый способ — bootstrap-скрипт. Он скачает исходники с GitHub,
-запустит нативную установку и спросит домен:
+запустит нативную установку и откроет мастер: домен, e-mail для Let's Encrypt,
+e-mail и пароль администратора, порт.
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/seriec163/routx/main/install.sh | sudo sh
@@ -30,7 +31,11 @@ curl -fsSL https://raw.githubusercontent.com/seriec163/routx/main/install.sh | s
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/seriec163/routx/main/install.sh \
-  | sudo sh -s -- --domain routx.example.com --tls-email admin@example.com --yes
+  | sudo sh -s -- \
+      --domain routx.example.com \
+      --tls-email admin@example.com \
+      --admin-email admin@example.com \
+      --yes
 ```
 
 `--yes` автоматически ставит Node.js 24, PostgreSQL и `psql`, создаёт базу,
@@ -117,10 +122,9 @@ sudo routx update
 ## Ограничения
 
 * Нет публичного Docker-образа: образ собирается локально из исходников.
-  CI собирает образ, но не публикует его в registry.
-* Репозиторий не содержит `LICENSE`. Если вы хотите разрешить посторонним
-  использовать и распространять код, добавьте лицензию (например, MIT или
-  Apache-2.0). Без лицензии по умолчанию действует «все права защищены».
+* Лицензия — [Apache License 2.0](../../LICENSE). Код можно свободно
+  использовать, изменять и распространять; при распространении сохраняйте
+  [NOTICE](../../NOTICE) и ссылку на оригинальный репозиторий.
 * Панель не обновляет сама себя из интерфейса; обновление — через
   `git pull` и пересборку.
 * Почта/SMTP не настроена: восстановление пароля работает через TOTP,
