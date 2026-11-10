@@ -696,6 +696,22 @@ export interface SettingsStorageTable {
   rows: number;
 }
 
+export interface UpdateStatus {
+  current: { version: string; build: string };
+  latest: { sha: string; message: string; date: string; url: string } | null;
+  update_available: boolean;
+  checked_at: string | null;
+  updater_installed: boolean;
+  status: {
+    state?: string;
+    message?: string;
+    updated_at?: string;
+    from_build?: string;
+    to_build?: string;
+  } | null;
+  error: string | null;
+}
+
 export interface SettingsStorage {
   generated_at: string;
   database_bytes: number;

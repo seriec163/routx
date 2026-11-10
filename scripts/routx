@@ -37,6 +37,8 @@ CADDY_READY=0
 REF="$DEFAULT_REF"
 REPO_URL="$DEFAULT_REPO"
 ARCHIVE_URL=""
+UPDATER_BIN="/usr/local/bin/routx-updater"
+UPDATER_UNIT="/etc/systemd/system/routx-updater.service"
 
 die() { printf 'Ошибка: %s\n' "$*" >&2; exit 1; }
 warn() { printf 'Внимание: %s\n' "$*" >&2; }
@@ -163,6 +165,8 @@ RoutX CLI — установка и обслуживание панели RoutX.
   routx                    установить (нативно, спросит домен)
   routx install [параметры]
   routx update
+  routx rollback
+  routx updater install|status
   routx status
   routx logs [-f]
   routx restart | stop | start
@@ -208,6 +212,8 @@ e-mail администратора, пароль и порт.
   sudo routx install --docker --domain panel.example.com --tls-email admin@example.com
   sudo routx update            # скачать свежий образ
   sudo routx update --build    # собрать из исходников
+  sudo routx rollback          # вернуть предыдущий образ
+  sudo routx updater install   # разрешить обновление из панели
   routx status
   routx logs -f
 EOF
@@ -801,6 +807,158 @@ print_summary() {
 	info ""
 }
 
+install_updater() {
+	if [ "$MODE" != docker ]; then
+		warn "Updater из панели поддерживается только для Docker-установки."
+		return 0
+	fi
+	if ! has systemctl; then
+		warn "systemd не найден: кнопка обновления в панели недоступна."
+		return 0
+	fi
+	if [ "$(id -u)" -ne 0 ]; then
+		warn "Для установки updater нужен root: sudo routx updater install"
+		return 0
+	fi
+
+	mkdir -p "$DIR/update"
+	# Панель работает в контейнере под непривилегированным пользователем.
+	chmod 1777 "$DIR/update" 2>/dev/null || true
+
+	cat > "$UPDATER_BIN" <<'UPDATER'
+#!/bin/sh
+set -u
+DIR="${ROUTX_DIR:-/opt/routx}"
+UPDATE_DIR="$DIR/update"
+mkdir -p "$UPDATE_DIR" 2>/dev/null || true
+touch "$UPDATE_DIR/.updater-installed" 2>/dev/null || true
+
+write_status() {
+	__state="$1"
+	__message="$2"
+	printf '{"state":"%s","message":"%s","updated_at":"%s"}\n' \
+		"$__state" "$__message" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+		> "$UPDATE_DIR/status.json.tmp" 2>/dev/null || return 0
+	mv "$UPDATE_DIR/status.json.tmp" "$UPDATE_DIR/status.json" 2>/dev/null || true
+}
+
+compose() {
+	if docker compose version >/dev/null 2>&1; then
+		docker compose --env-file "$DIR/.env" -f "$DIR/docker-compose.yml" "$@"
+	else
+		docker-compose --env-file "$DIR/.env" -f "$DIR/docker-compose.yml" "$@"
+	fi
+}
+
+app_container() {
+	compose ps -q app 2>/dev/null | head -n 1
+}
+
+wait_healthy() {
+	__i=0
+	while [ "$__i" -lt 90 ]; do
+		__cid=$(app_container)
+		if [ -z "$__cid" ]; then
+			sleep 2
+			__i=$((__i + 1))
+			continue
+		fi
+		__state=$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "$__cid" 2>/dev/null || true)
+		[ "$__state" = "healthy" ] && return 0
+		case "$__state" in
+			exited|dead) return 1 ;;
+		esac
+		sleep 2
+		__i=$((__i + 1))
+	done
+	return 1
+}
+
+snapshot_previous() {
+	__cid=$(app_container)
+	[ -n "$__cid" ] || return 0
+	__image=$(docker inspect -f '{{.Image}}' "$__cid" 2>/dev/null || true)
+	if [ -n "$__image" ]; then
+		printf '%s\n' "$__image" > "$UPDATE_DIR/previous-image" 2>/dev/null || true
+		docker tag "$__image" ghcr.io/seriec163/routx:rollback 2>/dev/null || true
+	fi
+}
+
+do_rollback() {
+	write_status rolling_back "Откатываю предыдущую версию"
+	if ! docker image inspect ghcr.io/seriec163/routx:rollback >/dev/null 2>&1; then
+		write_status rollback_failed "Нет сохранённого образа для отката"
+		return 1
+	fi
+	if ROUTX_IMAGE=ghcr.io/seriec163/routx:rollback compose up -d --no-deps --force-recreate app >/dev/null 2>&1 && wait_healthy; then
+		write_status rolled_back "Откат выполнен"
+		return 0
+	fi
+	write_status rollback_failed "Не удалось запустить предыдущую версию"
+	return 1
+}
+
+do_update() {
+	cd "$DIR" || { write_status failed "Каталог $DIR недоступен"; return 1; }
+	snapshot_previous
+	write_status pulling "Скачиваю свежий образ"
+	if ! compose pull app >/dev/null 2>&1; then
+		write_status failed "Не удалось скачать образ из registry"
+		return 1
+	fi
+	write_status restarting "Перезапускаю панель"
+	if ! compose up -d --no-deps app >/dev/null 2>&1; then
+		do_rollback
+		return 1
+	fi
+	if wait_healthy; then
+		write_status success "Обновление установлено"
+		return 0
+	fi
+	do_rollback
+	return 1
+}
+
+while :; do
+	if [ -f "$UPDATE_DIR/request" ]; then
+		mv "$UPDATE_DIR/request" "$UPDATE_DIR/request.processing" 2>/dev/null || true
+		__action=$(head -n 1 "$UPDATE_DIR/request.processing" 2>/dev/null | tr -d '\r')
+		rm -f "$UPDATE_DIR/request.processing"
+		case "$__action" in
+			update) do_update ;;
+			rollback) do_rollback ;;
+		esac
+	fi
+	sleep 2
+done
+UPDATER
+	chmod 755 "$UPDATER_BIN"
+
+	cat > "$UPDATER_UNIT" <<EOF
+[Unit]
+Description=RoutX panel updater
+After=docker.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+Environment=ROUTX_DIR=$DIR
+ExecStart=$UPDATER_BIN
+Restart=always
+RestartSec=3
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+	systemctl daemon-reload
+	systemctl enable routx-updater >/dev/null 2>&1 || true
+	systemctl restart routx-updater >/dev/null 2>&1 || true
+	info "  updater: systemctl status routx-updater"
+}
+
 install_docker() {
 	check_docker
 	prepare_env
@@ -822,6 +980,7 @@ install_docker() {
 	fi
 	wait_ready || die "Панель не ответила на /readyz. Проверьте: routx logs"
 	install_cli_link
+	install_updater
 	print_summary
 }
 
@@ -919,6 +1078,15 @@ cmd_update() {
 	load_runtime
 	[ -d "$DIR/.git" ] || die "Каталог $DIR не является git-репозиторием. Переустановите одной командой."
 	git -C "$DIR" pull --ff-only || die "git pull не удался. Проверьте локальные изменения."
+	if [ "$MODE" = docker ] && [ "$BUILD" -eq 0 ]; then
+		__cid=$(compose ps -q app 2>/dev/null | head -n 1 || true)
+		if [ -n "$__cid" ]; then
+			__prev=$(docker inspect -f '{{.Image}}' "$__cid" 2>/dev/null || true)
+			if [ -n "$__prev" ]; then
+				docker tag "$__prev" ghcr.io/seriec163/routx:rollback 2>/dev/null || true
+			fi
+		fi
+	fi
 	if [ "$MODE" = docker ]; then
 		if [ "$BUILD" -eq 1 ]; then
 			compose up -d --build
@@ -929,6 +1097,7 @@ cmd_update() {
 			compose up -d --build
 		fi
 		wait_ready || die "Панель не ответила после обновления."
+		install_updater
 	else
 		cd "$DIR"
 		if [ -f package-lock.json ]; then npm ci --no-audit --no-fund; else npm install --no-audit --no-fund; fi
@@ -1063,6 +1232,12 @@ cmd_uninstall() {
 			systemctl daemon-reload
 		fi
 	fi
+	if has systemctl && systemctl list-unit-files routx-updater.service 2>/dev/null | grep -q '^routx-updater\.service'; then
+		systemctl disable --now routx-updater >/dev/null 2>&1 || true
+		rm -f "$UPDATER_UNIT"
+		systemctl daemon-reload >/dev/null 2>&1 || true
+	fi
+	rm -f "$UPDATER_BIN"
 	if [ "$PURGE" -eq 1 ]; then
 		rm -rf "$DIR"
 		info "Каталог $DIR удалён. Базу данных удалите вручную, если нужно."
@@ -1104,6 +1279,9 @@ cmd_doctor() {
 		else
 			warn "Docker не найден"; FAIL=1
 		fi
+		if has systemctl; then
+			info "  updater: $(systemctl is-active routx-updater 2>/dev/null || echo inactive)"
+		fi
 	else
 		if has systemctl; then
 			info "  сервис:  $(systemctl is-active routx 2>/dev/null || true)"
@@ -1126,6 +1304,60 @@ cmd_doctor() {
 	fi
 	if [ "$FAIL" -eq 0 ]; then info "Итог: всё в порядке."; else warn "Есть проблемы, см. выше."; fi
 	return "$FAIL"
+}
+
+cmd_updater() {
+	__action="${1:-install}"
+	if [ $# -gt 0 ]; then
+		shift
+	fi
+	while [ $# -gt 0 ]; do
+		case "$1" in
+			--dir) DIR=$2; shift 2 ;;
+			--help|-h) usage; exit 0 ;;
+			*) die "Неизвестный аргумент updater: $1" ;;
+		esac
+	done
+	case "$__action" in
+		install)
+			MODE=docker
+			resolve_dir
+			if [ -f "$DIR/.routx-mode" ]; then
+				MODE=$(cat "$DIR/.routx-mode" 2>/dev/null || true)
+				[ -n "$MODE" ] || MODE=docker
+			fi
+			install_updater
+			info "Готово. Кнопка обновления станет доступна в настройках панели."
+			;;
+		status)
+			if has systemctl; then
+				info "routx-updater: $(systemctl is-active routx-updater 2>/dev/null || echo inactive)"
+			else
+				info "systemd не найден"
+			fi
+			;;
+		*) die "Используйте: routx updater install|status" ;;
+	esac
+}
+
+cmd_rollback() {
+	while [ $# -gt 0 ]; do
+		case "$1" in
+			--dir) DIR=$2; shift 2 ;;
+			--docker) MODE=docker; shift ;;
+			--native) MODE=native; shift ;;
+			--help|-h) usage; exit 0 ;;
+			*) die "Неизвестный аргумент rollback: $1" ;;
+		esac
+	done
+	load_runtime
+	[ "$MODE" = docker ] || die "Для native откатите коммит вручную и выполните routx update --build."
+	docker image inspect ghcr.io/seriec163/routx:rollback >/dev/null 2>&1 ||
+		die "Нет сохранённого образа для отката. Он создаётся при обновлении или через панель."
+	export ROUTX_IMAGE=ghcr.io/seriec163/routx:rollback
+	compose up -d --no-deps --force-recreate app
+	wait_ready || die "Панель не ответила после отката. Проверьте: routx logs"
+	info "Откат выполнен: запущен предыдущий образ."
 }
 
 cmd_version() {
@@ -1154,6 +1386,8 @@ fi
 case "$CMD" in
 	install) cmd_install "$@" ;;
 	update) cmd_update "$@" ;;
+	rollback) cmd_rollback "$@" ;;
+	updater) cmd_updater "$@" ;;
 	status) cmd_status "$@" ;;
 	logs) cmd_logs "$@" ;;
 	restart) cmd_service restart "$@" ;;

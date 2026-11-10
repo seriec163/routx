@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import {
   Button,
+  ConfirmDialog,
   ErrorBanner,
   Field,
   InfoBanner,
@@ -14,8 +15,13 @@ import {
   useToast,
 } from '../components/ui';
 import { api, errorMessage } from '../lib/api';
-import { formatBytes } from '../lib/format';
-import type { SettingsEffective, SettingsResponse, SettingsStorage } from '../lib/types';
+import { formatBytes, formatDate } from '../lib/format';
+import type {
+  SettingsEffective,
+  SettingsResponse,
+  SettingsStorage,
+  UpdateStatus,
+} from '../lib/types';
 import { useApi } from '../lib/useApi';
 
 interface FormState {
@@ -42,21 +48,75 @@ function toForm(effective: SettingsEffective): FormState {
   };
 }
 
-function StatusBadge({ tone, children }: { tone: 'ok' | 'warn' | 'muted'; children: string }) {
+function StatusBadge({ tone, children }: { tone: 'ok' | 'warn' | 'muted' | 'bad'; children: string }) {
   return <span className={`badge badge-${tone}`}>{children}</span>;
+}
+
+const UPDATE_STATE_LABEL: Record<string, string> = {
+  pulling: 'Скачиваю образ',
+  restarting: 'Перезапускаю панель',
+  rolling_back: 'Откатываю версию',
+  rolled_back: 'Откат выполнен',
+  success: 'Обновление установлено',
+  failed: 'Ошибка обновления',
+  rollback_failed: 'Ошибка отката',
+};
+
+function updateTone(state: string | undefined): 'ok' | 'warn' | 'muted' | 'bad' {
+  if (state === 'success' || state === 'rolled_back') return 'ok';
+  if (state === 'failed' || state === 'rollback_failed') return 'bad';
+  if (state) return 'warn';
+  return 'muted';
 }
 
 export function SettingsPage() {
   const toast = useToast();
   const settings = useApi<SettingsResponse>('/api/v1/settings');
   const storage = useApi<SettingsStorage>('/api/v1/settings/storage');
+  const updates = useApi<UpdateStatus>('/api/v1/updates');
   const [form, setForm] = useState<FormState | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [updateAction, setUpdateAction] = useState<'check' | 'apply' | 'rollback' | null>(null);
+  const [confirmUpdate, setConfirmUpdate] = useState<'apply' | 'rollback' | null>(null);
 
   useEffect(() => {
     if (settings.data?.effective && !form) setForm(toForm(settings.data.effective));
   }, [settings.data, form]);
+
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      void updates.reload();
+    }, 5000);
+    return () => window.clearInterval(timer);
+  }, [updates.reload]);
+
+  async function checkUpdates(): Promise<void> {
+    setUpdateAction('check');
+    try {
+      await api('/api/v1/updates/check', { method: 'POST' });
+      await updates.reload();
+      toast.success('Проверка обновлений выполнена');
+    } catch (caught) {
+      toast.error(errorMessage(caught));
+    } finally {
+      setUpdateAction(null);
+    }
+  }
+
+  async function runUpdate(action: 'apply' | 'rollback'): Promise<void> {
+    setUpdateAction(action);
+    try {
+      await api(`/api/v1/updates/${action}`, { method: 'POST' });
+      setConfirmUpdate(null);
+      toast.success(action === 'apply' ? 'Обновление запущено' : 'Откат запущен');
+      await updates.reload();
+    } catch (caught) {
+      toast.error(errorMessage(caught));
+    } finally {
+      setUpdateAction(null);
+    }
+  }
 
   function numberField<K extends keyof FormState>(key: K, value: number): void {
     setForm((current) => (current ? { ...current, [key]: value } : current));
@@ -193,6 +253,96 @@ export function SettingsPage() {
         журнал аудита. Отключить второй фактор полностью нельзя: первый суперадминистратор обязан
         настроить TOTP при первом входе.
       </InfoBanner>
+
+      <Panel
+        title="Обновления"
+        subtitle="Проверка GitHub и обновление панели из опубликованного образа."
+      >
+        {updates.error ? (
+          <ErrorBanner message={updates.error} onRetry={() => void updates.reload()} />
+        ) : null}
+        {updates.data?.error ? <InfoBanner>{updates.data.error}</InfoBanner> : null}
+        {updates.data ? (
+          <>
+            <div className="kv">
+              <span>Текущая версия</span>
+              <strong>
+                {updates.data.current.version} ·{' '}
+                {updates.data.current.build === 'dev'
+                  ? 'dev'
+                  : updates.data.current.build.slice(0, 7)}
+              </strong>
+              <span>Последняя в GitHub</span>
+              <strong>
+                {updates.data.latest
+                  ? `${updates.data.latest.sha.slice(0, 7)} · ${updates.data.latest.message}`
+                  : '—'}
+              </strong>
+              <span>Проверено</span>
+              <strong>{formatDate(updates.data.checked_at)}</strong>
+              <span>Updater</span>
+              <strong>
+                {updates.data.updater_installed ? 'установлен' : 'не установлен'}
+              </strong>
+            </div>
+            {updates.data.status?.state ? (
+              <p>
+                <StatusBadge tone={updateTone(updates.data.status.state)}>
+                  {UPDATE_STATE_LABEL[updates.data.status.state] ?? updates.data.status.state}
+                </StatusBadge>{' '}
+                <span className="muted-text small">
+                  {updates.data.status.message ?? ''}{' '}
+                  {updates.data.status.updated_at
+                    ? `· ${formatDate(updates.data.status.updated_at)}`
+                    : ''}
+                </span>
+              </p>
+            ) : null}
+            <div className="toolbar">
+              <Button
+                variant="ghost"
+                onClick={() => void checkUpdates()}
+                busy={updateAction === 'check'}
+                disabled={updateAction !== null}
+              >
+                Проверить обновления
+              </Button>
+              <Button
+                onClick={() => setConfirmUpdate('apply')}
+                disabled={
+                  updateAction !== null ||
+                  !updates.data.updater_installed ||
+                  !updates.data.update_available
+                }
+              >
+                {updates.data.update_available ? 'Обновить панель' : 'Обновлений нет'}
+              </Button>
+              <Button
+                variant="ghost"
+                onClick={() => setConfirmUpdate('rollback')}
+                disabled={updateAction !== null || !updates.data.updater_installed}
+              >
+                Откатить
+              </Button>
+            </div>
+            {!updates.data.updater_installed ? (
+              <InfoBanner>
+                Чтобы обновлять панель из интерфейса, установите host-службу на сервере:{' '}
+                <code>sudo routx updater install</code>.
+              </InfoBanner>
+            ) : null}
+            {updates.data.latest?.url ? (
+              <p className="muted-text small">
+                <a href={updates.data.latest.url} target="_blank" rel="noreferrer">
+                  Изменения в GitHub
+                </a>
+              </p>
+            ) : null}
+          </>
+        ) : (
+          <Spinner />
+        )}
+      </Panel>
 
       <div className="grid-2">
         <div className="stack">
@@ -678,6 +828,42 @@ export function SettingsPage() {
           </div>
         </div>
       </details>
+
+      {confirmUpdate ? (
+        <ConfirmDialog
+          title={confirmUpdate === 'apply' ? 'Обновить панель?' : 'Откатить панель?'}
+          confirmLabel={confirmUpdate === 'apply' ? 'Обновить' : 'Откатить'}
+          danger={confirmUpdate === 'rollback'}
+          busy={updateAction === 'apply' || updateAction === 'rollback'}
+          onCancel={() => setConfirmUpdate(null)}
+          onConfirm={() => void runUpdate(confirmUpdate)}
+          message={
+            confirmUpdate === 'apply' ? (
+              <>
+                <p>
+                  Панель скачает свежий образ из GitHub Container Registry, перезапустится и
+                  применит миграции базы.
+                </p>
+                <p>
+                  Если новая версия не пройдёт healthcheck, updater автоматически вернёт
+                  предыдущий образ. Панель будет недоступна примерно 1–3 минуты.
+                </p>
+              </>
+            ) : (
+              <>
+                <p>
+                  Панель вернётся к предыдущему Docker-образу, сохранённому перед последним
+                  обновлением.
+                </p>
+                <p>
+                  Миграции базы автоматически не откатываются. Схема обычно совместима с прошлой
+                  версией; при серьёзной ошибке используйте резервную копию базы.
+                </p>
+              </>
+            )
+          }
+        />
+      ) : null}
     </div>
   );
 }

@@ -3,7 +3,7 @@ import { buildApp } from './app.js';
 import { loadConfig } from './config.js';
 import { createDb } from './db/index.js';
 import { migrate } from './db/migrate.js';
-import { APP_VERSION } from './version.js';
+import { APP_BUILD_SHA, APP_VERSION } from './version.js';
 import { loadSettings } from './settings.js';
 import { JobWorker } from './jobs/worker.js';
 import { ensureBootstrapAdmin } from './bootstrap.js';
@@ -114,6 +114,7 @@ try {
   app.log.info(
     {
       version: APP_VERSION,
+      build: APP_BUILD_SHA,
       env: config.NODE_ENV,
       public_url: config.RC_PUBLIC_URL,
       web: config.WEB_DIST ?? webDist,

@@ -55,6 +55,7 @@ services:
       - "127.0.0.1:3000:3000"
     volumes:
       - rc_data:/app/data
+      - ./update:/app/update
     read_only: true
     tmpfs:
       - /tmp

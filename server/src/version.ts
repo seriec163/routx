@@ -4,3 +4,4 @@ const require = createRequire(import.meta.url);
 const packageJson = require('../../package.json') as { version?: string };
 
 export const APP_VERSION = packageJson.version ?? '0.0.0';
+export const APP_BUILD_SHA = (process.env.RC_BUILD_SHA ?? 'dev').trim().slice(0, 40) || 'dev';

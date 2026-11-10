@@ -20,7 +20,9 @@ RUN node agent/build.mjs
 RUN npm prune --omit=dev
 
 FROM node:24-alpine AS runtime
+ARG RC_BUILD_SHA=dev
 ENV NODE_ENV=production
+ENV RC_BUILD_SHA=$RC_BUILD_SHA
 WORKDIR /app
 
 # pg_dump/pg_restore нужны для экспорта и переноса базы из панели.

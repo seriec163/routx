@@ -52,6 +52,7 @@ services:
     volumes:
       # Ключ шифрования и страховочные копии перед импортом.
       - rc_data:/app/data
+      - ./update:/app/update
     read_only: true
     tmpfs:
       - /tmp

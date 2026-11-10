@@ -11,7 +11,7 @@ import Fastify, {
 import type { Pool } from 'pg';
 import { ZodError } from 'zod';
 import type { AppDb } from './db/index.js';
-import { APP_VERSION } from './version.js';
+import { APP_BUILD_SHA, APP_VERSION } from './version.js';
 import { HttpError } from './lib/errors.js';
 import { registerGuards } from './auth/service.js';
 import { registerAuthRoutes } from './auth/routes.js';
@@ -30,6 +30,7 @@ import { registerDiagnosticsRoutes } from './diagnostics/routes.js';
 import { registerSingBoxRoutes } from './singbox/routes.js';
 import { registerUserRoutes } from './users/routes.js';
 import { registerSettingsRoutes } from './settings/routes.js';
+import { registerUpdateRoutes } from './updates/routes.js';
 import { registerAuditRoutes } from './audit/routes.js';
 import { registerAgentRoutes } from './agent/routes.js';
 import { registerDeployRoutes } from './deploy/routes.js';
@@ -191,6 +192,7 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
     status: 'ok',
     service: 'routx',
     version: APP_VERSION,
+    build: APP_BUILD_SHA,
     uptime_s: Math.round(process.uptime()),
     now: new Date().toISOString(),
   }));
@@ -306,6 +308,7 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
       secureCookie: config.secureCookie,
     });
     await registerSettingsRoutes(app, { pool });
+    await registerUpdateRoutes(app, { pool });
     await registerAuditRoutes(app, { pool });
     await registerDeployRoutes(app, {
       pool,
