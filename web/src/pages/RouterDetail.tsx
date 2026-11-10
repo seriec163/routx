@@ -575,7 +575,7 @@ export function RouterDetailPage({ id }: { id: string }) {
     tab === 'metrics' ? `/api/v1/routers/${id}/metrics?hours=${hours}&granularity=raw` : null,
   );
   const connectionLosses = useApi<ConnectionsResponse>(
-    tab === 'metrics' ? `/api/v1/routers/${id}/connections?hours=${hours}` : null,
+    tab === 'metrics' ? `/api/v1/routers/${id}/connection-losses?hours=${hours}` : null,
   );
 
   const [diffFlow, setDiffFlow] = useState<{ templateId: string; revision: number; name: string } | null>(null);

@@ -148,7 +148,7 @@ export async function registerMonitoringRoutes(
     },
   );
 
-  app.get('/api/v1/routers/:id/connections', async (request) => {
+  app.get('/api/v1/routers/:id/connection-losses', async (request) => {
     const auth = requireUser(request);
     const params = z.object({ id: z.string().uuid() }).parse(request.params);
     const query = z
