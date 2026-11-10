@@ -70,10 +70,12 @@ docker compose logs caddy --tail 30
 
 ```sh
 cd /opt/routx
-docker compose pull   # если образ берётся из registry
-# или пересобрать: docker build -t routx-app:latest .
+docker compose pull
 docker compose up -d
 ```
+
+Образ берётся из `ghcr.io/seriec163/routx:latest`. Для локальной сборки:
+`docker build -t ghcr.io/seriec163/routx:latest .`.
 
 Сертификат и приватный ключ лежат в томе `caddy_data` и переживают
 пересоздание контейнера. Продление автоматическое.

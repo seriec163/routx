@@ -116,6 +116,9 @@ docker compose --profile proxy up -d --build
 sudo routx update
 ```
 
+Для Docker `routx update` скачивает свежий образ
+`ghcr.io/seriec163/routx:latest`; локальная сборка — `routx update --build`.
+
 База и ключи хранятся в Docker-томах `router-control_pgdata` и
 `router-control_rc_data`; пересборка их не удаляет.
 

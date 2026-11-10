@@ -30,7 +30,7 @@ services:
       - no-new-privileges:true
 
   app:
-    image: routx-app:latest
+    image: ${ROUTX_IMAGE:-ghcr.io/seriec163/routx:latest}
     restart: unless-stopped
     depends_on:
       db:

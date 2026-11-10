@@ -24,6 +24,7 @@ DB_NAME_ARG=""
 DB_USER_ARG=""
 DB_PASSWORD_ARG=""
 NO_BUILD=0
+BUILD=0
 NO_SERVICE=0
 NO_CADDY=0
 INSTALL_DEPS=0
@@ -186,7 +187,8 @@ RoutX CLI — установка и обслуживание панели RoutX.
   --db-user USER           пользователь локальной БД (native)
   --db-password PASS       пароль локальной БД (native)
   --with-proxy             поднять Caddy (Docker) / создать Caddyfile (native)
-  --no-build               не пересобирать Docker-образ
+  --build                  собрать Docker-образ локально вместо pull
+  --no-build               не пересобирать образ (устарело, теперь pull по умолчанию)
   --no-service             не создавать systemd-сервис (native)
   --no-caddy               не устанавливать и не настраивать Caddy (native)
   --install-deps           установить Node.js и PostgreSQL (Debian/Ubuntu)
@@ -204,6 +206,8 @@ e-mail администратора, пароль и порт.
   sudo routx
   sudo routx install --domain panel.example.com --tls-email admin@example.com --yes
   sudo routx install --docker --domain panel.example.com --tls-email admin@example.com
+  sudo routx update            # скачать свежий образ
+  sudo routx update --build    # собрать из исходников
   routx status
   routx logs -f
 EOF
@@ -803,9 +807,12 @@ install_docker() {
 	if [ ! -f "$DIR/docker-compose.yml" ]; then
 		die "В $DIR нет docker-compose.yml. Запустите установку из репозитория."
 	fi
-	if [ "$NO_BUILD" -eq 1 ]; then
+	if [ "$BUILD" -eq 1 ]; then
+		set -- up -d --build
+	elif compose pull; then
 		set -- up -d
 	else
+		warn "Не удалось скачать образ из registry. Собираю локально."
 		set -- up -d --build
 	fi
 	if [ "$WITH_PROXY" -eq 1 ]; then
@@ -870,7 +877,8 @@ cmd_install() {
 			--db-user) [ $# -ge 2 ] || die "--db-user требует значение"; DB_USER_ARG=$2; shift 2 ;;
 			--db-password) [ $# -ge 2 ] || die "--db-password требует значение"; DB_PASSWORD_ARG=$2; shift 2 ;;
 			--with-proxy|--proxy) WITH_PROXY=1; shift ;;
-			--no-build) NO_BUILD=1; shift ;;
+			--build) BUILD=1; shift ;;
+			--no-build) NO_BUILD=1; BUILD=0; shift ;;
 			--no-service) NO_SERVICE=1; shift ;;
 			--no-caddy) NO_CADDY=1; shift ;;
 			--install-deps) INSTALL_DEPS=1; shift ;;
@@ -901,7 +909,8 @@ cmd_update() {
 			--dir) DIR=$2; shift 2 ;;
 			--docker) MODE=docker; shift ;;
 			--native) MODE=native; shift ;;
-			--no-build) NO_BUILD=1; shift ;;
+			--build) BUILD=1; shift ;;
+			--no-build) NO_BUILD=1; BUILD=0; shift ;;
 			--yes|-y) YES=1; shift ;;
 			--help|-h) usage; exit 0 ;;
 			*) die "Неизвестный аргумент update: $1" ;;
@@ -911,9 +920,12 @@ cmd_update() {
 	[ -d "$DIR/.git" ] || die "Каталог $DIR не является git-репозиторием. Переустановите одной командой."
 	git -C "$DIR" pull --ff-only || die "git pull не удался. Проверьте локальные изменения."
 	if [ "$MODE" = docker ]; then
-		if [ "$NO_BUILD" -eq 1 ]; then
+		if [ "$BUILD" -eq 1 ]; then
+			compose up -d --build
+		elif compose pull; then
 			compose up -d
 		else
+			warn "Не удалось скачать образ из registry. Собираю локально."
 			compose up -d --build
 		fi
 		wait_ready || die "Панель не ответила после обновления."

@@ -96,6 +96,11 @@ curl -fsSL https://raw.githubusercontent.com/seriec163/routx/main/install.sh \
   | sudo sh -s -- --docker
 ```
 
+Docker-образ публикуется в
+[`ghcr.io/seriec163/routx`](https://github.com/seriec163/routx/pkgs/container/routx).
+CLI скачивает свежий образ, а при недоступности registry собирает локально.
+Принудительная локальная сборка: `--build`.
+
 ### Из клона репозитория
 
 ```sh
@@ -130,7 +135,8 @@ sudo routx install --docker
 | `routx` / `routx install` | Нативная установка, спрашивает домен |
 | `routx install --docker` | Установка через Docker Compose |
 | `routx install --native --install-deps` | Нативная установка с зависимостями |
-| `routx update` | Обновление кода, сборка, миграции и перезапуск |
+| `routx update` | Скачать свежий образ (Docker) или пересобрать native, применить миграции |
+| `routx update --build` | Обновить с локальной сборкой Docker-образа |
 | `routx status` | Режим, каталог, URL, состояние сервиса и `/readyz` |
 | `routx logs -f` | Логи приложения |
 | `routx restart` / `stop` / `start` | Управление сервисом |
