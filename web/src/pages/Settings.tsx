@@ -72,7 +72,11 @@ export function SettingsPage() {
     );
   }
 
-  function flag<K extends 'singbox' | 'features'>(group: K, key: keyof FormState[K], value: boolean): void {
+  function flag<K extends 'monitoring' | 'singbox' | 'features'>(
+    group: K,
+    key: keyof FormState[K],
+    value: boolean,
+  ): void {
     setForm((current) =>
       current ? { ...current, [group]: { ...current[group], [key]: value } } : current,
     );
@@ -115,6 +119,9 @@ export function SettingsPage() {
             offline_after_misses: form.monitoring.offlineAfterMisses,
             latency_degraded_ms: form.monitoring.latencyDegradedMs,
             stagger_seconds: form.monitoring.staggerSeconds,
+            degraded_after_samples: form.monitoring.degradedAfterSamples,
+            degraded_cooldown_minutes: form.monitoring.degradedCooldownMinutes,
+            recovery_notify: form.monitoring.recoveryNotify,
           },
           retention: {
             days: form.retention.days,
@@ -349,7 +356,44 @@ export function SettingsPage() {
                   onChange={(value) => nested('monitoring', 'staggerSeconds', Number(value))}
                 />
               </Field>
+              <Field
+                label="Проверок до деградации"
+                hint="2–20. По умолчанию 3."
+                tip="Сколько проверок подряд должны показать деградацию, прежде чем появится уведомление. Защищает от одиночных выбросов задержки и лишних тревог. Статус в панели обновляется сразу, ждёт только уведомление."
+              >
+                <TextInput
+                  type="number"
+                  min={2}
+                  max={20}
+                  value={String(form.monitoring.degradedAfterSamples)}
+                  onChange={(value) =>
+                    nested('monitoring', 'degradedAfterSamples', Number(value))
+                  }
+                />
+              </Field>
+              <Field
+                label="Пауза уведомлений о деградации, минут"
+                hint="30–10080. По умолчанию 360 (6 часов)."
+                tip="После предупреждения о деградации следующее по этому роутеру придёт не раньше чем через указанное время. Внутри одного непрерывного эпизода уведомление отправляется один раз. Проверки и статус в панели продолжают обновляться."
+              >
+                <TextInput
+                  type="number"
+                  min={30}
+                  max={10080}
+                  value={String(form.monitoring.degradedCooldownMinutes)}
+                  onChange={(value) =>
+                    nested('monitoring', 'degradedCooldownMinutes', Number(value))
+                  }
+                />
+              </Field>
             </div>
+            <Switch
+              label="Сообщать о восстановлении"
+              hint="Одно сообщение, когда связь вернулась после тревоги."
+              tip="Отправлять «VPN снова работает» после устранения деградации или отказа. Уведомление приходит один раз на эпизод и только если до этого было отправлено предупреждение."
+              checked={form.monitoring.recoveryNotify}
+              onChange={(value) => flag('monitoring', 'recoveryNotify', value)}
+            />
           </Panel>
         </div>
 

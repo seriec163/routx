@@ -654,6 +654,9 @@ export interface SettingsEffective {
     offlineAfterMisses: number;
     latencyDegradedMs: number;
     staggerSeconds: number;
+    degradedAfterSamples: number;
+    degradedCooldownMinutes: number;
+    recoveryNotify: boolean;
   };
   retention: { days: number; commandsDays: number; snapshotsLocal: number };
   agent: {

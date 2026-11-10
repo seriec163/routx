@@ -26,6 +26,9 @@ const monitoringSchema = z
     offline_after_misses: z.coerce.number().int().min(2).max(20).optional(),
     latency_degraded_ms: z.coerce.number().int().min(100).max(30_000).optional(),
     stagger_seconds: z.coerce.number().int().min(0).max(120).optional(),
+    degraded_after_samples: z.coerce.number().int().min(2).max(20).optional(),
+    degraded_cooldown_minutes: z.coerce.number().int().min(30).max(10_080).optional(),
+    recovery_notify: z.boolean().optional(),
   })
   .strict();
 

@@ -17,6 +17,9 @@ export interface PlatformSettings {
     offlineAfterMisses: number;
     latencyDegradedMs: number;
     staggerSeconds: number;
+    degradedAfterSamples: number;
+    degradedCooldownMinutes: number;
+    recoveryNotify: boolean;
   };
   retention: { days: number; commandsDays: number; snapshotsLocal: number };
   agent: {
@@ -44,6 +47,9 @@ export const DEFAULT_SETTINGS: PlatformSettings = {
     offlineAfterMisses: 3,
     latencyDegradedMs: 1500,
     staggerSeconds: 50,
+    degradedAfterSamples: 3,
+    degradedCooldownMinutes: 360,
+    recoveryNotify: true,
   },
   retention: { days: 30, commandsDays: 7, snapshotsLocal: 10 },
   agent: {
@@ -123,6 +129,18 @@ export async function loadSettings(pool: Pool): Promise<PlatformSettings> {
         DEFAULT_SETTINGS.monitoring.latencyDegradedMs,
       ),
       staggerSeconds: num(monitoring.stagger_seconds, DEFAULT_SETTINGS.monitoring.staggerSeconds),
+      degradedAfterSamples: num(
+        monitoring.degraded_after_samples,
+        DEFAULT_SETTINGS.monitoring.degradedAfterSamples,
+      ),
+      degradedCooldownMinutes: num(
+        monitoring.degraded_cooldown_minutes,
+        DEFAULT_SETTINGS.monitoring.degradedCooldownMinutes,
+      ),
+      recoveryNotify:
+        typeof monitoring.recovery_notify === 'boolean'
+          ? monitoring.recovery_notify
+          : DEFAULT_SETTINGS.monitoring.recoveryNotify,
     },
     retention: {
       days: num(retention.days, DEFAULT_SETTINGS.retention.days),

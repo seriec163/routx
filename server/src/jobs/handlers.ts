@@ -929,6 +929,66 @@ function proxyHealthOf(sample: Json, settings: PlatformSettings): 'healthy' | 'd
   return total > 0 ? 'healthy' : 'unknown';
 }
 
+function leadingStateCount(
+  rows: Array<{ proxy_health: string | null }>,
+  state: string,
+): number {
+  let count = 0;
+  for (const row of rows) {
+    if (row.proxy_health !== state) break;
+    count += 1;
+  }
+  return count;
+}
+
+/**
+ * Была ли по роутеру отправлена нотификация указанного типа за последние
+ * `minutes` минут. Нужна, чтобы один и тот же сбой не присылал push на каждой
+ * проверке и не зависел от границ часовых интервалов.
+ */
+async function notifiedSince(
+  pool: Pool,
+  routerId: string,
+  kind: string,
+  minutes: number,
+): Promise<boolean> {
+  const result = await pool.query(
+    `select 1 from notifications
+      where router_id = $1 and kind = $2
+        and created_at > now() - ($3::int * interval '1 minute')
+      limit 1`,
+    [routerId, kind, Math.max(1, Math.round(minutes))],
+  );
+  return (result.rowCount ?? 0) > 0;
+}
+
+/**
+ * Есть ли уже уведомление этого типа в текущем эпизоде состояния прокси.
+ * Эпизод начинается после последней проверки с другим статусом. Так одно
+ * длительное ухудшение присылает одно сообщение, а не напоминание каждый час.
+ */
+async function notifiedInProxyEpisode(
+  pool: Pool,
+  routerId: string,
+  kind: string,
+  state: string,
+): Promise<boolean> {
+  const boundary = await pool.query<{ last_other: Date | null }>(
+    `select max(ts) as last_other from monitoring_samples
+      where router_id = $1 and proxy_health is distinct from $2`,
+    [routerId, state],
+  );
+  const since = boundary.rows[0]?.last_other ?? null;
+  const result = await pool.query(
+    `select 1 from notifications
+      where router_id = $1 and kind = $2
+        and ($3::timestamptz is null or created_at > $3)
+      limit 1`,
+    [routerId, kind, since],
+  );
+  return (result.rowCount ?? 0) > 0;
+}
+
 export async function monitorProbe(ctx: HandlerContext, job: JobRow): Promise<Json> {
   const routerId = requireRouter(job);
   const raw = await runCommand(
@@ -947,13 +1007,6 @@ export async function monitorProbe(ctx: HandlerContext, job: JobRow): Promise<Js
   const total = asNumber(raw.total_tags);
   const directIp = asString(raw.direct_ip) || null;
   const vpnIp = asString(raw.vpn_ip) || null;
-
-  const previousSample = await ctx.pool.query<{ proxy_health: string | null }>(
-    `select proxy_health from monitoring_samples
-      where router_id = $1 order by ts desc limit 1`,
-    [routerId],
-  );
-  const previousProxy = previousSample.rows[0]?.proxy_health ?? null;
 
   await ctx.pool.query(
     `insert into monitoring_samples
@@ -1003,29 +1056,89 @@ export async function monitorProbe(ctx: HandlerContext, job: JobRow): Promise<Js
   const suppressProxy =
     (recentRestart.rowCount ?? 0) > 0 || (rebootPending.rowCount ?? 0) > 0;
 
-  if (!suppressProxy && reachable && proxyHealth && proxyHealth !== previousProxy) {
-    const bucket = new Date().toISOString().slice(0, 13);
+  if (!suppressProxy && reachable && proxyHealth && proxyHealth !== 'unknown') {
+    const degradedAfter = Math.max(2, ctx.settings.monitoring.degradedAfterSamples);
+    const degradedCooldown = Math.max(30, ctx.settings.monitoring.degradedCooldownMinutes);
+    const history = await ctx.pool.query<{ proxy_health: string | null }>(
+      `select proxy_health from monitoring_samples
+        where router_id = $1 order by ts desc limit $2`,
+      [routerId, Math.max(10, degradedAfter + 2)],
+    );
+    const streak = leadingStateCount(history.rows, proxyHealth);
+
     if (proxyHealth === 'dead') {
-      await notifyRouterOwner(ctx.pool, routerId, {
-        kind: 'proxy.offline',
-        severity: 'critical',
-        message: 'VPN не работает: прокси не отвечает',
-        dedupeKey: `proxy-dead:${routerId}:${bucket}`,
-      });
+      // Полный отказ подтверждаем двумя проверками подряд.
+      if (streak >= 2) {
+        const alreadySent = await notifiedInProxyEpisode(
+          ctx.pool,
+          routerId,
+          'proxy.offline',
+          'dead',
+        );
+        const inCooldown = await notifiedSince(ctx.pool, routerId, 'proxy.offline', 60);
+        if (!alreadySent && !inCooldown) {
+          const bucket = new Date().toISOString().slice(0, 13);
+          await notifyRouterOwner(ctx.pool, routerId, {
+            kind: 'proxy.offline',
+            severity: 'critical',
+            message: 'VPN не работает: прокси не отвечает',
+            dedupeKey: `proxy-dead:${routerId}:${bucket}`,
+          });
+        }
+      }
     } else if (proxyHealth === 'degraded') {
-      await notifyRouterOwner(ctx.pool, routerId, {
-        kind: 'proxy.degraded',
-        severity: 'warning',
-        message: 'VPN работает с перебоями: часть прокси не отвечает',
-        dedupeKey: `proxy-degraded:${routerId}:${bucket}`,
-      });
-    } else if (proxyHealth === 'healthy' && previousProxy && previousProxy !== 'healthy') {
-      await notifyRouterOwner(ctx.pool, routerId, {
-        kind: 'proxy.online',
-        severity: 'info',
-        message: 'VPN снова работает',
-        dedupeKey: `proxy-online:${routerId}:${bucket}`,
-      });
+      // Деградация часто мигает: ждём несколько плохих проверок подряд,
+      // отправляем одно сообщение на эпизод и держим паузу между эпизодами.
+      if (streak >= degradedAfter) {
+        const alreadySent = await notifiedInProxyEpisode(
+          ctx.pool,
+          routerId,
+          'proxy.degraded',
+          'degraded',
+        );
+        const inCooldown = await notifiedSince(
+          ctx.pool,
+          routerId,
+          'proxy.degraded',
+          degradedCooldown,
+        );
+        if (!alreadySent && !inCooldown) {
+          const bucket = Math.floor(Date.now() / (degradedCooldown * 60_000));
+          await notifyRouterOwner(ctx.pool, routerId, {
+            kind: 'proxy.degraded',
+            severity: 'warning',
+            message: 'VPN работает с перебоями: часть прокси не отвечает',
+            dedupeKey: `proxy-degraded:${routerId}:${bucket}`,
+          });
+        }
+      }
+    } else if (proxyHealth === 'healthy' && streak >= 2) {
+      // Восстановление отправляем один раз и только если до этого был
+      // реальный тревожный эпизод, а не короткий всплеск задержки.
+      if (ctx.settings.monitoring.recoveryNotify) {
+        const state = await ctx.pool.query<{
+          last_alert: Date | null;
+          last_online: Date | null;
+        }>(
+          `select
+             (select max(created_at) from notifications
+               where router_id = $1 and kind in ('proxy.degraded','proxy.offline')) as last_alert,
+             (select max(created_at) from notifications
+               where router_id = $1 and kind = 'proxy.online') as last_online`,
+          [routerId],
+        );
+        const lastAlert = state.rows[0]?.last_alert ?? null;
+        const lastOnline = state.rows[0]?.last_online ?? null;
+        if (lastAlert && (!lastOnline || lastAlert > lastOnline)) {
+          const bucket = new Date().toISOString().slice(0, 13);
+          await notifyRouterOwner(ctx.pool, routerId, {
+            kind: 'proxy.online',
+            severity: 'info',
+            message: 'VPN снова работает',
+            dedupeKey: `proxy-online:${routerId}:${bucket}`,
+          });
+        }
+      }
     }
   }
 
