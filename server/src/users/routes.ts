@@ -1,10 +1,10 @@
-import type { FastifyInstance } from 'fastify';
+import type { FastifyInstance, FastifyRequest } from 'fastify';
 import type { Pool } from 'pg';
 import { z } from 'zod';
 import { audit } from '../audit.js';
-import { requireSuperadmin } from '../auth/service.js';
+import { canManageBranchUser, requireManager } from '../auth/service.js';
 import { randomToken, sha256Hex } from '../lib/crypto.js';
-import { badRequest, conflict, notFound } from '../lib/errors.js';
+import { badRequest, conflict, forbidden, notFound } from '../lib/errors.js';
 import { uuidv7 } from '../lib/ids.js';
 import { loadSettings } from '../settings.js';
 import { userJson } from '../auth/routes.js';
@@ -14,14 +14,42 @@ interface RouteContext {
   publicUrl: string;
 }
 
+type Auth = NonNullable<FastifyRequest['auth']>;
+
+interface ManagedUserRow {
+  id: string;
+  role: string;
+  status: string;
+  email: string;
+  archived_at: Date | null;
+  parent_id: string | null;
+}
+
 const INVITE_TTL_HOURS = 7 * 24;
 const emailSchema = z.string().trim().toLowerCase().email().max(254);
+
+function canManageTarget(auth: Auth, user: ManagedUserRow): boolean {
+  return canManageBranchUser(auth.role, auth.userId, user);
+}
+
+async function loadTarget(pool: Pool, id: string): Promise<ManagedUserRow | null> {
+  const result = await pool.query<ManagedUserRow>(
+    'select id, role, status, email, archived_at, parent_id from users where id = $1',
+    [id],
+  );
+  return result.rows[0] ?? null;
+}
+
+function assertManageable(auth: Auth, user: ManagedUserRow): void {
+  if (canManageTarget(auth, user)) return;
+  throw forbidden('Действие доступно только для пользователей своей ветки');
+}
 
 export async function registerUserRoutes(app: FastifyInstance, ctx: RouteContext): Promise<void> {
   const { pool } = ctx;
 
   app.get('/api/v1/users', async (request) => {
-    requireSuperadmin(request);
+    const auth = requireManager(request);
     const query = z
       .object({
         include_suspended: z.enum(['true', 'false']).optional(),
@@ -29,40 +57,48 @@ export async function registerUserRoutes(app: FastifyInstance, ctx: RouteContext
       })
       .parse(request.query);
 
+    const scope = auth.role === 'superadmin' ? null : auth.userId;
     const result = await pool.query(
       `select u.id, u.email, u.role, u.status, u.totp_enabled,
-              u.first_name, u.middle_name, u.last_name, u.created_at, u.last_login_at,
-              u.archived_at,
+              u.first_name, u.middle_name, u.last_name, u.parent_id,
+              p.email as parent_email,
+              u.created_at, u.last_login_at, u.archived_at,
               (select count(*)::int from routers r where r.owner_id = u.id and r.archived_at is null) as router_count
          from users u
-        where ($1::boolean or u.status = 'active')
-          and ($2::boolean or u.archived_at is null)
+         left join users p on p.id = u.parent_id
+        where ($1::uuid is null or u.id = $1 or u.parent_id = $1)
+          and ($2::boolean or u.status = 'active')
+          and ($3::boolean or u.archived_at is null)
         order by u.created_at asc`,
-      [query.include_suspended === 'true', query.include_archived === 'true'],
+      [scope, query.include_suspended === 'true', query.include_archived === 'true'],
     );
     return { items: result.rows.map((row) => ({ ...userJson(row), router_count: row.router_count })) };
   });
 
   app.get('/api/v1/users/:id', async (request) => {
-    requireSuperadmin(request);
+    const auth = requireManager(request);
     const params = z.object({ id: z.string().uuid() }).parse(request.params);
     const result = await pool.query(
       `select id, email, role, status, totp_enabled,
-              first_name, middle_name, last_name, created_at, last_login_at, archived_at
+              first_name, middle_name, last_name, parent_id, created_at, last_login_at, archived_at
          from users where id = $1`,
       [params.id],
     );
-    if (!result.rows[0]) throw notFound('Пользователь не найден');
-    return { user: userJson(result.rows[0]) };
+    const user = result.rows[0];
+    if (!user) throw notFound('Пользователь не найден');
+    if (auth.role !== 'superadmin' && user.id !== auth.userId) {
+      assertManageable(auth, user as ManagedUserRow);
+    }
+    return { user: userJson(user) };
   });
 
   app.patch('/api/v1/users/:id', async (request) => {
-    const auth = requireSuperadmin(request);
+    const auth = requireManager(request);
     const params = z.object({ id: z.string().uuid() }).parse(request.params);
     const body = z
       .object({
         email: emailSchema.optional(),
-        role: z.enum(['superadmin', 'user']).optional(),
+        role: z.enum(['superadmin', 'admin', 'user']).optional(),
         status: z.enum(['active', 'suspended']).optional(),
         first_name: z.string().trim().max(100).nullable().optional(),
         middle_name: z.string().trim().max(100).nullable().optional(),
@@ -71,18 +107,22 @@ export async function registerUserRoutes(app: FastifyInstance, ctx: RouteContext
       .strict()
       .parse(request.body);
 
-    const target = await pool.query<{
-      id: string;
-      role: string;
-      status: string;
-      email: string;
-      archived_at: Date | null;
-    }>(
-      'select id, role, status, email, archived_at from users where id = $1',
-      [params.id],
-    );
-    const user = target.rows[0];
+    const user = await loadTarget(pool, params.id);
     if (!user) throw notFound('Пользователь не найден');
+
+    if (auth.role === 'admin') {
+      if (user.id === auth.userId) {
+        if (body.role !== undefined || body.status !== undefined) {
+          throw forbidden('Нельзя менять собственную роль или статус');
+        }
+      } else {
+        assertManageable(auth, user);
+        if (body.role !== undefined && body.role !== 'user') {
+          throw forbidden('Администратор может назначать только роль «Пользователь»');
+        }
+      }
+    }
+
     if (user.archived_at && (body.role !== undefined || body.status !== undefined)) {
       throw conflict(
         'user_archived',
@@ -90,7 +130,8 @@ export async function registerUserRoutes(app: FastifyInstance, ctx: RouteContext
       );
     }
 
-    const demotesSuperadmin = user.role === 'superadmin' && body.role === 'user';
+    const demotesSuperadmin =
+      user.role === 'superadmin' && body.role !== undefined && body.role !== 'superadmin';
     const suspendsSuperadmin = user.role === 'superadmin' && body.status === 'suspended';
     if ((demotesSuperadmin || suspendsSuperadmin) && user.id === auth.userId) {
       throw conflict('self_lockout', 'Нельзя понизить или заблокировать собственную учётную запись');
@@ -121,6 +162,10 @@ export async function registerUserRoutes(app: FastifyInstance, ctx: RouteContext
     if (body.role !== undefined) {
       values.push(body.role);
       sets.push(`role = $${values.length}`);
+      if (body.role === 'admin' || body.role === 'superadmin') {
+        // Администратор верхнего уровня не входит в чужую ветку.
+        sets.push('parent_id = null');
+      }
     }
     if (body.status !== undefined) {
       values.push(body.status);
@@ -144,7 +189,7 @@ export async function registerUserRoutes(app: FastifyInstance, ctx: RouteContext
         `update users set ${sets.join(', ')}
         where id = $${values.length}
         returning id, email, role, status, totp_enabled,
-                  first_name, middle_name, last_name, created_at, last_login_at, archived_at`,
+                  first_name, middle_name, last_name, parent_id, created_at, last_login_at, archived_at`,
         values,
       )
       .catch((error: unknown) => {
@@ -179,8 +224,11 @@ export async function registerUserRoutes(app: FastifyInstance, ctx: RouteContext
   });
 
   app.post('/api/v1/users/:id/revoke-sessions', async (request) => {
-    const auth = requireSuperadmin(request);
+    const auth = requireManager(request);
     const params = z.object({ id: z.string().uuid() }).parse(request.params);
+    const user = await loadTarget(pool, params.id);
+    if (!user) throw notFound('Пользователь не найден');
+    if (auth.role === 'admin' && user.id !== auth.userId) assertManageable(auth, user);
     const result = await pool.query(
       'update sessions set revoked_at = now() where user_id = $1 and revoked_at is null',
       [params.id],
@@ -200,20 +248,14 @@ export async function registerUserRoutes(app: FastifyInstance, ctx: RouteContext
   });
 
   app.post('/api/v1/users/:id/archive', async (request) => {
-    const auth = requireSuperadmin(request);
+    const auth = requireManager(request);
     const params = z.object({ id: z.string().uuid() }).parse(request.params);
-    const target = await pool.query<{
-      id: string;
-      role: string;
-      status: string;
-      email: string;
-      archived_at: Date | null;
-    }>('select id, role, status, email, archived_at from users where id = $1', [params.id]);
-    const user = target.rows[0];
+    const user = await loadTarget(pool, params.id);
     if (!user) throw notFound('Пользователь не найден');
     if (user.id === auth.userId) {
       throw conflict('self_lockout', 'Нельзя архивировать собственную учётную запись');
     }
+    if (auth.role === 'admin') assertManageable(auth, user);
     if (user.archived_at) throw conflict('already_archived', 'Пользователь уже в архиве');
     if (user.role === 'superadmin' && user.status === 'active') {
       const activeAdmins = await pool.query<{ count: string }>(
@@ -248,15 +290,11 @@ export async function registerUserRoutes(app: FastifyInstance, ctx: RouteContext
   });
 
   app.post('/api/v1/users/:id/restore', async (request) => {
-    const auth = requireSuperadmin(request);
+    const auth = requireManager(request);
     const params = z.object({ id: z.string().uuid() }).parse(request.params);
-    const target = await pool.query<{
-      id: string;
-      email: string;
-      archived_at: Date | null;
-    }>('select id, email, archived_at from users where id = $1', [params.id]);
-    const user = target.rows[0];
+    const user = await loadTarget(pool, params.id);
     if (!user) throw notFound('Пользователь не найден');
+    if (auth.role === 'admin') assertManageable(auth, user);
     if (!user.archived_at) throw conflict('not_archived', 'Пользователь не находится в архиве');
 
     const settings = await loadSettings(pool);
@@ -290,20 +328,14 @@ export async function registerUserRoutes(app: FastifyInstance, ctx: RouteContext
   });
 
   app.delete('/api/v1/users/:id', async (request, reply) => {
-    const auth = requireSuperadmin(request);
+    const auth = requireManager(request);
     const params = z.object({ id: z.string().uuid() }).parse(request.params);
-    const target = await pool.query<{
-      id: string;
-      role: string;
-      status: string;
-      email: string;
-      archived_at: Date | null;
-    }>('select id, role, status, email, archived_at from users where id = $1', [params.id]);
-    const user = target.rows[0];
+    const user = await loadTarget(pool, params.id);
     if (!user) throw notFound('Пользователь не найден');
     if (user.id === auth.userId) {
       throw conflict('self_lockout', 'Нельзя удалить собственную учётную запись');
     }
+    if (auth.role === 'admin') assertManageable(auth, user);
     if (user.role === 'superadmin' && user.status === 'active') {
       const activeAdmins = await pool.query<{ count: string }>(
         `select count(*)::text as count from users
@@ -357,19 +389,16 @@ export async function registerUserRoutes(app: FastifyInstance, ctx: RouteContext
   });
 
   app.post('/api/v1/users/:id/password-reset', async (request) => {
-    const auth = requireSuperadmin(request);
+    const auth = requireManager(request);
     const params = z.object({ id: z.string().uuid() }).parse(request.params);
     const body = z
       .object({ reset_mfa: z.boolean().optional().default(false) })
       .strict()
       .parse(request.body ?? {});
 
-    const target = await pool.query<{ id: string; email: string }>(
-      'select id, email from users where id = $1',
-      [params.id],
-    );
-    const user = target.rows[0];
+    const user = await loadTarget(pool, params.id);
     if (!user) throw notFound('Пользователь не найден');
+    if (auth.role === 'admin' && user.id !== auth.userId) assertManageable(auth, user);
 
     // Старые неиспользованные ссылки перестают действовать.
     await pool.query(
@@ -409,14 +438,18 @@ export async function registerUserRoutes(app: FastifyInstance, ctx: RouteContext
   });
 
   app.post('/api/v1/invites', async (request, reply) => {
-    const auth = requireSuperadmin(request);
+    const auth = requireManager(request);
     const body = z
       .object({
-        role: z.enum(['superadmin', 'user']).default('user'),
+        role: z.enum(['superadmin', 'admin', 'user']).default('user'),
         email: z.string().trim().toLowerCase().email().max(254).optional(),
       })
       .strict()
       .parse(request.body ?? {});
+
+    if (auth.role === 'admin' && body.role !== 'user') {
+      throw forbidden('Администратор может приглашать только пользователей');
+    }
 
     const settings = await loadSettings(pool);
     const total = await pool.query<{ count: string }>(
@@ -473,24 +506,28 @@ export async function registerUserRoutes(app: FastifyInstance, ctx: RouteContext
   });
 
   app.get('/api/v1/invites', async (request) => {
-    requireSuperadmin(request);
+    const auth = requireManager(request);
     const result = await pool.query(
       `select i.id, i.role, i.email, i.expires_at, i.used_at, i.created_at,
               u.email as created_by_email, ub.email as used_by_email
          from invites i
          left join users u on u.id = i.created_by
          left join users ub on ub.id = i.used_by
+        where ($1::boolean or i.created_by = $2)
         order by i.created_at desc limit 100`,
+      [auth.role === 'superadmin', auth.userId],
     );
     return { items: result.rows };
   });
 
   app.delete('/api/v1/invites/:id', async (request, reply) => {
-    const auth = requireSuperadmin(request);
+    const auth = requireManager(request);
     const params = z.object({ id: z.string().uuid() }).parse(request.params);
     const result = await pool.query(
-      `update invites set expires_at = now() where id = $1 and used_at is null`,
-      [params.id],
+      `update invites set expires_at = now()
+        where id = $1 and used_at is null
+          and ($2::boolean or created_by = $3)`,
+      [params.id, auth.role === 'superadmin', auth.userId],
     );
     if ((result.rowCount ?? 0) === 0) throw notFound('Активное приглашение не найдено');
     await audit(pool, {

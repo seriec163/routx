@@ -1,3 +1,13 @@
+export const ROLE_LABEL: Record<string, string> = {
+  superadmin: 'Суперадминистратор',
+  admin: 'Администратор',
+  user: 'Пользователь',
+};
+
+export function roleLabel(role: string | null | undefined): string {
+  return role ? (ROLE_LABEL[role] ?? role) : '—';
+}
+
 const dateTime = new Intl.DateTimeFormat('ru-RU', {
   day: '2-digit',
   month: '2-digit',

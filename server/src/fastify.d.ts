@@ -5,7 +5,7 @@ declare module 'fastify' {
       sessionId: string;
       userId: string;
       email: string;
-      role: 'superadmin' | 'user';
+      role: 'superadmin' | 'admin' | 'user';
       mfaPassed: boolean;
     };
     agent?: {

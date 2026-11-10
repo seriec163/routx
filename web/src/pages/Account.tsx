@@ -13,7 +13,7 @@ import {
   useToast,
 } from '../components/ui';
 import { api, errorMessage } from '../lib/api';
-import { formatDate } from '../lib/format';
+import { formatDate, roleLabel } from '../lib/format';
 import { useSession } from '../session';
 
 interface EnrollResponse {
@@ -227,9 +227,7 @@ export function AccountPage() {
               <span>E-mail</span>
               <strong>{me.user.email}</strong>
               <span>Роль</span>
-              <strong>
-                {me.user.role === 'superadmin' ? 'Суперадминистратор' : 'Пользователь'}
-              </strong>
+              <strong>{roleLabel(me.user.role)}</strong>
               <span>Статус</span>
               <strong>
                 <StatusBadge
@@ -244,8 +242,10 @@ export function AccountPage() {
               <span>Права</span>
               <strong>
                 {me.permissions.is_superadmin
-                  ? 'полный доступ, включая секреты, лимиты и rollout'
-                  : 'свои роутеры, шаблоны и подключения'}
+                  ? 'полный доступ, включая настройки панели и всех пользователей'
+                  : me.permissions.can_manage_users
+                    ? 'свои роутеры и пользователи своей ветки'
+                    : 'свои роутеры, шаблоны и подключения'}
               </strong>
             </div>
           </Panel>

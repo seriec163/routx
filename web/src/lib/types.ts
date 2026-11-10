@@ -1,4 +1,4 @@
-export type Role = 'superadmin' | 'user';
+export type Role = 'superadmin' | 'admin' | 'user';
 
 export interface InstalledProduct {
   product: 'forkop' | 'prokop' | 'podkop' | 'tachyon';
@@ -609,6 +609,8 @@ export interface UserRow {
   first_name: string | null;
   middle_name: string | null;
   last_name: string | null;
+  parent_id?: string | null;
+  parent_email?: string | null;
   created_at: string;
   last_login_at: string | null;
   archived_at?: string | null;

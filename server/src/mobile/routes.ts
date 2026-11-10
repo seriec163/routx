@@ -68,7 +68,7 @@ export async function registerMobileRoutes(
       const userResult = await pool.query<{
         id: string;
         email: string;
-        role: 'superadmin' | 'user';
+        role: 'superadmin' | 'admin' | 'user';
         status: string;
         totp_enabled: boolean;
         first_name: string | null;

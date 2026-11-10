@@ -17,7 +17,7 @@ import {
 } from '../components/ui';
 import { api, errorMessage } from '../lib/api';
 import { copyText } from '../lib/clipboard';
-import { formatDate, formatRelative } from '../lib/format';
+import { formatDate, formatRelative, roleLabel } from '../lib/format';
 import type { InviteRow, Role, UserRow } from '../lib/types';
 import { useApi } from '../lib/useApi';
 import { useSession } from '../session';
@@ -25,6 +25,7 @@ import { useSession } from '../session';
 export function UsersPage() {
   const toast = useToast();
   const { me, reload: reloadSession } = useSession();
+  const isSuperadmin = me?.permissions.is_superadmin === true;
   const users = useApi<{ items: UserRow[] }>(
     '/api/v1/users?include_suspended=true&include_archived=true',
   );
@@ -253,9 +254,11 @@ export function UsersPage() {
         subtitle="Регистрация только по приглашению. Ссылка одноразовая и действует 7 дней."
         actions={
           <div className="toolbar">
-            <Button variant="ghost" onClick={() => setMessageOpen(true)}>
-              Сообщение
-            </Button>
+            {isSuperadmin ? (
+              <Button variant="ghost" onClick={() => setMessageOpen(true)}>
+                Сообщение
+              </Button>
+            ) : null}
             <Button onClick={() => setInviteOpen(true)}>Пригласить</Button>
           </div>
         }
@@ -305,14 +308,22 @@ export function UsersPage() {
                       </button>
                     </td>
                     <td>
-                      <Select
-                        value={user.role}
-                        onChange={(value) => void updateUser(user, { role: value as Role })}
-                        disabled={Boolean(user.archived_at)}
-                      >
-                        <option value="user">Пользователь</option>
-                        <option value="superadmin">Суперадминистратор</option>
-                      </Select>
+                      {isSuperadmin ? (
+                        <Select
+                          value={user.role}
+                          onChange={(value) => void updateUser(user, { role: value as Role })}
+                          disabled={Boolean(user.archived_at)}
+                        >
+                          <option value="user">Пользователь</option>
+                          <option value="admin">Администратор</option>
+                          <option value="superadmin">Суперадминистратор</option>
+                        </Select>
+                      ) : (
+                        <StatusBadge
+                          status={user.role === 'admin' ? 'warning' : 'neutral'}
+                          label={roleLabel(user.role)}
+                        />
+                      )}
                     </td>
                     <td>
                       <StatusBadge
@@ -439,7 +450,7 @@ export function UsersPage() {
                   return (
                     <tr key={invite.id}>
                       <td className="small">{formatDate(invite.created_at)}</td>
-                      <td>{invite.role === 'superadmin' ? 'Суперадминистратор' : 'Пользователь'}</td>
+                      <td>{roleLabel(invite.role)}</td>
                       <td className="small">{invite.email ?? 'любой'}</td>
                       <td>
                         <StatusBadge
@@ -588,10 +599,17 @@ export function UsersPage() {
             <>
               {error ? <ErrorBanner message={error} /> : null}
               <Field label="Роль">
-                <Select value={role} onChange={(value) => setRole(value as Role)}>
-                  <option value="user">Пользователь</option>
-                  <option value="superadmin">Суперадминистратор</option>
-                </Select>
+                {isSuperadmin ? (
+                  <Select value={role} onChange={(value) => setRole(value as Role)}>
+                    <option value="user">Пользователь</option>
+                    <option value="admin">Администратор</option>
+                    <option value="superadmin">Суперадминистратор</option>
+                  </Select>
+                ) : (
+                  <Select value="user" onChange={() => undefined} disabled>
+                    <option value="user">Пользователь</option>
+                  </Select>
+                )}
               </Field>
               <Field
                 label="E-mail (необязательно)"

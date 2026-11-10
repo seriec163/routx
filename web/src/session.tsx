@@ -4,12 +4,13 @@ import { api, errorMessage } from './lib/api';
 export interface SessionUser {
   id: string;
   email: string;
-  role: 'superadmin' | 'user';
+  role: 'superadmin' | 'admin' | 'user';
   status: string;
   totp_enabled: boolean;
   first_name?: string | null;
   middle_name?: string | null;
   last_name?: string | null;
+  parent_id?: string | null;
   created_at?: string;
   last_login_at?: string | null;
 }
@@ -22,6 +23,7 @@ export interface Me {
   mfa_passed: boolean;
   permissions: {
     is_superadmin: boolean;
+    can_manage_routers: boolean;
     can_manage_users: boolean;
     can_manage_settings: boolean;
     can_rollout: boolean;
@@ -95,6 +97,10 @@ export function useSession(): SessionContextValue {
 
 export function canManageUsers(me: Me | null): boolean {
   return me?.permissions.can_manage_users === true;
+}
+
+export function canManageRouters(me: Me | null): boolean {
+  return me?.permissions.can_manage_routers === true;
 }
 
 export function canManageSettings(me: Me | null): boolean {

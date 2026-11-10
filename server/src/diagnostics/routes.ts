@@ -182,7 +182,7 @@ interface ReportRow {
 
 async function loadReport(
   pool: Pool,
-  auth: { userId: string; role: 'superadmin' | 'user' },
+  auth: { userId: string; role: 'superadmin' | 'admin' | 'user' },
   id: string,
 ): Promise<ReportRow> {
   const result = await pool.query<ReportRow>(

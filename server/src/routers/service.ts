@@ -34,7 +34,7 @@ export interface RouterRecord {
 
 export interface Caller {
   userId: string;
-  role: 'superadmin' | 'user';
+  role: 'superadmin' | 'admin' | 'user';
 }
 
 export function routerJson(row: RouterRecord) {

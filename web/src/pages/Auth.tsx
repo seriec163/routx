@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { api, errorMessage } from '../lib/api';
+import { roleLabel } from '../lib/format';
 import { navigate } from '../lib/router';
 import { Button, ErrorBanner, Field, InfoBanner, Spinner, TextInput } from '../components/ui';
 import { LogoMark } from '../components/Logo';
@@ -324,7 +325,7 @@ export function LoginPage() {
 }
 
 interface InvitePreview {
-  role: 'superadmin' | 'user';
+  role: 'superadmin' | 'admin' | 'user';
   email: string | null;
   expires_at: string;
   valid: boolean;
@@ -445,7 +446,7 @@ export function InvitePage({
           {preview?.valid ? (
             <>
               <p className="page-sub">
-                Роль: <strong>{preview.role === 'superadmin' ? 'суперадминистратор' : 'пользователь'}</strong>
+                Роль: <strong>{roleLabel(preview.role)}</strong>
                 {preview.email ? ` · приглашение привязано к ${preview.email}` : ''}
               </p>
               {error ? <ErrorBanner message={error} /> : null}

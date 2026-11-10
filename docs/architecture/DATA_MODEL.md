@@ -36,7 +36,8 @@ create table users (
   id              uuid primary key,
   email           citext not null unique,
   password_hash   text   not null,              -- argon2id
-  role            text   not null check (role in ('superadmin','user')),
+  role            text   not null check (role in ('superadmin','admin','user')),
+  parent_id       uuid references users(id) on delete set null, -- ветка администратора
   status          text   not null default 'active'
                          check (status in ('active','suspended')),
   totp_secret_enc bytea,                        -- AES-256-GCM
@@ -50,11 +51,15 @@ create table users (
   updated_at      timestamptz not null default now()
 );
 create index on users (role, status);
+create index on users (parent_id);
 ```
 
 Инварианты:
 
 * ровно один `superadmin` создаётся при инициализации (bootstrap), дальнейшие — только им;
+* `parent_id` задаёт ветку: у пользователя, приглашённого администратором,
+  `parent_id = id` этого администратора; у администраторов и пользователей,
+  созданных суперадминистратором, `parent_id = null`;
 * `totp_secret_enc` обязателен при `totp_enabled = true`;
 * e-mail нормализуется в нижний регистр до вставки.
 
@@ -83,7 +88,7 @@ create table invites (
   id          uuid primary key,
   token_hash  bytea not null unique,            -- sha256(32-char base32)
   created_by  uuid not null references users(id),
-  role        text not null check (role in ('superadmin','user')),
+  role        text not null check (role in ('superadmin','admin','user')),
   email       citext,                           -- необязательное ограничение
   expires_at  timestamptz not null,             -- по умолчанию now()+5 min
   used_at     timestamptz,

@@ -16,6 +16,7 @@ import {
   consumeMfaTicket,
   createMfaTicket,
   createSession,
+  isManagerRole,
   isMfaRequired,
   requireUser,
   revokeSession,
@@ -75,6 +76,8 @@ export function userJson(row: {
   first_name?: string | null;
   middle_name?: string | null;
   last_name?: string | null;
+  parent_id?: string | null;
+  parent_email?: string | null;
   created_at?: Date;
   last_login_at?: Date | null;
   archived_at?: Date | null;
@@ -88,6 +91,8 @@ export function userJson(row: {
     first_name: row.first_name ?? null,
     middle_name: row.middle_name ?? null,
     last_name: row.last_name ?? null,
+    parent_id: row.parent_id ?? null,
+    parent_email: row.parent_email ?? null,
     created_at: row.created_at?.toISOString(),
     last_login_at: row.last_login_at?.toISOString() ?? null,
     archived_at: row.archived_at?.toISOString() ?? null,
@@ -108,7 +113,7 @@ export async function registerAuthRoutes(app: FastifyInstance, ctx: RouteContext
         id: string;
         email: string;
         password_hash: string;
-        role: 'superadmin' | 'user';
+        role: 'superadmin' | 'admin' | 'user';
         status: string;
         totp_enabled: boolean;
         totp_secret_enc: string | null;
@@ -253,7 +258,7 @@ export async function registerAuthRoutes(app: FastifyInstance, ctx: RouteContext
       const userResult = await pool.query<{
         id: string;
         email: string;
-        role: 'superadmin' | 'user';
+        role: 'superadmin' | 'admin' | 'user';
         status: string;
         totp_enabled: boolean;
         totp_secret_enc: string | null;
@@ -351,7 +356,7 @@ export async function registerAuthRoutes(app: FastifyInstance, ctx: RouteContext
       let user: {
         id: string;
         email: string;
-        role: 'superadmin' | 'user';
+        role: 'superadmin' | 'admin' | 'user';
         status: string;
         totp_enabled: boolean;
       };
@@ -370,13 +375,15 @@ export async function registerAuthRoutes(app: FastifyInstance, ctx: RouteContext
 
         const inviteResult = await client.query<{
           id: string;
-          role: 'superadmin' | 'user';
+          role: 'superadmin' | 'admin' | 'user';
           email: string | null;
           expires_at: Date;
           used_at: Date | null;
-        }>('select id, role, email, expires_at, used_at from invites where token_hash = $1 for update', [
-          sha256Hex(body.token),
-        ]);
+          created_by: string;
+        }>(
+          'select id, role, email, expires_at, used_at, created_by from invites where token_hash = $1 for update',
+          [sha256Hex(body.token)],
+        );
         const invite = inviteResult.rows[0];
         if (!invite || invite.used_at || invite.expires_at.getTime() <= Date.now()) {
           throw badRequest('invalid_invite', 'Приглашение недействительно или истекло');
@@ -390,17 +397,24 @@ export async function registerAuthRoutes(app: FastifyInstance, ctx: RouteContext
 
         const id = uuidv7();
         const passwordHash = await hashPassword(body.password);
+        // Пользователь, приглашённый администратором, остаётся в его ветке.
+        // Приглашения от суперадминистратора создают учётные записи верхнего уровня.
+        const inviter = await client.query<{ role: string }>(
+          'select role from users where id = $1',
+          [invite.created_by],
+        );
+        const parentId = inviter.rows[0]?.role === 'admin' ? invite.created_by : null;
         const created = await client.query<{
           id: string;
           email: string;
-          role: 'superadmin' | 'user';
+          role: 'superadmin' | 'admin' | 'user';
           status: string;
           totp_enabled: boolean;
         }>(
-          `insert into users (id, email, password_hash, role, status)
-           values ($1,$2,$3,$4,'active')
-           returning id, email, role, status, totp_enabled`,
-          [id, body.email, passwordHash, invite.role],
+          `insert into users (id, email, password_hash, role, status, parent_id)
+           values ($1,$2,$3,$4,'active',$5)
+           returning id, email, role, status, totp_enabled, parent_id`,
+          [id, body.email, passwordHash, invite.role, parentId],
         );
         user = created.rows[0]!;
 
@@ -485,7 +499,7 @@ export async function registerAuthRoutes(app: FastifyInstance, ctx: RouteContext
       const passwordHash = await hashPassword(body.password);
 
       const client = await pool.connect();
-      let user: { id: string; email: string; role: 'superadmin' | 'user' };
+      let user: { id: string; email: string; role: 'superadmin' | 'admin' | 'user' };
       let resetMfa = false;
       try {
         await client.query('begin');
@@ -496,7 +510,7 @@ export async function registerAuthRoutes(app: FastifyInstance, ctx: RouteContext
           used_at: Date | null;
           reset_mfa: boolean;
           email: string;
-          role: 'superadmin' | 'user';
+          role: 'superadmin' | 'admin' | 'user';
         }>(
           `select pr.id, pr.user_id, pr.expires_at, pr.used_at, pr.reset_mfa, u.email, u.role
              from password_resets pr
@@ -588,7 +602,7 @@ export async function registerAuthRoutes(app: FastifyInstance, ctx: RouteContext
       const result = await pool.query<{
         id: string;
         email: string;
-        role: 'superadmin' | 'user';
+        role: 'superadmin' | 'admin' | 'user';
         status: string;
         archived_at: Date | null;
         totp_enabled: boolean;
@@ -714,7 +728,8 @@ export async function registerAuthRoutes(app: FastifyInstance, ctx: RouteContext
         mfa_passed: auth.mfaPassed,
         permissions: {
           is_superadmin: auth.role === 'superadmin',
-          can_manage_users: auth.role === 'superadmin',
+          can_manage_routers: isManagerRole(auth.role),
+          can_manage_users: isManagerRole(auth.role),
           can_manage_settings: auth.role === 'superadmin',
           can_rollout: auth.role === 'superadmin',
         },

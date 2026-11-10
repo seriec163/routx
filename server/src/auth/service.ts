@@ -12,7 +12,7 @@ export const MFA_TICKET_TTL_SECONDS = 300;
 export interface AuthUser {
   id: string;
   email: string;
-  role: 'superadmin' | 'user';
+  role: Role;
   totpEnabled: boolean;
   mfaPassed: boolean;
   sessionId: string;
@@ -21,8 +21,28 @@ export interface AuthUser {
   lastName?: string | null;
 }
 
-export function isMfaRequired(settings: PlatformSettings, role: 'superadmin' | 'user'): boolean {
-  return settings.mfaPolicy === 'all' || (settings.mfaPolicy === 'admins' && role === 'superadmin');
+export type Role = 'superadmin' | 'admin' | 'user';
+
+export function isManagerRole(role: Role): boolean {
+  return role === 'superadmin' || role === 'admin';
+}
+
+/**
+ * Может ли актор управлять указанным пользователем. Суперадминистратор — всех,
+ * администратор — только пользователей своей ветки (parent_id = его id).
+ */
+export function canManageBranchUser(
+  actorRole: Role,
+  actorId: string,
+  target: { role: string; parent_id: string | null },
+): boolean {
+  if (actorRole === 'superadmin') return true;
+  if (actorRole !== 'admin') return false;
+  return target.role === 'user' && target.parent_id === actorId;
+}
+
+export function isMfaRequired(settings: PlatformSettings, role: Role): boolean {
+  return settings.mfaPolicy === 'all' || (settings.mfaPolicy === 'admins' && isManagerRole(role));
 }
 
 export function cookieOptions(config: { secure: boolean; days: number }) {
@@ -102,7 +122,7 @@ export async function resolveSession(
     mfa_passed: boolean;
     user_id: string;
     email: string;
-    role: 'superadmin' | 'user';
+    role: Role;
     totp_enabled: boolean;
     mobile_device_id: string | null;
   }>(
@@ -235,6 +255,16 @@ export function requireUser(request: FastifyRequest): NonNullable<FastifyRequest
 export function requireSuperadmin(request: FastifyRequest): NonNullable<FastifyRequest['auth']> {
   const auth = requireUser(request);
   if (auth.role !== 'superadmin') throw forbidden('Действие доступно только суперадминистратору');
+  return auth;
+}
+
+/**
+ * Управляющий уровень: суперадминистратор или администратор. Конкретные
+ * маршруты дополнительно проверяют владение роутером и ветку пользователей.
+ */
+export function requireManager(request: FastifyRequest): NonNullable<FastifyRequest['auth']> {
+  const auth = requireUser(request);
+  if (!isManagerRole(auth.role)) throw forbidden('Действие доступно администратору');
   return auth;
 }
 

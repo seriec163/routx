@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { Link } from './components/link';
 import { Button, Empty, ErrorBanner, Spinner, StatusBadge, ToastProvider, useToast } from './components/ui';
 import { api, errorMessage, subscribeActivity } from './lib/api';
-import { formatRelative, SEVERITY } from './lib/format';
+import { formatRelative, roleLabel, SEVERITY } from './lib/format';
 import { useRoute, navigate } from './lib/router';
 import type { NotificationRow } from './lib/types';
 import { useApi } from './lib/useApi';
@@ -31,7 +31,7 @@ import { useNotificationToasts } from './lib/notifications';
 interface NavItem {
   to: string;
   label: string;
-  admin?: boolean;
+  access?: 'manager' | 'superadmin';
   exact?: boolean;
 }
 
@@ -62,10 +62,10 @@ const NAV: Array<{ section: string; items: NavItem[] }> = [
   {
     section: 'Администрирование',
     items: [
-      { to: '/users', label: 'Пользователи', admin: true },
-      { to: '/settings', label: 'Настройки', admin: true },
-      { to: '/deploy', label: 'Развёртывание', admin: true },
-      { to: '/audit', label: 'Аудит', admin: true },
+      { to: '/users', label: 'Пользователи', access: 'manager' },
+      { to: '/settings', label: 'Настройки', access: 'superadmin' },
+      { to: '/deploy', label: 'Развёртывание', access: 'superadmin' },
+      { to: '/audit', label: 'Аудит', access: 'superadmin' },
     ],
   },
 ];
@@ -222,14 +222,18 @@ function Shell() {
   const { me, logout } = useSession();
   const route = useRoute();
   useNotificationToasts();
-  const isAdmin = me?.permissions.is_superadmin === true;
+  const canManageUsers = me?.permissions.can_manage_users === true;
+  const canManageSettings = me?.permissions.can_manage_settings === true;
   const [navOpen, setNavOpen] = useState(false);
 
   useEffect(() => {
     setNavOpen(false);
   }, [route.path]);
 
-  const page = useMemo(() => renderRoute(route.segments, isAdmin), [route.segments, isAdmin]);
+  const page = useMemo(
+    () => renderRoute(route.segments, canManageUsers, canManageSettings),
+    [route.segments, canManageUsers, canManageSettings],
+  );
   const activeTitle = useMemo(() => {
     for (const group of NAV) {
       for (const item of group.items) {
@@ -252,7 +256,11 @@ function Shell() {
 
         <nav className="nav">
           {NAV.map((group) => {
-            const items = group.items.filter((item) => !item.admin || isAdmin);
+            const items = group.items.filter((item) => {
+              if (!item.access) return true;
+              if (item.access === 'manager') return canManageUsers;
+              return canManageSettings;
+            });
             if (items.length === 0) return null;
             return (
               <div key={group.section} className="nav-group">
@@ -280,7 +288,7 @@ function Shell() {
               <span>
                 <span className="nav-email">{displayName(me?.user)}</span>
                 <span className="nav-role">
-                  {me?.user.role === 'superadmin' ? 'Суперадминистратор' : 'Пользователь'}
+                  {roleLabel(me?.user.role)}
                 </span>
               </span>
             </span>
@@ -335,7 +343,7 @@ function RedirectTo({ to }: { to: string }) {
   );
 }
 
-function renderRoute(segments: string[], isAdmin: boolean) {
+function renderRoute(segments: string[], canManageUsers: boolean, canManageSettings: boolean) {
   const [first, second] = segments;
 
   if (!first) return <DashboardPage />;
@@ -364,13 +372,13 @@ function renderRoute(segments: string[], isAdmin: boolean) {
     case 'account':
       return <AccountPage />;
     case 'users':
-      return isAdmin ? <UsersPage /> : <AdminOnly />;
+      return canManageUsers ? <UsersPage /> : <ManagerOnly />;
     case 'settings':
-      return isAdmin ? <SettingsPage /> : <AdminOnly />;
+      return canManageSettings ? <SettingsPage /> : <SuperadminOnly />;
     case 'deploy':
-      return isAdmin ? <DeployPage /> : <AdminOnly />;
+      return canManageSettings ? <DeployPage /> : <SuperadminOnly />;
     case 'audit':
-      return isAdmin ? <AuditPage /> : <AdminOnly />;
+      return canManageSettings ? <AuditPage /> : <SuperadminOnly />;
     default:
       return (
         <div className="page">
@@ -382,11 +390,21 @@ function renderRoute(segments: string[], isAdmin: boolean) {
   }
 }
 
-function AdminOnly() {
+function SuperadminOnly() {
   return (
     <div className="page">
       <Empty>
         Раздел доступен только суперадминистратору. <Link to="/">На панель</Link>.
+      </Empty>
+    </div>
+  );
+}
+
+function ManagerOnly() {
+  return (
+    <div className="page">
+      <Empty>
+        Раздел доступен администратору. <Link to="/">На панель</Link>.
       </Empty>
     </div>
   );

@@ -20,7 +20,7 @@ try {
   const result = await db.pool.query<{
     id: string;
     email: string;
-    role: 'superadmin' | 'user';
+    role: 'superadmin' | 'admin' | 'user';
   }>('select id, email, role from users where email = $1', [email]);
   const user = result.rows[0];
 

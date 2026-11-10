@@ -185,7 +185,7 @@ export async function registerSingBoxRoutes(
     assertOnline(router);
     const settings = await loadSettings(pool);
 
-    if (auth.role !== 'superadmin') {
+    if (auth.role === 'user') {
       if (!settings.singbox.userInstall) {
         throw conflict('singbox_install_disabled', 'Установка sing-box пользователем отключена');
       }

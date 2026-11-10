@@ -544,7 +544,8 @@ function DnsApplyModal(props: {
 export function RouterDetailPage({ id }: { id: string }) {
   const toast = useToast();
   const { me } = useSession();
-  const isAdmin = me?.permissions.is_superadmin === true;
+  const isAdmin = me?.permissions.can_manage_routers === true;
+  const isSuperadmin = me?.permissions.is_superadmin === true;
   const [tab, setTab] = useState<TabId>('overview');
   const [selectedVariantId, setSelectedVariantId] = useState('');
 
@@ -2521,7 +2522,7 @@ export function RouterDetailPage({ id }: { id: string }) {
                   : 'Этот вариант ставится последней версией из пакетного репозитория Prokop/Forkop. Список конкретных версий для него недоступен.'
             }
             actions={
-              isAdmin && selectedVariantId === 'extended' ? (
+              isSuperadmin && selectedVariantId === 'extended' ? (
                 <Button
                   size="sm"
                   variant="ghost"

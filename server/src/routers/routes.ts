@@ -502,7 +502,20 @@ export async function registerRouterRoutes(app: FastifyInstance, ctx: RouteConte
     const params = z.object({ id: z.string().uuid() }).parse(request.params);
     const body = z.object({ owner_id: z.string().uuid() }).strict().parse(request.body);
     const router = await getRouter(pool, auth, params.id);
-    if (auth.role !== 'superadmin') throw forbidden('Передача роутера доступна только суперадминистратору');
+    if (auth.role === 'user') {
+      throw forbidden('Передача роутера доступна только администратору');
+    }
+    if (auth.role === 'admin') {
+      // Администратор передаёт свои роутеры только себе или пользователям
+      // своей ветки, чтобы не управлять чужими учётными записями.
+      const allowed = await pool.query(
+        'select 1 from users where id = $1 and (id = $2 or parent_id = $2)',
+        [body.owner_id, auth.userId],
+      );
+      if (!allowed.rows[0]) {
+        throw forbidden('Можно передать роутер только пользователю своей ветки');
+      }
+    }
 
     const settings = await loadSettings(pool);
     const target = await pool.query('select id from users where id = $1 and status = $2', [
@@ -1029,8 +1042,8 @@ export async function registerRouterRoutes(app: FastifyInstance, ctx: RouteConte
     { config: { rateLimit: { max: 3, timeWindow: '10 minutes' } } },
     async (request, reply) => {
       const auth = requireUser(request);
-      if (auth.role !== 'superadmin') {
-        throw forbidden('superadmin_required', 'Смена продукта доступна только администратору');
+      if (auth.role === 'user') {
+        throw forbidden('Смена продукта доступна только администратору');
       }
       const params = z.object({ id: z.string().uuid() }).parse(request.params);
       const body = z
@@ -1097,8 +1110,8 @@ export async function registerRouterRoutes(app: FastifyInstance, ctx: RouteConte
     { config: { rateLimit: { max: 5, timeWindow: '10 minutes' } } },
     async (request, reply) => {
       const auth = requireUser(request);
-      if (auth.role !== 'superadmin') {
-        throw forbidden('superadmin_required', 'Удаление пакетов доступно только администратору');
+      if (auth.role === 'user') {
+        throw forbidden('Удаление пакетов доступно только администратору');
       }
       const params = z.object({ id: z.string().uuid() }).parse(request.params);
       const body = z
