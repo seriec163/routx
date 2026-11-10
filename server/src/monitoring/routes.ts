@@ -6,6 +6,7 @@ import { requireUser } from '../auth/service.js';
 import { notFound } from '../lib/errors.js';
 import { enqueueJob, jobJson } from '../jobs/queue.js';
 import { assertOnline, getRouter } from '../routers/service.js';
+import { loadSettings } from '../settings.js';
 
 interface RouteContext {
   pool: Pool;
@@ -146,6 +147,90 @@ export async function registerMonitoringRoutes(
       return { job: jobJson(job) };
     },
   );
+
+  app.get('/api/v1/routers/:id/connections', async (request) => {
+    const auth = requireUser(request);
+    const params = z.object({ id: z.string().uuid() }).parse(request.params);
+    const query = z
+      .object({ hours: z.coerce.number().int().min(1).max(168).default(24) })
+      .parse(request.query);
+
+    await getRouter(pool, auth, params.id);
+
+    const settings = await loadSettings(pool);
+    // Соседние неудачные замеры считаем одним эпизодом, пока между ними
+    // не пропущено больше трёх интервалов мониторинга.
+    const gapSeconds = Math.max(180, settings.monitoring.intervalSeconds * 3);
+
+    const result = await pool.query(
+      `with samples as (
+         select ts, coalesce(detail->'failed_tag_names', '[]'::jsonb) as failed
+           from monitoring_samples
+          where router_id = $1
+            and ts > now() - ($2::int * interval '1 hour')
+            and detail ? 'failed_tag_names'
+            and reachable
+            and proxy_health is distinct from 'unknown'
+       ),
+       totals as (select count(*)::int as samples from samples),
+       tags as (
+         select distinct t.value as tag
+           from samples s
+           cross join lateral jsonb_array_elements_text(s.failed) as t(value)
+       ),
+       series as (
+         select s.ts, t.tag,
+                exists (
+                  select 1
+                    from jsonb_array_elements_text(s.failed) as f(value)
+                   where f.value = t.tag
+                ) as bad
+           from samples s
+           cross join tags t
+       ),
+       marked as (
+         select tag, ts, bad,
+                lag(bad) over (partition by tag order by ts) as prev_bad,
+                lag(ts) over (partition by tag order by ts) as prev_ts
+           from series
+       ),
+       episodes as (
+         select tag,
+                count(*) filter (
+                  where bad and (
+                    coalesce(prev_bad, false) = false
+                    or ts - prev_ts > ($3::int * interval '1 second')
+                  )
+                )::int as losses,
+                count(*) filter (where bad)::int as failed_samples,
+                max(ts) filter (where bad) as last_failure
+           from marked
+          group by tag
+       )
+       select e.tag, e.losses, e.failed_samples, t.samples as total_samples, e.last_failure
+         from episodes e cross join totals t
+        order by e.losses desc, e.failed_samples desc, e.tag
+        limit 10`,
+      [params.id, query.hours, gapSeconds],
+    );
+
+    const latest = await pool.query<{ failed: string[] | null }>(
+      `select detail->'failed_tag_names' as failed
+         from monitoring_samples
+        where router_id = $1 and detail ? 'failed_tag_names'
+        order by ts desc limit 1`,
+      [params.id],
+    );
+    const downNow = new Set(latest.rows[0]?.failed ?? []);
+
+    return {
+      hours: query.hours,
+      items: result.rows.map((row) => ({
+        ...row,
+        down_now: downNow.has(row.tag as string),
+      })),
+    };
+  });
 
   app.get('/api/v1/routers/:id/metrics', async (request) => {
     const auth = requireUser(request);

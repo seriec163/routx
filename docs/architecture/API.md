@@ -46,7 +46,7 @@
 | Назначения | `GET/PUT/DELETE /routers/{id}/templates/{template_id}` |
 | Diff/apply | `POST /routers/{id}/diff`, `GET /apply-runs/{id}`, `POST /apply-runs/{id}/confirm`, `POST /apply-runs/{id}/cancel` |
 | Задания | `GET /jobs`, `GET /jobs/{id}`, `POST /jobs/{id}/cancel` |
-| Мониторинг | `GET /routers/{id}/monitoring?from=&to=&step=`, `GET /routers/{id}/availability` |
+| Мониторинг | `GET /routers/{id}/metrics?hours=&granularity=`, `GET /routers/{id}/connections?hours=`, `GET /routers/{id}/availability` |
 | Диагностика | `POST /routers/{id}/diagnostics` (`kind=quick|full`), `GET /diagnostics/{id}`, `GET /diagnostics?batch_id=` |
 | sing-box | `GET /sing-box/versions`, `POST /sing-box/rollouts`, `POST /sing-box/rollouts/{id}/approve`, `POST /sing-box/rollouts/{id}/pause`, `POST /routers/{id}/sing-box/install` |
 | Аудит | `GET /audit?actor=&router=&action=&from=&to=` (superadmin) |

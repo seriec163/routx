@@ -158,7 +158,7 @@ try {
       `--info version:${version}-r0`,
       '--info "description:RoutX agent for OpenWrt"',
       '--info arch:noarch',
-      '--info license:GPL-2.0',
+      '--info license:Apache-2.0',
       '--info origin:routx-agent',
       '--info maintainer:routx',
       '--info "depends:ucode curl"',

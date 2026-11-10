@@ -516,6 +516,20 @@ export interface MetricsResponse {
   items: Array<Record<string, unknown>>;
 }
 
+export interface ConnectionLossItem {
+  tag: string;
+  losses: number;
+  failed_samples: number;
+  total_samples: number;
+  last_failure: string | null;
+  down_now: boolean;
+}
+
+export interface ConnectionsResponse {
+  hours: number;
+  items: ConnectionLossItem[];
+}
+
 export interface DiagnosticReportSummary {
   id: string;
   router_id: string;

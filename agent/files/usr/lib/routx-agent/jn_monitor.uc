@@ -200,6 +200,9 @@ function probe_proxy(product, force) {
 		latency_ms: null,
 		failed_tags: null,
 		total_tags: null,
+		group: "",
+		active_tag: "",
+		failed_tag_names: [],
 		detail: ""
 	};
 
@@ -223,6 +226,8 @@ function probe_proxy(product, force) {
 		result.total_tags = 1;
 		result.failed_tags = delay == null ? 1 : 0;
 		result.latency_ms = delay;
+		result.active_tag = single;
+		result.failed_tag_names = delay == null ? [ single ] : [];
 		result.proxy_health = delay == null ? "dead" : "healthy";
 		result.detail = "подключение " + group_display(product, single) +
 			(delay == null ? ": не отвечает" : ": " + delay + " мс");
@@ -232,6 +237,8 @@ function probe_proxy(product, force) {
 
 	let info = proxies.value.proxies[group];
 	let members = type(info) == "object" && type(info.all) == "array" ? info.all : [];
+	result.group = group;
+	result.active_tag = type(info) == "object" ? util.as_string(info.now) : "";
 	if (length(members) == 0) {
 		result.detail = "группа " + display_group + " пуста";
 		return result;
@@ -242,6 +249,7 @@ function probe_proxy(product, force) {
 		result.proxy_health = "dead";
 		result.total_tags = length(members);
 		result.failed_tags = length(members);
+		result.failed_tag_names = slice(members, 0, 50);
 		result.detail = "группа " + display_group + ": ни один тег не ответил";
 		return result;
 	}
@@ -268,18 +276,22 @@ function probe_proxy(product, force) {
 
 	result.total_tags = length(members);
 	result.failed_tags = failed;
+	result.group = group;
 	// Показываем задержку активного сервера, а не медиану всех тегов.
 	let active_tag = type(info) == "object" ? util.as_string(info.now) : "";
 	let active_delay = active_tag != "" ? delays[active_tag] : null;
+	result.active_tag = active_tag;
+	result.failed_tag_names = slice(failed_names, 0, 50);
 	result.latency_ms = measured(active_delay) ? active_delay : median(latencies);
 	result.detail = "группа " + display_group + ": " + alive + "/" + length(members) + " живых";
 	if (failed > 0 && length(failed_names) <= 3)
 		result.detail = result.detail + " (" + join(", ", failed_names) + ")";
 
+	// Группа с живыми резервными соединениями остаётся рабочей: переключение
+	// на другой активный сервер — не деградация. Упавшие теги учитываются
+	// отдельно в статистике нестабильных соединений.
 	if (alive == 0)
 		result.proxy_health = "dead";
-	else if (failed > 0)
-		result.proxy_health = "degraded";
 	else
 		result.proxy_health = "healthy";
 
@@ -648,6 +660,9 @@ function probe(product, force) {
 		latency_ms: null,
 		failed_tags: null,
 		total_tags: null,
+		group: "",
+		active_tag: "",
+		failed_tag_names: [],
 		direct_ip: "",
 		vpn_ip: "",
 		detail: ""
@@ -735,6 +750,9 @@ function probe(product, force) {
 	result.latency_ms = proxy.latency_ms;
 	result.failed_tags = proxy.failed_tags;
 	result.total_tags = proxy.total_tags;
+	result.group = proxy.group;
+	result.active_tag = proxy.active_tag;
+	result.failed_tag_names = proxy.failed_tag_names;
 	result.detail = proxy.detail;
 
 	let ips = current_ips(product, force);

@@ -44,6 +44,7 @@ import type {
   BindingToken,
   CatalogSubscription,
   ConnectionSecretPreview,
+  ConnectionsResponse,
   CredentialInfo,
   DiagnosticReportSummary,
   DiffItem,
@@ -571,6 +572,9 @@ export function RouterDetailPage({ id }: { id: string }) {
   const [hours, setHours] = useState(24);
   const metrics = useApi<MetricsResponse>(
     tab === 'metrics' ? `/api/v1/routers/${id}/metrics?hours=${hours}&granularity=raw` : null,
+  );
+  const connectionLosses = useApi<ConnectionsResponse>(
+    tab === 'metrics' ? `/api/v1/routers/${id}/connections?hours=${hours}` : null,
   );
 
   const [diffFlow, setDiffFlow] = useState<{ templateId: string; revision: number; name: string } | null>(null);
@@ -2257,11 +2261,81 @@ export function RouterDetailPage({ id }: { id: string }) {
             {latest ? (
               <p className="muted-text small">
                 Последний замер: {formatDate(latest.ts)} · прокси {proxyHealth(latest.proxy_health)} ·
-                healthy-теги: {latest.total_tags !== null && latest.failed_tags !== null
+                живых соединений: {latest.total_tags !== null && latest.failed_tags !== null
                   ? `${latest.total_tags - latest.failed_tags}/${latest.total_tags}`
                   : '—'}
               </p>
             ) : null}
+          </Panel>
+
+          <Panel
+            title="Нестабильные соединения"
+            subtitle="Соединения, которые чаще всего не отвечали. Группа остаётся рабочей, если есть живые резервные соединения."
+            actions={
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={() => void connectionLosses.reload()}
+                busy={connectionLosses.loading}
+              >
+                Обновить
+              </Button>
+            }
+          >
+            {connectionLosses.error ? (
+              <ErrorBanner
+                message={connectionLosses.error}
+                onRetry={() => void connectionLosses.reload()}
+              />
+            ) : null}
+            {connectionLosses.loading && !connectionLosses.data ? (
+              <Spinner />
+            ) : (connectionLosses.data?.items.length ?? 0) === 0 ? (
+              <Empty>За выбранный период потерь связи не было.</Empty>
+            ) : (
+              <div className="table-wrap">
+                <table className="table">
+                  <thead>
+                    <tr>
+                      <th>Соединение</th>
+                      <th>Потерь связи</th>
+                      <th>Неудачных проверок</th>
+                      <th>Последняя потеря</th>
+                      <th>Сейчас</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {connectionLosses.data!.items.map((item) => (
+                      <tr key={item.tag}>
+                        <td>
+                          <code>{item.tag}</code>
+                        </td>
+                        <td>
+                          <strong>{item.losses}</strong>
+                        </td>
+                        <td className="muted-text small">
+                          {item.failed_samples} из {item.total_samples}
+                        </td>
+                        <td className="muted-text small">
+                          {item.last_failure ? formatRelative(item.last_failure) : '—'}
+                        </td>
+                        <td>
+                          {item.down_now ? (
+                            <StatusBadge status="warning" label="не отвечает" />
+                          ) : (
+                            <StatusBadge status="success" label="отвечает" />
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+            <p className="muted-text small">
+              Потерей считается эпизод, когда соединение перестало отвечать и затем
+              восстановилось. Показаны 10 самых нестабильных соединений за выбранный период.
+            </p>
           </Panel>
         </div>
       ) : null}

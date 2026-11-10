@@ -909,23 +909,22 @@ export async function applyRun(ctx: HandlerContext, job: JobRow): Promise<Json> 
 
 function proxyHealthOf(sample: Json, settings: PlatformSettings): 'healthy' | 'degraded' | 'dead' | 'unknown' {
   const explicit = asString(sample.proxy_health);
-  if (explicit === 'healthy' || explicit === 'degraded' || explicit === 'dead') {
-    const explicitLatency = asNumber(sample.latency_ms);
-    if (
-      explicit === 'healthy' &&
-      explicitLatency !== null &&
-      explicitLatency > settings.monitoring.latencyDegradedMs
-    ) {
-      return 'degraded';
-    }
-    return explicit;
-  }
+  const explicitLatency = asNumber(sample.latency_ms);
   const failed = asNumber(sample.failed_tags) ?? 0;
   const total = asNumber(sample.total_tags) ?? 0;
-  const latency = asNumber(sample.latency_ms);
+  const slow = explicitLatency !== null && explicitLatency > settings.monitoring.latencyDegradedMs;
+
+  if (explicit === 'healthy' || explicit === 'degraded' || explicit === 'dead') {
+    if (explicit === 'dead') return 'dead';
+    if (slow) return 'degraded';
+    // Пока в группе есть живые соединения, она работает: переключение на
+    // резервный сервер не считается деградацией. Упавшие теги видны в
+    // статистике нестабильных соединений, а не в статусе группы.
+    if (explicit === 'degraded' && total > 0 && failed < total) return 'healthy';
+    return explicit;
+  }
   if (total > 0 && failed >= total) return 'dead';
-  if (failed >= 1) return 'degraded';
-  if (latency !== null && latency > settings.monitoring.latencyDegradedMs) return 'degraded';
+  if (slow) return 'degraded';
   return total > 0 ? 'healthy' : 'unknown';
 }
 
@@ -989,6 +988,29 @@ async function notifiedInProxyEpisode(
   return (result.rowCount ?? 0) > 0;
 }
 
+/**
+ * Структурированные детали замера: текст для человека, группа, активное
+ * соединение и список не ответивших тегов. По списку строится статистика
+ * нестабильных соединений за 24 часа.
+ */
+function probeDetailOf(sample: Json): Json {
+  const out: Json = {};
+  const detail = asString(sample.detail);
+  if (detail) out.detail = detail;
+  const group = asString(sample.group);
+  if (group) out.group = group;
+  const activeTag = asString(sample.active_tag);
+  if (activeTag) out.active_tag = activeTag;
+  const failedTagNames = Array.isArray(sample.failed_tag_names)
+    ? sample.failed_tag_names
+        .map((value) => asString(value))
+        .filter((value): value is string => value !== null)
+        .slice(0, 50)
+    : null;
+  if (failedTagNames !== null) out.failed_tag_names = failedTagNames;
+  return out;
+}
+
 export async function monitorProbe(ctx: HandlerContext, job: JobRow): Promise<Json> {
   const routerId = requireRouter(job);
   const raw = await runCommand(
@@ -1025,7 +1047,7 @@ export async function monitorProbe(ctx: HandlerContext, job: JobRow): Promise<Js
       total,
       asString(raw.sing_box_version),
       asString(raw.agent_version),
-      JSON.stringify(asString(raw.detail ?? null) ? { detail: raw.detail } : {}),
+      JSON.stringify(probeDetailOf(raw)),
       directIp,
       vpnIp,
     ],
