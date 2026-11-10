@@ -9,7 +9,7 @@
   <img alt="OpenWrt" src="https://img.shields.io/badge/OpenWrt-24.10%20%7C%2025.12-00B5E2?logo=openwrt&logoColor=white">
   <img alt="Agent" src="https://img.shields.io/badge/agent-1.5.45-3ddc9a">
   <img alt="Schema" src="https://img.shields.io/badge/schema-27-8b5cf6">
-  <img alt="Tests" src="https://img.shields.io/badge/tests-84%20passed-3ddc9a">
+  <img alt="Tests" src="https://img.shields.io/badge/tests-90%20passed-3ddc9a">
   <img alt="Install" src="https://img.shields.io/badge/install-one--command-3ddc9a">
   <img alt="License" src="https://img.shields.io/badge/license-Apache--2.0-3ddc9a">
 </p>

@@ -907,7 +907,7 @@ export async function applyRun(ctx: HandlerContext, job: JobRow): Promise<Json> 
   }
 }
 
-function proxyHealthOf(sample: Json, settings: PlatformSettings): 'healthy' | 'degraded' | 'dead' | 'unknown' {
+export function proxyHealthOf(sample: Json, settings: PlatformSettings): 'healthy' | 'degraded' | 'dead' | 'unknown' {
   const explicit = asString(sample.proxy_health);
   const explicitLatency = asNumber(sample.latency_ms);
   const failed = asNumber(sample.failed_tags) ?? 0;
@@ -920,7 +920,9 @@ function proxyHealthOf(sample: Json, settings: PlatformSettings): 'healthy' | 'd
     // Пока в группе есть живые соединения, она работает: переключение на
     // резервный сервер не считается деградацией. Упавшие теги видны в
     // статистике нестабильных соединений, а не в статусе группы.
-    if (explicit === 'degraded' && total > 0 && failed < total) return 'healthy';
+    if (explicit === 'degraded' && total > 0) {
+      return failed >= total ? 'dead' : 'healthy';
+    }
     return explicit;
   }
   if (total > 0 && failed >= total) return 'dead';
