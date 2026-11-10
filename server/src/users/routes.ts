@@ -2,9 +2,18 @@ import type { FastifyInstance, FastifyRequest } from 'fastify';
 import type { Pool } from 'pg';
 import { z } from 'zod';
 import { audit } from '../audit.js';
-import { canManageBranchUser, requireManager } from '../auth/service.js';
+import {
+  IMPERSONATION_COOKIE,
+  SESSION_COOKIE,
+  canManageBranchUser,
+  cookieOptions,
+  createSession,
+  requireManager,
+  requireSuperadmin,
+  setSessionCookies,
+} from '../auth/service.js';
 import { randomToken, sha256Hex } from '../lib/crypto.js';
-import { badRequest, conflict, forbidden, notFound } from '../lib/errors.js';
+import { badRequest, conflict, forbidden, notFound, unauthorized } from '../lib/errors.js';
 import { uuidv7 } from '../lib/ids.js';
 import { loadSettings } from '../settings.js';
 import { userJson } from '../auth/routes.js';
@@ -12,6 +21,7 @@ import { userJson } from '../auth/routes.js';
 interface RouteContext {
   pool: Pool;
   publicUrl: string;
+  secureCookie: boolean;
 }
 
 type Auth = NonNullable<FastifyRequest['auth']>;
@@ -91,6 +101,77 @@ export async function registerUserRoutes(app: FastifyInstance, ctx: RouteContext
     }
     return { user: userJson(user) };
   });
+
+  app.post(
+    '/api/v1/users/:id/impersonate',
+    { config: { rateLimit: { max: 20, timeWindow: '1 minute' } } },
+    async (request, reply) => {
+      const auth = requireSuperadmin(request);
+      if (auth.impersonatedBy) {
+        throw forbidden('Сначала вернитесь к своей учётной записи');
+      }
+      const params = z.object({ id: z.string().uuid() }).parse(request.params);
+      const result = await pool.query<{
+        id: string;
+        email: string;
+        role: string;
+        status: string;
+        archived_at: Date | null;
+      }>('select id, email, role, status, archived_at from users where id = $1', [params.id]);
+      const target = result.rows[0];
+      if (!target) throw notFound('Пользователь не найден');
+      if (target.id === auth.userId) {
+        throw badRequest('self_impersonation', 'Нельзя войти под собственной учётной записью');
+      }
+      if (target.archived_at || target.status !== 'active') {
+        throw conflict(
+          'user_inactive',
+          'Пользователь заблокирован или в архиве. Сначала активируйте его.',
+        );
+      }
+
+      const adminToken = request.cookies[SESSION_COOKIE];
+      if (!adminToken) throw unauthorized();
+
+      const settings = await loadSettings(pool);
+      // Вход под пользователем ограничен двумя часами; вернуться можно
+      // кнопкой в интерфейсе, пока жива исходная сессия суперадминистратора.
+      const days = Math.min(settings.sessionDays, 2 / 24);
+      const session = await createSession(pool, {
+        userId: target.id,
+        mfaPassed: true,
+        ip: request.ip,
+        userAgent: request.headers['user-agent'] ?? null,
+        days,
+        impersonatedBy: auth.userId,
+      });
+
+      reply.setCookie(
+        IMPERSONATION_COOKIE,
+        adminToken,
+        cookieOptions({ secure: ctx.secureCookie, days }),
+      );
+      setSessionCookies(reply, session, { secure: ctx.secureCookie, days });
+
+      await audit(pool, {
+        actorId: auth.userId,
+        actorRole: auth.role,
+        action: 'user.impersonate',
+        targetType: 'user',
+        targetId: target.id,
+        result: 'ok',
+        ip: request.ip,
+        userAgent: request.headers['user-agent'],
+        metadata: { email: target.email, role: target.role },
+      });
+
+      return {
+        ok: true,
+        user: { id: target.id, email: target.email, role: target.role },
+        expires_at: session.expiresAt.toISOString(),
+      };
+    },
+  );
 
   app.patch('/api/v1/users/:id', async (request) => {
     const auth = requireManager(request);

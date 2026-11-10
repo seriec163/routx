@@ -317,6 +317,18 @@ h3 {
   flex-direction: column;
 }
 
+.impersonation-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 26px;
+  background: var(--warn-soft);
+  border-bottom: 1px solid rgba(240, 195, 107, 0.35);
+  color: var(--warn);
+  font-size: 14px;
+}
+
 .app-topbar {
   position: sticky;
   top: 0;

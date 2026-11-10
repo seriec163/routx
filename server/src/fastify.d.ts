@@ -7,6 +7,8 @@ declare module 'fastify' {
       email: string;
       role: 'superadmin' | 'admin' | 'user';
       mfaPassed: boolean;
+      impersonatedBy?: string | null;
+      impersonatorEmail?: string | null;
     };
     agent?: {
       routerId: string;

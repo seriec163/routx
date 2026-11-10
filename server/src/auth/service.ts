@@ -7,6 +7,7 @@ import type { PlatformSettings } from '../settings.js';
 
 export const SESSION_COOKIE = 'rc_session';
 export const CSRF_COOKIE = 'rc_csrf';
+export const IMPERSONATION_COOKIE = 'rc_admin_session';
 export const MFA_TICKET_TTL_SECONDS = 300;
 
 export interface AuthUser {
@@ -19,6 +20,8 @@ export interface AuthUser {
   firstName?: string | null;
   middleName?: string | null;
   lastName?: string | null;
+  impersonatedBy?: string | null;
+  impersonatorEmail?: string | null;
 }
 
 export type Role = 'superadmin' | 'admin' | 'user';
@@ -70,6 +73,7 @@ export async function createSession(
     ip: string | null;
     userAgent: string | null;
     days: number;
+    impersonatedBy?: string | null;
   },
 ): Promise<CreatedSession> {
   const id = uuidv7();
@@ -78,8 +82,8 @@ export async function createSession(
   const expiresAt = new Date(Date.now() + input.days * 24 * 60 * 60 * 1000);
 
   await pool.query(
-    `insert into sessions (id, user_id, token_hash, csrf_hash, ip, user_agent, mfa_passed, expires_at)
-     values ($1,$2,$3,$4,$5,$6,$7,$8)`,
+    `insert into sessions (id, user_id, token_hash, csrf_hash, ip, user_agent, mfa_passed, expires_at, impersonated_by)
+     values ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
     [
       id,
       input.userId,
@@ -89,6 +93,7 @@ export async function createSession(
       input.userAgent?.slice(0, 300) ?? null,
       input.mfaPassed,
       expiresAt,
+      input.impersonatedBy ?? null,
     ],
   );
 
@@ -110,6 +115,7 @@ export function setSessionCookies(
 export function clearSessionCookies(reply: FastifyReply): void {
   reply.clearCookie(SESSION_COOKIE, { path: '/' });
   reply.clearCookie(CSRF_COOKIE, { path: '/' });
+  reply.clearCookie(IMPERSONATION_COOKIE, { path: '/' });
 }
 
 export async function resolveSession(
@@ -125,11 +131,15 @@ export async function resolveSession(
     role: Role;
     totp_enabled: boolean;
     mobile_device_id: string | null;
+    impersonated_by: string | null;
+    impersonator_email: string | null;
   }>(
     `select s.id as session_id, s.csrf_hash, s.mfa_passed, s.mobile_device_id,
+            s.impersonated_by, imp.email as impersonator_email,
             u.id as user_id, u.email, u.role, u.totp_enabled
        from sessions s
        join users u on u.id = s.user_id
+       left join users imp on imp.id = s.impersonated_by
       where s.token_hash = $1
         and s.revoked_at is null
         and s.expires_at > now()
@@ -166,7 +176,22 @@ export async function resolveSession(
     mfaPassed: row.mfa_passed,
     sessionId: row.session_id,
     csrfHash: row.csrf_hash,
+    impersonatedBy: row.impersonated_by,
+    impersonatorEmail: row.impersonator_email,
   };
+}
+
+/**
+ * Новый CSRF-токен для существующей сессии. Нужен при возврате из режима
+ * «войти как пользователь»: старый CSRF-cookie был заменён на пользовательский.
+ */
+export async function rotateSessionCsrf(pool: Pool, sessionId: string): Promise<string> {
+  const csrf = randomToken(24);
+  await pool.query('update sessions set csrf_hash = $2 where id = $1 and revoked_at is null', [
+    sessionId,
+    sha256(csrf),
+  ]);
+  return csrf;
 }
 
 interface GuardOptions {
@@ -209,6 +234,8 @@ export function registerGuards(app: FastifyInstance, pool: Pool, options: GuardO
       email: session.email,
       role: session.role,
       mfaPassed: session.mfaPassed,
+      impersonatedBy: session.impersonatedBy ?? null,
+      impersonatorEmail: session.impersonatorEmail ?? null,
     };
 
     if (!session.mfaPassed && !config?.allowPendingMfa) {

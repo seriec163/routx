@@ -29,6 +29,12 @@ describe('маршруты приложения', () => {
     });
 
     expect(app).toBeTruthy();
+    expect(
+      app.hasRoute({ method: 'POST', url: '/api/v1/users/:id/impersonate' }),
+    ).toBe(true);
+    expect(
+      app.hasRoute({ method: 'POST', url: '/api/v1/auth/impersonation/stop' }),
+    ).toBe(true);
     await app.close();
   });
 });

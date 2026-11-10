@@ -19,6 +19,7 @@ import { api, errorMessage } from '../lib/api';
 import { copyText } from '../lib/clipboard';
 import { formatDate, formatRelative, roleLabel } from '../lib/format';
 import type { InviteRow, Role, UserRow } from '../lib/types';
+import { navigate } from '../lib/router';
 import { useApi } from '../lib/useApi';
 import { useSession } from '../session';
 
@@ -40,6 +41,7 @@ export function UsersPage() {
   const [role, setRole] = useState<Role>('user');
   const [email, setEmail] = useState('');
   const [busy, setBusy] = useState(false);
+  const [impersonatingId, setImpersonatingId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [createdInvite, setCreatedInvite] = useState<{
     url: string;
@@ -189,6 +191,20 @@ export function UsersPage() {
       toast.error(errorMessage(caught));
     } finally {
       setBusy(false);
+    }
+  }
+
+  async function impersonate(user: UserRow): Promise<void> {
+    setImpersonatingId(user.id);
+    try {
+      await api(`/api/v1/users/${user.id}/impersonate`, { method: 'POST' });
+      await reloadSession();
+      toast.success(`Вы вошли как ${user.email}`);
+      navigate('/routers');
+    } catch (caught) {
+      toast.error(errorMessage(caught));
+    } finally {
+      setImpersonatingId(null);
     }
   }
 
@@ -352,6 +368,19 @@ export function UsersPage() {
                     <td>{user.router_count ?? '—'}</td>
                     <td className="muted-text small">{formatRelative(user.last_login_at)}</td>
                     <td className="row-actions">
+                      {isSuperadmin &&
+                      !user.archived_at &&
+                      user.status === 'active' &&
+                      user.id !== me?.user.id ? (
+                        <Button
+                          size="sm"
+                          variant="subtle"
+                          busy={impersonatingId === user.id}
+                          onClick={() => void impersonate(user)}
+                        >
+                          Войти
+                        </Button>
+                      ) : null}
                       {user.archived_at ? (
                         <>
                           <Button

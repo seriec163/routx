@@ -8,8 +8,8 @@
   <img alt="PostgreSQL" src="https://img.shields.io/badge/PostgreSQL-16-4169E1?logo=postgresql&logoColor=white">
   <img alt="OpenWrt" src="https://img.shields.io/badge/OpenWrt-24.10%20%7C%2025.12-00B5E2?logo=openwrt&logoColor=white">
   <img alt="Agent" src="https://img.shields.io/badge/agent-1.5.45-3ddc9a">
-  <img alt="Schema" src="https://img.shields.io/badge/schema-28-8b5cf6">
-  <img alt="Tests" src="https://img.shields.io/badge/tests-96%20passed-3ddc9a">
+  <img alt="Schema" src="https://img.shields.io/badge/schema-29-8b5cf6">
+  <img alt="Tests" src="https://img.shields.io/badge/tests-97%20passed-3ddc9a">
   <img alt="Install" src="https://img.shields.io/badge/install-one--command-3ddc9a">
   <img alt="License" src="https://img.shields.io/badge/license-Apache--2.0-3ddc9a">
 </p>
@@ -47,7 +47,7 @@
 | 🧩 **Правила без шаблонов** | Секции, домены, IP, community lists, подписки и прямые ссылки. |
 | 📊 **Мониторинг** | Задержка, живые узлы, direct/VPN IP, история, топ нестабильных соединений и потери связи за 24 часа. |
 | 🔐 **Безопасность** | Токены агентов, CSRF, rate limit, аудит, мастер-ключ, read-only контейнер. |
-| 🛡 **Три уровня доступа** | Суперадминистратор, администратор своей ветки и пользователь. Каждый видит только свои роутеры. |
+| 🛡 **Три уровня доступа** | Суперадминистратор, администратор своей ветки и пользователь. Суперадминистратор может безопасно войти под пользователем для поддержки. |
 | 📱 **PWA** | Мобильный интерфейс, push-уведомления, QR-вход и выбор ресурсов с описаниями. |
 | 🛠 **CLI `routx`** | `install`, `update`, `status`, `logs`, `restart`, `doctor`, `uninstall`. |
 

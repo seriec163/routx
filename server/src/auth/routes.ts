@@ -11,6 +11,7 @@ import { generateTotpSecret, provisioningUri, totpStep, verifyTotp } from '../li
 import { loadSettings } from '../settings.js';
 import {
   CSRF_COOKIE,
+  IMPERSONATION_COOKIE,
   MFA_TICKET_TTL_SECONDS,
   clearSessionCookies,
   consumeMfaTicket,
@@ -19,7 +20,9 @@ import {
   isManagerRole,
   isMfaRequired,
   requireUser,
+  resolveSession,
   revokeSession,
+  rotateSessionCsrf,
   setSessionCookies,
   SESSION_COOKIE,
 } from './service.js';
@@ -724,8 +727,16 @@ export async function registerAuthRoutes(app: FastifyInstance, ctx: RouteContext
         user: userJson(user),
         csrf_token: request.cookies[CSRF_COOKIE] ?? null,
         mfa_policy: settings.mfaPolicy,
-        enrollment_required: !user.totp_enabled && isMfaRequired(settings, auth.role),
+        enrollment_required: auth.impersonatedBy
+          ? false
+          : !user.totp_enabled && isMfaRequired(settings, auth.role),
         mfa_passed: auth.mfaPassed,
+        impersonation: auth.impersonatedBy
+          ? {
+              by_id: auth.impersonatedBy,
+              by_email: auth.impersonatorEmail ?? null,
+            }
+          : null,
         permissions: {
           is_superadmin: auth.role === 'superadmin',
           can_manage_routers: isManagerRole(auth.role),
@@ -824,6 +835,13 @@ export async function registerAuthRoutes(app: FastifyInstance, ctx: RouteContext
     { config: { allowPendingMfa: true } },
     async (request, reply) => {
       const auth = requireUser(request);
+      if (auth.impersonatedBy) {
+        const adminToken = request.cookies[IMPERSONATION_COOKIE];
+        if (adminToken) {
+          const adminSession = await resolveSession(pool, adminToken);
+          if (adminSession) await revokeSession(pool, adminSession.sessionId);
+        }
+      }
       await revokeSession(pool, auth.sessionId);
       clearSessionCookies(reply);
       await audit(pool, {
@@ -834,6 +852,58 @@ export async function registerAuthRoutes(app: FastifyInstance, ctx: RouteContext
         ip: request.ip,
         userAgent: request.headers['user-agent'],
       });
+      return { ok: true };
+    },
+  );
+
+  app.post(
+    '/api/v1/auth/impersonation/stop',
+    async (request, reply) => {
+      const auth = requireUser(request);
+      if (!auth.impersonatedBy) {
+        throw forbidden('Текущая сессия не является входом под пользователем');
+      }
+      const adminToken = request.cookies[IMPERSONATION_COOKIE];
+      if (!adminToken) {
+        throw unauthorized('Сессия суперадминистратора не найдена, войдите снова');
+      }
+      const adminSession = await resolveSession(pool, adminToken);
+      if (
+        !adminSession ||
+        adminSession.role !== 'superadmin' ||
+        adminSession.id !== auth.impersonatedBy
+      ) {
+        reply.clearCookie(IMPERSONATION_COOKIE, { path: '/' });
+        throw unauthorized('Сессия суперадминистратора истекла, войдите снова');
+      }
+
+      const settings = await loadSettings(pool);
+      await revokeSession(pool, auth.sessionId);
+      const csrf = await rotateSessionCsrf(pool, adminSession.sessionId);
+      setSessionCookies(
+        reply,
+        {
+          id: adminSession.sessionId,
+          token: adminToken,
+          csrf,
+          expiresAt: new Date(Date.now() + settings.sessionDays * 24 * 60 * 60 * 1000),
+        },
+        { secure: ctx.secureCookie, days: settings.sessionDays },
+      );
+      reply.clearCookie(IMPERSONATION_COOKIE, { path: '/' });
+
+      await audit(pool, {
+        actorId: adminSession.id,
+        actorRole: 'superadmin',
+        action: 'user.impersonate_stop',
+        targetType: 'user',
+        targetId: auth.userId,
+        result: 'ok',
+        ip: request.ip,
+        userAgent: request.headers['user-agent'],
+        metadata: { impersonated_email: auth.email },
+      });
+
       return { ok: true };
     },
   );

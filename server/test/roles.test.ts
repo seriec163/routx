@@ -3,6 +3,7 @@ import {
   canManageBranchUser,
   isManagerRole,
   isMfaRequired,
+  requireSuperadmin,
 } from '../src/auth/service.js';
 import { DEFAULT_SETTINGS } from '../src/settings.js';
 
@@ -48,5 +49,23 @@ describe('уровни доступа', () => {
     expect(isMfaRequired(settings, 'superadmin')).toBe(true);
     expect(isMfaRequired(settings, 'admin')).toBe(true);
     expect(isMfaRequired(settings, 'user')).toBe(false);
+  });
+
+  it('входить под пользователем может только суперадминистратор', () => {
+    const base = {
+      sessionId: 'session',
+      userId: 'actor',
+      email: 'actor@example.com',
+      mfaPassed: true,
+    };
+    expect(() =>
+      requireSuperadmin({ auth: { ...base, role: 'admin' } } as never),
+    ).toThrow();
+    expect(() =>
+      requireSuperadmin({ auth: { ...base, role: 'user' } } as never),
+    ).toThrow();
+    expect(
+      requireSuperadmin({ auth: { ...base, role: 'superadmin' } } as never).role,
+    ).toBe('superadmin');
   });
 });

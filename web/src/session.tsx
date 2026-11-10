@@ -21,6 +21,7 @@ export interface Me {
   mfa_policy: 'all' | 'admins';
   enrollment_required: boolean;
   mfa_passed: boolean;
+  impersonation: { by_id: string; by_email: string | null } | null;
   permissions: {
     is_superadmin: boolean;
     can_manage_routers: boolean;

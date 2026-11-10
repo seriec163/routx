@@ -300,7 +300,11 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
     await registerMonitoringRoutes(app, { pool });
     await registerDiagnosticsRoutes(app, { pool });
     await registerSingBoxRoutes(app, { pool });
-    await registerUserRoutes(app, { pool, publicUrl: config.publicUrl });
+    await registerUserRoutes(app, {
+      pool,
+      publicUrl: config.publicUrl,
+      secureCookie: config.secureCookie,
+    });
     await registerSettingsRoutes(app, { pool });
     await registerAuditRoutes(app, { pool });
     await registerDeployRoutes(app, {

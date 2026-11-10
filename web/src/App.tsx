@@ -219,12 +219,28 @@ function Root() {
 }
 
 function Shell() {
-  const { me, logout } = useSession();
+  const { me, logout, reload } = useSession();
+  const toast = useToast();
   const route = useRoute();
   useNotificationToasts();
   const canManageUsers = me?.permissions.can_manage_users === true;
   const canManageSettings = me?.permissions.can_manage_settings === true;
   const [navOpen, setNavOpen] = useState(false);
+  const [stoppingImpersonation, setStoppingImpersonation] = useState(false);
+
+  async function stopImpersonation(): Promise<void> {
+    setStoppingImpersonation(true);
+    try {
+      await api('/api/v1/auth/impersonation/stop', { method: 'POST' });
+      await reload();
+      navigate('/users');
+      toast.success('Вы снова работаете как суперадминистратор');
+    } catch (caught) {
+      toast.error(errorMessage(caught));
+    } finally {
+      setStoppingImpersonation(false);
+    }
+  }
 
   useEffect(() => {
     setNavOpen(false);
@@ -300,6 +316,22 @@ function Shell() {
       </aside>
 
       <div className="app-main">
+        {me?.impersonation ? (
+          <div className="impersonation-banner">
+            <span>
+              Вы вошли как <strong>{displayName(me.user)}</strong> ({me.user.email}). Действия
+              выполняются от имени этого пользователя.
+            </span>
+            <Button
+              size="sm"
+              variant="ghost"
+              busy={stoppingImpersonation}
+              onClick={() => void stopImpersonation()}
+            >
+              Вернуться
+            </Button>
+          </div>
+        ) : null}
         <header className="app-topbar">
           <button
             type="button"
