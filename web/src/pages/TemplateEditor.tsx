@@ -389,9 +389,7 @@ export function TemplateEditorPage({ id }: { id: string }) {
         '/api/v1/routers?include_archived=false&scope=branch',
       );
       setRolloutRouters(data.items);
-      setRolloutSelected(
-        new Set(data.items.filter((router) => router.status === 'online').map((router) => router.id)),
-      );
+      setRolloutSelected(new Set());
     } catch (caught) {
       setRolloutError(errorMessage(caught));
     } finally {
@@ -1005,8 +1003,9 @@ export function TemplateEditorPage({ id }: { id: string }) {
           {rolloutStage === 'select' ? (
             <>
               <InfoBanner>
-                Выберите роутеры. Сначала панель подготовит diff по шаблону, затем вы подтвердите
-                изменения. Ничего не запишется без второго шага.
+                Выберите роутеры. Будет использована сохранённая ревизия {revision}. Сначала панель
+                подготовит diff по шаблону, затем вы подтвердите изменения. Ничего не запишется без
+                второго шага.
               </InfoBanner>
               <div className="row wrap" style={{ margin: '12px 0' }}>
                 <Button
