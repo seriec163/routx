@@ -17,6 +17,12 @@
 <h1 align="center">RoutX</h1>
 
 <p align="center">
+  <a href="https://seriec163.github.io/routx/"><b>Сайт и инструкция по установке</b></a> ·
+  <a href="https://t.me/unc1escrooge">Telegram</a> ·
+  <a href="https://github.com/seriec163/routx">GitHub</a>
+</p>
+
+<p align="center">
   Централизованная панель для роутеров OpenWrt: установка и переключение
   <b>Tachyon</b>, <b>Forkop</b>, <b>Prokop</b> и <b>Podkop</b>, подписки,
   правила маршрутизации, мониторинг и PWA.
@@ -310,6 +316,10 @@ RoutX распространяется по [Apache License 2.0](LICENSE): ко�
 документации или публикации, поставьте ссылку на этот репозиторий.
 
 ---
+
+<p align="center">
+  <sub>Идеи и пожелания: <a href="https://t.me/unc1escrooge">Telegram @unc1escrooge</a></sub>
+</p>
 
 <p align="center">
   <sub><b>Проекты:</b>

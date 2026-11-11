@@ -3,6 +3,10 @@ name: Publish container image
 on:
   push:
     branches: [main]
+    paths-ignore:
+      - 'docs/**'
+      - 'README.md'
+      - 'assets/readme/**'
     tags: ['v*']
   workflow_dispatch:
 
