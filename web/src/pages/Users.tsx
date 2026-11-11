@@ -31,6 +31,15 @@ export function UsersPage() {
     '/api/v1/users?include_suspended=true&include_archived=true',
   );
   const invites = useApi<{ items: InviteRow[] }>('/api/v1/invites');
+  const allUsers = users.data?.items ?? [];
+  const superadmins = allUsers.filter((user) => user.role === 'superadmin');
+  const directUsers = allUsers.filter((user) => user.role === 'user' && !user.parent_id);
+  const admins = allUsers.filter((user) => user.role === 'admin');
+  const adminIds = new Set(admins.map((user) => user.id));
+  const orphanedUsers = allUsers.filter(
+    (user) => user.role === 'user' && user.parent_id && !adminIds.has(user.parent_id),
+  );
+  const childrenOf = (id: string) => allUsers.filter((user) => user.parent_id === id);
 
   const [inviteOpen, setInviteOpen] = useState(false);
   const [messageOpen, setMessageOpen] = useState(false);
@@ -282,6 +291,76 @@ export function UsersPage() {
 
       {users.error ? <ErrorBanner message={users.error} onRetry={() => void users.reload()} /> : null}
 
+      {isSuperadmin ? (
+        <Panel
+          title="Ветки пользователей"
+          subtitle="Кто закреплён напрямую за суперадминистратором, а кто — за администраторами."
+        >
+          <div className="stack">
+            <div>
+              <strong>Суперадминистраторы</strong>
+              <ul className="branch-list">
+                {superadmins.length > 0 ? (
+                  superadmins.map((user) => <li key={user.id}>{user.email}</li>)
+                ) : (
+                  <li className="muted-text">нет</li>
+                )}
+              </ul>
+            </div>
+            <div>
+              <strong>Напрямую за суперадминистратором</strong>
+              <ul className="branch-list">
+                {directUsers.length > 0 ? (
+                  directUsers.map((user) => (
+                    <li key={user.id}>
+                      {user.email}
+                      {user.archived_at ? ' · архив' : user.status !== 'active' ? ' · заблокирован' : ''}
+                    </li>
+                  ))
+                ) : (
+                  <li className="muted-text">нет пользователей</li>
+                )}
+              </ul>
+            </div>
+            {admins.map((admin) => {
+              const children = childrenOf(admin.id);
+              return (
+                <div key={admin.id}>
+                  <strong>{admin.email}</strong>{' '}
+                  <span className="muted-text small">— администратор</span>
+                  <ul className="branch-list">
+                    {children.length > 0 ? (
+                      children.map((user) => (
+                        <li key={user.id}>
+                          {user.email}
+                          {user.archived_at
+                            ? ' · архив'
+                            : user.status !== 'active'
+                              ? ' · заблокирован'
+                              : ''}
+                        </li>
+                      ))
+                    ) : (
+                      <li className="muted-text">нет пользователей</li>
+                    )}
+                  </ul>
+                </div>
+              );
+            })}
+            {orphanedUsers.length > 0 ? (
+              <div>
+                <strong>Без активного администратора</strong>
+                <ul className="branch-list">
+                  {orphanedUsers.map((user) => (
+                    <li key={user.id}>{user.email}</li>
+                  ))}
+                </ul>
+              </div>
+            ) : null}
+          </div>
+        </Panel>
+      ) : null}
+
       <Panel
         title="Учётные записи"
         actions={
@@ -316,6 +395,9 @@ export function UsersPage() {
                       <button type="button" className="link" onClick={() => openNameEditor(user)}>
                         {user.email}
                       </button>
+                      {isSuperadmin && user.parent_email ? (
+                        <div className="muted-text small">↳ {user.parent_email}</div>
+                      ) : null}
                       {user.id === me?.user.id ? <span className="muted-text small"> · это вы</span> : null}
                     </td>
                     <td>

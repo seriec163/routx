@@ -13,6 +13,7 @@ import {
 import { apiDownload, apiUploadBinary, errorMessage } from '../lib/api';
 import { formatDate } from '../lib/format';
 import { useApi } from '../lib/useApi';
+import { useSession } from '../session';
 import { AgentUpdates } from './AgentUpdates';
 
 interface DeployStatus {
@@ -76,7 +77,9 @@ function sleep(ms: number): Promise<void> {
 
 export function DeployPage() {
   const toast = useToast();
-  const status = useApi<DeployStatus>('/api/v1/deploy/status');
+  const { me } = useSession();
+  const isSuperadmin = me?.permissions.is_superadmin === true;
+  const status = useApi<DeployStatus>(isSuperadmin ? '/api/v1/deploy/status' : null);
 
   const [passphrase, setPassphrase] = useState('');
   const [passphraseRepeat, setPassphraseRepeat] = useState('');
@@ -212,6 +215,18 @@ export function DeployPage() {
       setPhase('idle');
       setPhaseText('');
     }
+  }
+
+  if (!isSuperadmin) {
+    return (
+      <div className="page">
+        <PageHeader
+          title="Развёртывание"
+          subtitle="Обновление агента RoutX на ваших роутерах и роутерах пользователей вашей ветки."
+        />
+        <AgentUpdates />
+      </div>
+    );
   }
 
   if (status.error) {

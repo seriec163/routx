@@ -64,7 +64,7 @@ const NAV: Array<{ section: string; items: NavItem[] }> = [
     items: [
       { to: '/users', label: 'Пользователи', access: 'manager' },
       { to: '/settings', label: 'Настройки', access: 'superadmin' },
-      { to: '/deploy', label: 'Развёртывание', access: 'superadmin' },
+      { to: '/deploy', label: 'Развёртывание', access: 'manager' },
       { to: '/audit', label: 'Аудит', access: 'superadmin' },
     ],
   },
@@ -225,6 +225,7 @@ function Shell() {
   useNotificationToasts();
   const canManageUsers = me?.permissions.can_manage_users === true;
   const canManageSettings = me?.permissions.can_manage_settings === true;
+  const canManageRouters = me?.permissions.can_manage_routers === true;
   const [navOpen, setNavOpen] = useState(false);
   const [stoppingImpersonation, setStoppingImpersonation] = useState(false);
 
@@ -247,8 +248,8 @@ function Shell() {
   }, [route.path]);
 
   const page = useMemo(
-    () => renderRoute(route.segments, canManageUsers, canManageSettings),
-    [route.segments, canManageUsers, canManageSettings],
+    () => renderRoute(route.segments, canManageUsers, canManageSettings, canManageRouters),
+    [route.segments, canManageUsers, canManageSettings, canManageRouters],
   );
   const activeTitle = useMemo(() => {
     for (const group of NAV) {
@@ -375,7 +376,12 @@ function RedirectTo({ to }: { to: string }) {
   );
 }
 
-function renderRoute(segments: string[], canManageUsers: boolean, canManageSettings: boolean) {
+function renderRoute(
+  segments: string[],
+  canManageUsers: boolean,
+  canManageSettings: boolean,
+  canManageRouters: boolean,
+) {
   const [first, second] = segments;
 
   if (!first) return <DashboardPage />;
@@ -408,7 +414,7 @@ function renderRoute(segments: string[], canManageUsers: boolean, canManageSetti
     case 'settings':
       return canManageSettings ? <SettingsPage /> : <SuperadminOnly />;
     case 'deploy':
-      return canManageSettings ? <DeployPage /> : <SuperadminOnly />;
+      return canManageRouters ? <DeployPage /> : <ManagerOnly />;
     case 'audit':
       return canManageSettings ? <AuditPage /> : <SuperadminOnly />;
     default:

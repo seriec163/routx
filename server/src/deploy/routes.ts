@@ -6,7 +6,7 @@ import type { Pool } from 'pg';
 import { Client } from 'pg';
 import { z } from 'zod';
 import { audit } from '../audit.js';
-import { requireSuperadmin } from '../auth/service.js';
+import { requireManager, requireSuperadmin } from '../auth/service.js';
 import { badRequest } from '../lib/errors.js';
 import { enqueueJob } from '../jobs/queue.js';
 import { createBundle, fingerprint, readBundle, type DeployManifest } from './bundle.js';
@@ -327,16 +327,24 @@ export async function registerDeployRoutes(
     '/api/v1/deploy/agent-update',
     { config: { rateLimit: { max: 10, timeWindow: '1 minute' } } },
     async (request, reply) => {
-      const auth = requireSuperadmin(request);
+      const auth = requireManager(request);
       const body = z
         .object({ router_ids: z.array(z.string().uuid()).min(1).max(100) })
         .strict()
         .parse(request.body);
       const ids = [...new Set(body.router_ids)];
+      const isSuperadmin = auth.role === 'superadmin';
+      const isAdmin = auth.role === 'admin';
 
       const routers = await pool.query<{ id: string }>(
-        'select id from routers where id = any($1::uuid[]) and archived_at is null',
-        [ids],
+        `select id from routers
+          where id = any($1::uuid[]) and archived_at is null
+            and (
+              $2::boolean
+              or owner_id = $3
+              or ($4::boolean and owner_id in (select id from users where parent_id = $3))
+            )`,
+        [ids, isSuperadmin, auth.userId, isAdmin],
       );
       if (routers.rowCount !== ids.length) {
         throw badRequest('router_not_found', 'Один или несколько роутеров не найдены');

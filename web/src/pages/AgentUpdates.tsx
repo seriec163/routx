@@ -25,7 +25,7 @@ function sleep(ms: number): Promise<void> {
 export function AgentUpdates() {
   const toast = useToast();
   const routers = useApi<{ items: RouterRecord[] }>(
-    '/api/v1/routers?include_archived=false',
+    '/api/v1/routers?include_archived=false&scope=branch',
   );
   const [targetVersion, setTargetVersion] = useState<string | null>(null);
   const [versionError, setVersionError] = useState<string | null>(null);
@@ -183,6 +183,9 @@ export function AgentUpdates() {
                     <td>
                       <strong>{router.name}</strong>
                       <div className="muted-text small">{router.status}</div>
+                      {router.owner_email ? (
+                        <div className="muted-text small">владелец: {router.owner_email}</div>
+                      ) : null}
                     </td>
                     <td className="mono small">{current ?? '—'}</td>
                     <td className="small">

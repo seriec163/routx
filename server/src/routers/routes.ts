@@ -55,20 +55,31 @@ export async function registerRouterRoutes(app: FastifyInstance, ctx: RouteConte
     const query = z
       .object({
         include_archived: z.enum(['true', 'false']).optional(),
+        scope: z.enum(['own', 'branch']).optional(),
         limit: z.coerce.number().int().min(1).max(200).default(100),
       })
       .parse(request.query);
 
     const includeArchived = query.include_archived === 'true';
+    const branch = auth.role === 'admin' && query.scope === 'branch';
 
     const result = await pool.query(
       `select r.*, u.email as owner_email
          from routers r join users u on u.id = r.owner_id
-        where ($1::uuid is null or r.owner_id = $1)
-          and ($2::boolean or r.archived_at is null)
+        where (
+                $1::uuid is null
+                or r.owner_id = $1
+                or ($2::boolean and r.owner_id in (select id from users where parent_id = $1))
+              )
+          and ($3::boolean or r.archived_at is null)
         order by r.created_at desc
-        limit $3`,
-      [auth.role === 'superadmin' ? null : auth.userId, includeArchived, query.limit],
+        limit $4`,
+      [
+        auth.role === 'superadmin' ? null : auth.userId,
+        branch,
+        includeArchived,
+        query.limit,
+      ],
     );
 
     return { items: result.rows.map(routerJson) };

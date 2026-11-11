@@ -317,6 +317,16 @@ h3 {
   flex-direction: column;
 }
 
+.branch-list {
+  margin: 6px 0 0 18px;
+  padding: 0;
+  color: var(--muted);
+}
+
+.branch-list li {
+  margin: 2px 0;
+}
+
 .impersonation-banner {
   display: flex;
   align-items: center;
