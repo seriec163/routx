@@ -10,15 +10,19 @@ import {
   Panel,
   Select,
   Spinner,
+  StatusBadge,
   Switch,
   TextInput,
   useToast,
 } from '../components/ui';
+import { DiffBadge } from '../components/diff';
 import { ServicePicker } from '../components/ServicePicker';
 import { api, errorMessage } from '../lib/api';
-import { formatDate } from '../lib/format';
+import { APPLY_STATUS, formatDate, ROUTER_STATUS } from '../lib/format';
 import { navigate } from '../lib/router';
 import type {
+  ApplyRun,
+  RouterRecord,
   RoutingAction,
   RoutingGroup,
   RoutingService,
@@ -98,6 +102,10 @@ function trimmedOrNull(value: string): string | null {
   return text === '' ? null : text;
 }
 
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => window.setTimeout(resolve, ms));
+}
+
 export function TemplateEditorPage({ id }: { id: string }) {
   const toast = useToast();
   const { me } = useSession();
@@ -138,6 +146,16 @@ export function TemplateEditorPage({ id }: { id: string }) {
   const [archiveOpen, setArchiveOpen] = useState(false);
   const [purgeOpen, setPurgeOpen] = useState(false);
   const [purgeName, setPurgeName] = useState('');
+  const [rolloutOpen, setRolloutOpen] = useState(false);
+  const [rolloutStage, setRolloutStage] = useState<'select' | 'preparing' | 'review' | 'done'>(
+    'select',
+  );
+  const [rolloutRouters, setRolloutRouters] = useState<RouterRecord[]>([]);
+  const [rolloutSelected, setRolloutSelected] = useState<Set<string>>(new Set());
+  const [rolloutRuns, setRolloutRuns] = useState<ApplyRun[]>([]);
+  const [rolloutMissing, setRolloutMissing] = useState<string[]>([]);
+  const [rolloutBusy, setRolloutBusy] = useState(false);
+  const [rolloutError, setRolloutError] = useState<string | null>(null);
 
   useEffect(() => {
     const data = template.data?.template;
@@ -357,6 +375,159 @@ export function TemplateEditorPage({ id }: { id: string }) {
     }
   }
 
+  async function openRollout(): Promise<void> {
+    setRolloutOpen(true);
+    setRolloutStage('select');
+    setRolloutError(null);
+    setRolloutRuns([]);
+    setRolloutMissing([]);
+    setRolloutRouters([]);
+    setRolloutSelected(new Set());
+    setRolloutBusy(true);
+    try {
+      const data = await api<{ items: RouterRecord[] }>(
+        '/api/v1/routers?include_archived=false&scope=branch',
+      );
+      setRolloutRouters(data.items);
+      setRolloutSelected(
+        new Set(data.items.filter((router) => router.status === 'online').map((router) => router.id)),
+      );
+    } catch (caught) {
+      setRolloutError(errorMessage(caught));
+    } finally {
+      setRolloutBusy(false);
+    }
+  }
+
+  function toggleRollout(id: string): void {
+    setRolloutSelected((current) => {
+      const next = new Set(current);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  async function prepareRollout(): Promise<void> {
+    const data = template.data?.template;
+    const rev = data?.revision ?? data?.current_revision;
+    if (!data || !rev || rolloutSelected.size === 0) return;
+    const ids = [...rolloutSelected];
+    const started = Date.now();
+    const failed: string[] = [];
+    setRolloutStage('preparing');
+    setRolloutBusy(true);
+    setRolloutError(null);
+    setRolloutMissing([]);
+    setRolloutRuns([]);
+
+    for (const routerId of ids) {
+      try {
+        await api(`/api/v1/routers/${routerId}/apply`, {
+          method: 'POST',
+          body: { template_id: id, revision: rev },
+        });
+      } catch (caught) {
+        const router = rolloutRouters.find((item) => item.id === routerId);
+        failed.push(`${router?.name ?? routerId}: ${errorMessage(caught)}`);
+      }
+    }
+
+    const deadline = Date.now() + 120_000;
+    let latest: ApplyRun[] = [];
+    while (Date.now() < deadline) {
+      try {
+        const result = await api<{ items: ApplyRun[] }>(
+          `/api/v1/apply-runs?limit=200&template_id=${encodeURIComponent(id)}`,
+        );
+        const byRouter = new Map<string, ApplyRun>();
+        for (const run of result.items) {
+          if (run.template_id !== id || run.revision !== rev) continue;
+          if (!rolloutSelected.has(run.router_id)) continue;
+          if (Date.parse(run.created_at) < started - 1_000) continue;
+          if (!byRouter.has(run.router_id)) byRouter.set(run.router_id, run);
+        }
+        latest = [...byRouter.values()];
+        if (latest.length + failed.length >= ids.length) break;
+      } catch {
+        // Панель могла перезапускаться; продолжаем опрос.
+      }
+      await sleep(2_000);
+    }
+
+    const missing = ids.filter((routerId) => !latest.some((run) => run.router_id === routerId));
+    setRolloutRuns(
+      latest.sort((a, b) => {
+        const left = rolloutRouters.find((item) => item.id === a.router_id)?.name ?? '';
+        const right = rolloutRouters.find((item) => item.id === b.router_id)?.name ?? '';
+        return left.localeCompare(right);
+      }),
+    );
+    setRolloutMissing(
+      missing.map(
+        (routerId) => rolloutRouters.find((item) => item.id === routerId)?.name ?? routerId,
+      ),
+    );
+    if (failed.length > 0) setRolloutError(failed.join('; '));
+    setRolloutStage('review');
+    setRolloutBusy(false);
+  }
+
+  async function confirmOne(run: ApplyRun): Promise<void> {
+    setRolloutBusy(true);
+    try {
+      await api(`/api/v1/apply-runs/${run.id}/confirm`, {
+        method: 'POST',
+        body: { diff_hash: run.diff_hash },
+      });
+      setRolloutRuns((current) =>
+        current.map((item) => (item.id === run.id ? { ...item, status: 'queued' } : item)),
+      );
+      toast.success(`Развёртывание запущено: ${run.router_name ?? run.router_id.slice(0, 8)}`);
+    } catch (caught) {
+      setRolloutError(errorMessage(caught));
+    } finally {
+      setRolloutBusy(false);
+    }
+  }
+
+  async function confirmAll(): Promise<void> {
+    const pending = rolloutRuns.filter((run) => run.status === 'awaiting_confirmation');
+    if (pending.length === 0) {
+      setRolloutStage('done');
+      return;
+    }
+    setRolloutBusy(true);
+    setRolloutError(null);
+    let launched = 0;
+    for (const run of pending) {
+      try {
+        await api(`/api/v1/apply-runs/${run.id}/confirm`, {
+          method: 'POST',
+          body: { diff_hash: run.diff_hash },
+        });
+        if (run.diff.length > 0) launched += 1;
+      } catch (caught) {
+        setRolloutError((current) =>
+          [current, `${run.router_name ?? run.router_id.slice(0, 8)}: ${errorMessage(caught)}`]
+            .filter(Boolean)
+            .join('; '),
+        );
+      }
+    }
+    setRolloutRuns((current) =>
+      current.map((run) =>
+        pending.some((item) => item.id === run.id)
+          ? { ...run, status: run.diff.length === 0 ? 'success' : 'queued' }
+          : run,
+      ),
+    );
+    if (launched > 0) toast.success(`Запущено применений: ${launched}`);
+    setRolloutStage('done');
+    setRolloutBusy(false);
+  }
+
+
   if (template.loading && !template.data) return <Spinner />;
   if (template.error && !template.data)
     return <ErrorBanner message={template.error} onRetry={() => void template.reload()} />;
@@ -379,6 +550,11 @@ export function TemplateEditorPage({ id }: { id: string }) {
             <Button variant="ghost" onClick={() => navigate('/templates')}>
               К шаблонам
             </Button>
+            {!current.archived_at ? (
+              <Button variant="ghost" onClick={() => void openRollout()}>
+                Развернуть
+              </Button>
+            ) : null}
             {canEdit ? (
               <>
                 <Button variant="ghost" onClick={() => setArchiveOpen(true)} disabled={busy}>
@@ -771,6 +947,265 @@ export function TemplateEditorPage({ id }: { id: string }) {
             Удалить шаблон навсегда
           </button>
         </p>
+      ) : null}
+
+      {rolloutOpen ? (
+        <Modal
+          wide
+          title={`Развернуть «${current.name}»`}
+          onClose={() => {
+            if (!rolloutBusy) setRolloutOpen(false);
+          }}
+          footer={
+            rolloutStage === 'select' ? (
+              <>
+                <Button variant="ghost" onClick={() => setRolloutOpen(false)} disabled={rolloutBusy}>
+                  Отмена
+                </Button>
+                <Button
+                  onClick={() => void prepareRollout()}
+                  busy={rolloutBusy}
+                  disabled={rolloutSelected.size === 0}
+                >
+                  Подготовить diff
+                </Button>
+              </>
+            ) : rolloutStage === 'review' ? (
+              <>
+                <Button
+                  variant="ghost"
+                  onClick={() => setRolloutStage('select')}
+                  disabled={rolloutBusy}
+                >
+                  Назад
+                </Button>
+                <Button variant="ghost" onClick={() => setRolloutOpen(false)} disabled={rolloutBusy}>
+                  Закрыть
+                </Button>
+                <Button
+                  onClick={() => void confirmAll()}
+                  busy={rolloutBusy}
+                  disabled={!rolloutRuns.some((run) => run.status === 'awaiting_confirmation')}
+                >
+                  Развернуть все
+                </Button>
+              </>
+            ) : rolloutStage === 'done' ? (
+              <>
+                <Button variant="ghost" onClick={() => setRolloutOpen(false)}>
+                  Закрыть
+                </Button>
+                <Button onClick={() => navigate('/apply-runs')}>К применениям</Button>
+              </>
+            ) : null
+          }
+        >
+          {rolloutError ? <ErrorBanner message={rolloutError} /> : null}
+
+          {rolloutStage === 'select' ? (
+            <>
+              <InfoBanner>
+                Выберите роутеры. Сначала панель подготовит diff по шаблону, затем вы подтвердите
+                изменения. Ничего не запишется без второго шага.
+              </InfoBanner>
+              <div className="row wrap" style={{ margin: '12px 0' }}>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  onClick={() =>
+                    setRolloutSelected(
+                      new Set(
+                        rolloutRouters
+                          .filter((router) => router.status === 'online')
+                          .map((router) => router.id),
+                      ),
+                    )
+                  }
+                  disabled={rolloutBusy}
+                >
+                  Выбрать онлайн
+                </Button>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => setRolloutSelected(new Set())}
+                  disabled={rolloutBusy}
+                >
+                  Снять выбор
+                </Button>
+                <span className="muted-text small">
+                  Выбрано: {rolloutSelected.size} из {rolloutRouters.length}
+                </span>
+              </div>
+              {rolloutBusy && rolloutRouters.length === 0 ? (
+                <Spinner label="Читаем роутеры…" />
+              ) : rolloutRouters.length === 0 ? (
+                <p className="muted-text">Нет доступных роутеров.</p>
+              ) : (
+                <div className="table-wrap">
+                  <table className="table">
+                    <thead>
+                      <tr>
+                        <th />
+                        <th>Роутер</th>
+                        <th>Владелец</th>
+                        <th>Статус</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {rolloutRouters.map((router) => {
+                        const online = router.status === 'online';
+                        return (
+                          <tr key={router.id}>
+                            <td>
+                              <input
+                                type="checkbox"
+                                checked={rolloutSelected.has(router.id)}
+                                disabled={!online || rolloutBusy}
+                                onChange={() => toggleRollout(router.id)}
+                                aria-label={`Выбрать ${router.name}`}
+                              />
+                            </td>
+                            <td>
+                              <strong>{router.name}</strong>
+                              <div className="muted-text small">
+                                {router.product}
+                                {router.product_version ? ` ${router.product_version}` : ''}
+                              </div>
+                            </td>
+                            <td className="small">{router.owner_email ?? '—'}</td>
+                            <td>
+                              <StatusBadge
+                                status={router.status}
+                                label={ROUTER_STATUS[router.status] ?? router.status}
+                              />
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </>
+          ) : null}
+
+          {rolloutStage === 'preparing' ? (
+            <Spinner label="Готовим diff на выбранных роутерах…" />
+          ) : null}
+
+          {rolloutStage === 'review' ? (
+            <>
+              <InfoBanner>
+                Проверьте изменения. «Развернуть» создаст снимок, применит шаблон и проверит
+                результат. Кнопка «Открыть» показывает полный diff.
+              </InfoBanner>
+              {rolloutMissing.length > 0 ? (
+                <InfoBanner tone="warn">
+                  Не удалось подготовить diff: {rolloutMissing.join(', ')}. Проверьте, что роутеры
+                  в сети и доступны.
+                </InfoBanner>
+              ) : null}
+              <div className="table-wrap" style={{ marginTop: 12 }}>
+                <table className="table">
+                  <thead>
+                    <tr>
+                      <th>Роутер</th>
+                      <th>Изменения</th>
+                      <th>Статус</th>
+                      <th />
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {rolloutRuns.map((run) => {
+                      const router = rolloutRouters.find((item) => item.id === run.router_id);
+                      const noChanges = run.diff.length === 0;
+                      return (
+                        <tr key={run.id}>
+                          <td>
+                            <strong>{router?.name ?? run.router_name ?? run.router_id.slice(0, 8)}</strong>
+                            {router?.owner_email ? (
+                              <div className="muted-text small">{router.owner_email}</div>
+                            ) : null}
+                          </td>
+                          <td>
+                            <DiffBadge items={run.diff} />
+                          </td>
+                          <td>
+                            <StatusBadge
+                              status={run.status}
+                              label={APPLY_STATUS[run.status] ?? run.status}
+                            />
+                          </td>
+                          <td className="row-actions">
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              onClick={() => navigate(`/apply-runs/${run.id}`)}
+                            >
+                              Открыть
+                            </Button>
+                            {run.status === 'awaiting_confirmation' && !noChanges ? (
+                              <Button
+                                size="sm"
+                                variant="subtle"
+                                onClick={() => void confirmOne(run)}
+                                busy={rolloutBusy}
+                              >
+                                Развернуть
+                              </Button>
+                            ) : noChanges && run.status === 'awaiting_confirmation' ? (
+                              <span className="muted-text small">Изменений нет</span>
+                            ) : null}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </>
+          ) : null}
+
+          {rolloutStage === 'done' ? (
+            <>
+              <InfoBanner>
+                Развёртывание запущено. Панель создала снимок и выполняет применение; прогресс и
+                ошибки видны в разделе «Применения».
+              </InfoBanner>
+              <div className="table-wrap" style={{ marginTop: 12 }}>
+                <table className="table">
+                  <thead>
+                    <tr>
+                      <th>Роутер</th>
+                      <th>Изменения</th>
+                      <th>Статус</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {rolloutRuns.map((run) => {
+                      const router = rolloutRouters.find((item) => item.id === run.router_id);
+                      return (
+                        <tr key={run.id}>
+                          <td>{router?.name ?? run.router_name ?? run.router_id.slice(0, 8)}</td>
+                          <td>
+                            <DiffBadge items={run.diff} />
+                          </td>
+                          <td>
+                            <StatusBadge
+                              status={run.status}
+                              label={APPLY_STATUS[run.status] ?? run.status}
+                            />
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </>
+          ) : null}
+        </Modal>
       ) : null}
     </div>
   );

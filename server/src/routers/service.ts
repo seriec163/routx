@@ -92,6 +92,47 @@ export async function getRouterForMutation(
   routerId: string,
 ): Promise<RouterRecord> {
   const router = await getRouter(pool, caller, routerId);
+  return assertRouterMutable(router);
+}
+
+/**
+ * Роутер доступен администратору, если он его создал или он принадлежит
+ * пользователю из его ветки. Используется только для развёртывания шаблонов и
+ * обновления агента — остальные разделы сохраняют обычную область видимости.
+ */
+export async function getRouterForBranch(
+  pool: Pool,
+  caller: Caller,
+  routerId: string,
+): Promise<RouterRecord> {
+  const result = await pool.query<RouterRecord>(
+    `select r.*, u.email as owner_email
+       from routers r join users u on u.id = r.owner_id
+      where r.id = $1
+        and (
+          $2::boolean
+          or r.owner_id = $3
+          or ($4::boolean and exists (
+            select 1 from users c where c.id = r.owner_id and c.parent_id = $3
+          ))
+        )`,
+    [routerId, caller.role === 'superadmin', caller.userId, caller.role === 'admin'],
+  );
+  const router = result.rows[0];
+  if (!router) throw notFound('Роутер не найден');
+  return router;
+}
+
+export async function getRouterForBranchMutation(
+  pool: Pool,
+  caller: Caller,
+  routerId: string,
+): Promise<RouterRecord> {
+  const router = await getRouterForBranch(pool, caller, routerId);
+  return assertRouterMutable(router);
+}
+
+function assertRouterMutable(router: RouterRecord): RouterRecord {
   if (router.archived_at) throw forbidden('Роутер архивирован');
   if (router.status === 'conflict' || router.product === 'conflict') {
     throw conflict(

@@ -5,7 +5,11 @@ import { audit } from '../audit.js';
 import { requireUser } from '../auth/service.js';
 import { badRequest, conflict, notFound } from '../lib/errors.js';
 import { enqueueJob, jobJson } from '../jobs/queue.js';
-import { assertOnline, getRouterForMutation, getRouter } from '../routers/service.js';
+import {
+  assertOnline,
+  getRouterForBranch,
+  getRouterForBranchMutation,
+} from '../routers/service.js';
 
 interface RouteContext {
   pool: Pool;
@@ -19,6 +23,7 @@ export async function registerApplyRoutes(app: FastifyInstance, ctx: RouteContex
     const query = z
       .object({
         router_id: z.string().uuid().optional(),
+        template_id: z.string().uuid().optional(),
         status: z.string().max(40).optional(),
         limit: z.coerce.number().int().min(1).max(200).default(50),
       })
@@ -31,14 +36,21 @@ export async function registerApplyRoutes(app: FastifyInstance, ctx: RouteContex
          left join users u on u.id = a.requested_by
         where ($1::uuid is null or a.router_id = $1)
           and ($2::text is null or a.status = $2)
-          and ($3::boolean or r.owner_id = $4)
+          and ($3::uuid is null or a.template_id = $3)
+          and (
+                $4::boolean
+                or r.owner_id = $5
+                or ($6::boolean and r.owner_id in (select id from users where parent_id = $5))
+              )
         order by a.created_at desc
-        limit $5`,
+        limit $7`,
       [
         query.router_id ?? null,
         query.status ?? null,
+        query.template_id ?? null,
         auth.role === 'superadmin',
         auth.userId,
+        auth.role === 'admin',
         query.limit,
       ],
     );
@@ -59,7 +71,12 @@ export async function registerApplyRoutes(app: FastifyInstance, ctx: RouteContex
     const row = run.rows[0];
     if (!row) throw notFound('Применение не найдено');
     if (auth.role !== 'superadmin' && row.owner_id !== auth.userId) {
-      throw notFound('Применение не найдено');
+      if (auth.role !== 'admin') throw notFound('Применение не найдено');
+      const child = await pool.query(
+        'select 1 from users where id = $1 and parent_id = $2',
+        [row.owner_id, auth.userId],
+      );
+      if (!child.rows[0]) throw notFound('Применение не найдено');
     }
 
     const items = await pool.query(
@@ -91,7 +108,7 @@ export async function registerApplyRoutes(app: FastifyInstance, ctx: RouteContex
     const run = runResult.rows[0];
     if (!run) throw notFound('Применение не найдено');
 
-    const router = await getRouterForMutation(pool, auth, run.router_id);
+    const router = await getRouterForBranchMutation(pool, auth, run.router_id);
     assertOnline(router);
 
     if (run.requested_by !== auth.userId && auth.role !== 'superadmin') {
@@ -164,7 +181,7 @@ export async function registerApplyRoutes(app: FastifyInstance, ctx: RouteContex
     );
     const run = runResult.rows[0];
     if (!run) throw notFound('Применение не найдено');
-    await getRouter(pool, auth, run.router_id);
+    await getRouterForBranch(pool, auth, run.router_id);
     if (auth.role !== 'superadmin' && run.requested_by !== auth.userId) {
       throw notFound('Применение не найдено');
     }
@@ -208,7 +225,7 @@ export async function registerApplyRoutes(app: FastifyInstance, ctx: RouteContex
       .strict()
       .parse(request.body);
 
-    const router = await getRouterForMutation(pool, auth, params.id);
+    const router = await getRouterForBranchMutation(pool, auth, params.id);
     assertOnline(router);
 
     const template = await pool.query<{
