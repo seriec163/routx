@@ -36,28 +36,36 @@ let cache: { at: number; latest: LatestCommit } | null = null;
 
 async function fetchLatest(force: boolean): Promise<LatestCommit> {
   if (!force && cache && Date.now() - cache.at < CACHE_MS) return cache.latest;
-  const response = await fetch(`https://api.github.com/repos/${REPO}/commits/main`, {
-    headers: {
-      accept: 'application/vnd.github+json',
-      'user-agent': 'routx-panel',
-      ...(process.env.GITHUB_TOKEN ? { authorization: `Bearer ${process.env.GITHUB_TOKEN}` } : {}),
+  const response = await fetch(
+    `https://api.github.com/repos/${REPO}/actions/workflows/publish-image.yml/runs?status=success&per_page=1`,
+    {
+      headers: {
+        accept: 'application/vnd.github+json',
+        'user-agent': 'routx-panel',
+        ...(process.env.GITHUB_TOKEN ? { authorization: `Bearer ${process.env.GITHUB_TOKEN}` } : {}),
+      },
+      signal: AbortSignal.timeout(8_000),
     },
-    signal: AbortSignal.timeout(8_000),
-  });
+  );
   if (!response.ok) {
     throw new HttpError(502, 'github_unavailable', `GitHub ответил ${response.status}`);
   }
   const body = (await response.json()) as {
-    sha?: string;
-    html_url?: string;
-    commit?: { message?: string; author?: { date?: string } };
+    workflow_runs?: Array<{
+      head_sha?: string;
+      html_url?: string;
+      created_at?: string;
+      head_commit?: { message?: string; timestamp?: string };
+    }>;
   };
-  if (!body.sha) throw new HttpError(502, 'github_unavailable', 'GitHub не вернул commit SHA');
+  const run = body.workflow_runs?.[0];
+  const sha = run?.head_sha;
+  if (!sha) throw new HttpError(502, 'github_unavailable', 'GitHub не вернул опубликованный образ');
   const latest: LatestCommit = {
-    sha: body.sha,
-    message: (body.commit?.message ?? '').split('\n')[0]?.slice(0, 200) ?? '',
-    date: body.commit?.author?.date ?? new Date().toISOString(),
-    url: body.html_url ?? `https://github.com/${REPO}/commit/${body.sha}`,
+    sha,
+    message: (run?.head_commit?.message ?? '').split('\n')[0]?.slice(0, 200) ?? '',
+    date: run?.head_commit?.timestamp ?? run?.created_at ?? new Date().toISOString(),
+    url: run?.html_url ?? `https://github.com/${REPO}/commit/${sha}`,
   };
   cache = { at: Date.now(), latest };
   return latest;
