@@ -59,6 +59,18 @@ services:
     security_opt:
       - no-new-privileges:true
 
+  updater:
+    image: docker:24-cli
+    restart: unless-stopped
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ${ROUTX_DIR:-/opt/routx}:${ROUTX_DIR:-/opt/routx}
+    environment:
+      ROUTX_DIR: ${ROUTX_DIR:-/opt/routx}
+    command: ["sh", "${ROUTX_DIR:-/opt/routx}/updater/updater.sh"]
+    security_opt:
+      - no-new-privileges:true
+
   caddy:
     image: caddy:2-alpine
     profiles: ["proxy"]

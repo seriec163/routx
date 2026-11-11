@@ -536,6 +536,7 @@ prepare_env() {
 	fi
 
 	printf '%s\n' "$MODE" > "$DIR/.routx-mode"
+	set_env ROUTX_DIR "$DIR"
 	chmod 600 "$ENV_FILE"
 }
 
@@ -812,20 +813,17 @@ install_updater() {
 		warn "Updater из панели поддерживается только для Docker-установки."
 		return 0
 	fi
-	if ! has systemctl; then
-		warn "systemd не найден: кнопка обновления в панели недоступна."
-		return 0
-	fi
 	if [ "$(id -u)" -ne 0 ]; then
 		warn "Для установки updater нужен root: sudo routx updater install"
 		return 0
 	fi
 
-	mkdir -p "$DIR/update"
-	# Панель работает в контейнере под непривилегированным пользователем.
+	mkdir -p "$DIR/update" "$DIR/updater"
+	# update/ доступен панели (запросы и статус), updater/ — только root.
 	chmod 1777 "$DIR/update" 2>/dev/null || true
+	chmod 755 "$DIR/updater" 2>/dev/null || true
 
-	cat > "$UPDATER_BIN" <<'UPDATER'
+	cat > "$DIR/updater/updater.sh" <<'UPDATER'
 #!/bin/sh
 set -u
 DIR="${ROUTX_DIR:-/opt/routx}"
@@ -890,24 +888,47 @@ do_rollback() {
 		write_status rollback_failed "Нет сохранённого образа для отката"
 		return 1
 	fi
-	if ROUTX_IMAGE=ghcr.io/seriec163/routx:rollback compose up -d --no-deps --force-recreate app >/dev/null 2>&1 && wait_healthy; then
+	export ROUTX_IMAGE=ghcr.io/seriec163/routx:rollback
+	if compose up -d --no-deps --force-recreate app >/dev/null 2>&1 && wait_healthy; then
+		unset ROUTX_IMAGE
 		write_status rolled_back "Откат выполнен"
 		return 0
 	fi
+	unset ROUTX_IMAGE
 	write_status rollback_failed "Не удалось запустить предыдущую версию"
 	return 1
 }
 
 do_update() {
+	__target="${1:-}"
 	cd "$DIR" || { write_status failed "Каталог $DIR недоступен"; return 1; }
 	snapshot_previous
-	write_status pulling "Скачиваю свежий образ"
-	if ! compose pull app >/dev/null 2>&1; then
-		write_status failed "Не удалось скачать образ из registry"
-		return 1
+	if [ -n "$__target" ]; then
+		__short=$(printf '%s' "$__target" | cut -c1-7)
+		__image="ghcr.io/seriec163/routx:sha-$__short"
+		write_status pulling "Скачиваю образ $__short"
+		if ! docker pull "$__image" >/dev/null 2>&1; then
+			write_status failed "Образ для $__short ещё не опубликован в registry"
+			return 1
+		fi
+	else
+		__image=""
+		write_status pulling "Скачиваю свежий образ"
+		if ! compose pull app >/dev/null 2>&1; then
+			write_status failed "Не удалось скачать образ из registry"
+			return 1
+		fi
 	fi
 	write_status restarting "Перезапускаю панель"
-	if ! compose up -d --no-deps app >/dev/null 2>&1; then
+	if [ -n "$__image" ]; then
+		export ROUTX_IMAGE="$__image"
+		if ! compose up -d --no-deps app >/dev/null 2>&1; then
+			unset ROUTX_IMAGE
+			do_rollback
+			return 1
+		fi
+		unset ROUTX_IMAGE
+	elif ! compose up -d --no-deps app >/dev/null 2>&1; then
 		do_rollback
 		return 1
 	fi
@@ -923,40 +944,24 @@ while :; do
 	if [ -f "$UPDATE_DIR/request" ]; then
 		mv "$UPDATE_DIR/request" "$UPDATE_DIR/request.processing" 2>/dev/null || true
 		__action=$(head -n 1 "$UPDATE_DIR/request.processing" 2>/dev/null | tr -d '\r')
+		__target=$(sed -n 's/^target_sha=//p' "$UPDATE_DIR/request.processing" 2>/dev/null | head -n 1 | tr -d '\r')
 		rm -f "$UPDATE_DIR/request.processing"
 		case "$__action" in
-			update) do_update ;;
+			update) do_update "$__target" ;;
 			rollback) do_rollback ;;
 		esac
 	fi
 	sleep 2
 done
 UPDATER
-	chmod 755 "$UPDATER_BIN"
+	chmod 755 "$DIR/updater/updater.sh"
 
-	cat > "$UPDATER_UNIT" <<EOF
-[Unit]
-Description=RoutX panel updater
-After=docker.service network-online.target
-Wants=network-online.target
-
-[Service]
-Type=simple
-Environment=ROUTX_DIR=$DIR
-ExecStart=$UPDATER_BIN
-Restart=always
-RestartSec=3
-NoNewPrivileges=true
-PrivateTmp=true
-
-[Install]
-WantedBy=multi-user.target
-EOF
-
-	systemctl daemon-reload
-	systemctl enable routx-updater >/dev/null 2>&1 || true
-	systemctl restart routx-updater >/dev/null 2>&1 || true
-	info "  updater: systemctl status routx-updater"
+	if compose config --services 2>/dev/null | grep -qx updater; then
+		compose up -d --force-recreate updater
+		info "  updater: docker compose ps updater"
+	else
+		warn "В docker-compose.yml нет сервиса updater. Обновите compose-файл RoutX."
+	fi
 }
 
 install_docker() {
@@ -1279,8 +1284,11 @@ cmd_doctor() {
 		else
 			warn "Docker не найден"; FAIL=1
 		fi
-		if has systemctl; then
-			info "  updater: $(systemctl is-active routx-updater 2>/dev/null || echo inactive)"
+		__upd=$(compose ps -q updater 2>/dev/null | head -n 1 || true)
+		if [ -n "$__upd" ]; then
+			info "  updater: $(docker inspect -f '{{.State.Status}}' "$__upd" 2>/dev/null || echo unknown)"
+		else
+			warn "updater не запущен"; FAIL=1
 		fi
 	else
 		if has systemctl; then
@@ -1330,10 +1338,13 @@ cmd_updater() {
 			info "Готово. Кнопка обновления станет доступна в настройках панели."
 			;;
 		status)
-			if has systemctl; then
-				info "routx-updater: $(systemctl is-active routx-updater 2>/dev/null || echo inactive)"
+			MODE=docker
+			resolve_dir
+			__upd=$(compose ps -q updater 2>/dev/null | head -n 1 || true)
+			if [ -n "$__upd" ]; then
+				info "routx-updater: $(docker inspect -f '{{.State.Status}}' "$__upd" 2>/dev/null || echo unknown)"
 			else
-				info "systemd не найден"
+				info "routx-updater: не запущен"
 			fi
 			;;
 		*) die "Используйте: routx updater install|status" ;;

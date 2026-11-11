@@ -77,7 +77,11 @@ function updaterInstalled(): boolean {
   return existsSync(join(UPDATE_DIR, '.updater-installed'));
 }
 
-async function requestUpdate(action: 'update' | 'rollback', userId: string): Promise<void> {
+async function requestUpdate(
+  action: 'update' | 'rollback',
+  userId: string,
+  targetSha?: string,
+): Promise<void> {
   const status = await readStatus();
   if (status?.state && BUSY_STATES.has(status.state)) {
     throw new HttpError(409, 'update_in_progress', 'Обновление уже выполняется');
@@ -90,7 +94,13 @@ async function requestUpdate(action: 'update' | 'rollback', userId: string): Pro
     const temp = join(UPDATE_DIR, 'request.tmp');
     await writeFile(
       temp,
-      `${action}\nrequested_by=${userId}\nrequested_at=${new Date().toISOString()}\n`,
+      [
+        action,
+        `requested_by=${userId}`,
+        `requested_at=${new Date().toISOString()}`,
+        ...(targetSha ? [`target_sha=${targetSha}`] : []),
+        '',
+      ].join('\n'),
       { mode: 0o600 },
     );
     await rename(temp, join(UPDATE_DIR, 'request'));
@@ -143,7 +153,13 @@ export async function registerUpdateRoutes(
 
   app.post('/api/v1/updates/apply', async (request) => {
     const auth = requireSuperadmin(request);
-    await requestUpdate('update', auth.userId);
+    let targetSha = '';
+    try {
+      targetSha = (await fetchLatest(false)).sha;
+    } catch {
+      // Если GitHub недоступен, updater просто скачает latest.
+    }
+    await requestUpdate('update', auth.userId, targetSha);
     await audit(pool, {
       actorId: auth.userId,
       actorRole: auth.role,
@@ -152,9 +168,13 @@ export async function registerUpdateRoutes(
       result: 'ok',
       ip: request.ip,
       userAgent: request.headers['user-agent'],
-      metadata: { current_build: APP_BUILD_SHA, current_version: APP_VERSION },
+      metadata: {
+        current_build: APP_BUILD_SHA,
+        current_version: APP_VERSION,
+        target_sha: targetSha || null,
+      },
     });
-    return { ok: true };
+    return { ok: true, target_sha: targetSha || null };
   });
 
   app.post('/api/v1/updates/rollback', async (request) => {

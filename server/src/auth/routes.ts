@@ -712,11 +712,12 @@ export async function registerAuthRoutes(app: FastifyInstance, ctx: RouteContext
         first_name: string | null;
         middle_name: string | null;
         last_name: string | null;
+        parent_id: string | null;
         created_at: Date;
         last_login_at: Date | null;
       }>(
         `select id, email, role, status, totp_enabled,
-                first_name, middle_name, last_name, created_at, last_login_at
+                first_name, middle_name, last_name, parent_id, created_at, last_login_at
            from users where id = $1`,
         [auth.userId],
       );
