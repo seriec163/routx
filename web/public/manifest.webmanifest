@@ -1,7 +1,7 @@
 {
   "name": "RoutX",
   "short_name": "RoutX",
-  "description": "Самостоятельная панель управления OpenWrt-роутерами на Forkop/Prokop: мониторинг, подключения, DNS и обновления.",
+  "description": "Самостоятельная панель управления VPN и прокси на OpenWrt: Tachyon, Forkop, Prokop, Podkop — мониторинг, подключения, DNS и обновления.",
   "start_url": "/#/app",
   "scope": "/",
   "display": "standalone",

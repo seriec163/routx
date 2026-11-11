@@ -1,4 +1,4 @@
-# Необязательный reverse proxy для Router Control.
+# Необязательный reverse proxy для RoutX.
 # Запуск: docker compose --profile proxy up -d
 #
 # RC_DOMAIN — публичное имя (или localhost для локальной проверки).

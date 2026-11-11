@@ -458,7 +458,7 @@ return view.extend({
 		const productVersion = st.product_version || '';
 		r.sub.textContent = product
 			? productLabel(product) + (productVersion ? ' ' + productVersion : '') + ' · агент ' + (st.agent_version || '?')
-			: 'Агент управления роутером';
+			: 'Агент VPN на роутере';
 
 		this.setServer(r.server, st.server || '');
 		this.setValue(r.router, st.router_id ? String(st.router_id) : '—', productLabel(product));
@@ -785,7 +785,7 @@ return view.extend({
 
 		const orb = E('div', { 'class': 'jn-orb jn-muted' });
 		const badge = E('span', { 'class': 'jn-badge jn-muted' }, 'Проверка…');
-		const sub = E('div', { 'class': 'jn-sub' }, 'Агент управления роутером');
+		const sub = E('div', { 'class': 'jn-sub' }, 'Агент VPN на роутере');
 
 		const hero = E('div', { 'class': 'jn-hero' }, [
 			orb,

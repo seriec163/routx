@@ -1,4 +1,4 @@
-# Router Control — карта интеграции с Forkop и Prokop
+# RoutX — карта интеграции с Forkop и Prokop
 
 Статус: **аудит завершён, реализация не начиналась**.
 Дата аудита: 2026-10-27.
@@ -155,7 +155,7 @@ exec /usr/bin/env -i PATH=/usr/sbin:/usr/bin:/sbin:/bin /usr/bin/prokop "$@"
 | `generate_reality_keypair` / `get_tls_certificate_sha256` | 0 / 1 | серверный режим |
 | `get_zapret_status`, `get_zapret2_status`, `get_byedpi_status` | 0 | статусы DPI-провайдеров (в Prokop тоже есть) |
 
-**Вывод:** серверный режим (inbound, Reality-ключи, VLESS-сервер) есть только у Forkop. Router Control v1 управляет **клиентской** конфигурацией; серверные секции не читаются и не изменяются.
+**Вывод:** серверный режим (inbound, Reality-ключи, VLESS-сервер) есть только у Forkop. RoutX v1 управляет **клиентской** конфигурацией; серверные секции не читаются и не изменяются.
 
 ### 4.4. Жёсткий denylist (никогда не вызывать)
 
@@ -471,7 +471,7 @@ UI обязан показывать «проверка недоступна д�
 
 Проверено: `prokop/files/usr/lib/components/action.uc`.
 
-### 11.3. Ограничения для Router Control
+### 11.3. Ограничения для RoutX
 
 * **Forkop:** нет списка версий и установки конкретной версии. Максимум — `check_update` + `install_stable|tiny|extended|extended_compressed`. Staged rollout по тегам невозможен → UI должен честно писать «управление версиями недоступно для Forkop».
 * **Prokop:** `install_version` работает **только для extended-варианта**; при pin на не-extended upstream отказывает. `install` без тега ставит тот же вариант, что установлен.
@@ -606,4 +606,4 @@ torrserver:        check_update, install, remove, start, apply_settings
 torrserver_direct: enable, disable
 ```
 
-Router Control v1 использует только `sing_box: check_update | install | install_extended | install_tiny | install_stable | install_version` (и то `install_version` — только Prokop). Остальное — вне области.
+RoutX v1 использует только `sing_box: check_update | install | install_extended | install_tiny | install_stable | install_version` (и то `install_version` — только Prokop). Остальное — вне области.

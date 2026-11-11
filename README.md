@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="./assets/readme/hero.svg" alt="RoutX — панель управления роутерами OpenWrt" width="100%">
+  <img src="./assets/readme/hero.svg" alt="RoutX — панель управления VPN и прокси на роутерах OpenWrt" width="100%">
 </p>
 
 <p align="center">
@@ -23,7 +23,7 @@
 </p>
 
 <p align="center">
-  Централизованная панель для роутеров OpenWrt: установка и переключение
+  Централизованная панель для VPN и прокси на роутерах OpenWrt: установка и переключение
   <b>Tachyon</b>, <b>Forkop</b>, <b>Prokop</b> и <b>Podkop</b>, подписки,
   правила маршрутизации, мониторинг и PWA.
 </p>
@@ -39,6 +39,10 @@
 > **Один роутер — один продукт.** RoutX ставит выбранный продукт, удаляет
 > остальные и переносит секции, списки, домены и подписки. Перед изменениями
 > создаётся снимок, при ошибке выполняется откат.
+>
+> **Область управления.** RoutX управляет VPN/прокси-продуктом на роутере,
+> его правилами, списками, подписками и агентом. Прошивка, сеть, firewall и
+> остальные настройки OpenWrt остаются вне панели.
 
 ---
 
@@ -46,7 +50,7 @@
 
 | | |
 |:--|:--|
-| 🧭 **Единый центр управления** | Все роутеры, продукты, версии и статусы в одной панели. |
+| 🧭 **Единый центр управления** | Все VPN-подключения, продукты, версии и статусы роутеров в одной панели. |
 | 🚀 **Установка одной командой** | Docker Compose или нативный Node.js + PostgreSQL. CLI `routx` сам готовит `.env`, администратора и базу. |
 | 🔁 **Смена и переустановка продукта** | Выбор версии Tachyon, удаление старых пакетов, перенос настроек и автоматический откат. |
 | 📦 **Каталог tachyon-lists** | 143 списка с описаниями, группами и счётчиками. Для Tachyon — нативно, для Forkop — rule-set, для Prokop — SRS, для Podkop — домены и подсети. |
@@ -199,7 +203,7 @@ sudo ./scripts/routx install --dir /srv/routx --domain panel.example.com
 
 ## Экосистема проектов
 
-RoutX — панель управления, а сами продукты и списки развиваются в отдельных
+RoutX — панель управления VPN и прокси, а сами продукты и списки развиваются в отдельных
 открытых проектах:
 
 | Проект | Что это | Исходники |
@@ -211,7 +215,7 @@ RoutX — панель управления, а сами продукты и с�
 | **Podkop** | VPN и прокси для OpenWrt | [itdoginfo/podkop](https://github.com/itdoginfo/podkop) |
 | **allow-domains** | Списки доменов для маршрутизации | [itdoginfo/allow-domains](https://github.com/itdoginfo/allow-domains) |
 | **sing-box** | Универсальное прокси-ядро | [SagerNet/sing-box](https://github.com/SagerNet/sing-box) |
-| **RoutX** | Панель управления роутерами | [seriec163/routx](https://github.com/seriec163/routx) |
+| **RoutX** | Панель управления VPN и прокси на роутерах | [seriec163/routx](https://github.com/seriec163/routx) |
 
 ---
 
@@ -333,5 +337,5 @@ RoutX распространяется по [Apache License 2.0](LICENSE): ко�
     <a href="https://github.com/seriec163/routx">RoutX</a>
   </sub>
   <br>
-  <sub>RoutX · OpenWrt control plane · Tachyon / Forkop / Prokop / Podkop</sub>
+  <sub>RoutX · OpenWrt VPN control plane · Tachyon / Forkop / Prokop / Podkop</sub>
 </p>

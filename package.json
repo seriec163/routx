@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "license": "Apache-2.0",
-  "description": "Централизованное управление роутерами OpenWrt с Forkop/Prokop/Podkop",
+  "description": "Централизованное управление VPN и прокси на роутерах OpenWrt: Tachyon, Forkop, Prokop, Podkop",
   "workspaces": [
     "server",
     "web"
