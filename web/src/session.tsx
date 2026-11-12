@@ -86,6 +86,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
 
         setMe(payload);
         if (isMobileClient()) markMobileBound();
+        refreshAttempted.current = false;
         setError(null);
         return payload;
       } catch (caught) {
@@ -136,7 +137,8 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       // Сессия могла уже истечь — это не мешает выйти локально.
     }
     clearMobileBound();
-    refreshAttempted.current = false;
+    // После явного выхода не восстанавливаем сессию автоматически.
+    refreshAttempted.current = true;
     setMe(null);
     setError(null);
   }, []);

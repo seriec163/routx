@@ -1262,7 +1262,7 @@ export async function registerAgentRoutes(
 
       const updated = await pool.query<{ id: string; name: string }>(
         `update mobile_devices
-            set revoked_at = now(), revoked_by = 'router'
+            set revoked_at = now(), revoked_by = 'router', device_token_hash = null
           where id = $1 and router_id = $2 and revoked_at is null
           returning id, name`,
         [params.id, agent.routerId],
