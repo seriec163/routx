@@ -15,6 +15,7 @@ import {
 import { api, errorMessage } from '../lib/api';
 import { formatDate, roleLabel } from '../lib/format';
 import { useSession } from '../session';
+import { PasskeyPanel, RecoveryCodesPanel } from './AccountSecurity';
 
 interface EnrollResponse {
   secret: string;
@@ -212,7 +213,7 @@ export function AccountPage() {
     <div className="page">
       <PageHeader
         title="Учётная запись"
-        subtitle="Профиль, второй фактор и пароль. Сессии, кроме текущей, отзываются при смене пароля."
+        subtitle="Профиль, второй фактор, passkey, резервные коды и пароль. Сессии, кроме текущей, отзываются при смене пароля."
         actions={
           <Button variant="ghost" onClick={() => void logout()}>
             Выйти
@@ -352,11 +353,27 @@ export function AccountPage() {
             <EnrollmentPanel />
           </Panel>
 
+          <Panel
+            title="Passkey (Face ID / Touch ID)"
+            subtitle="Дополнительный способ входа. Пароль и 2FA остаются рабочими."
+          >
+            <PasskeyPanel />
+          </Panel>
+
+          <Panel
+            title="Резервные коды"
+            subtitle="10 одноразовых кодов для полного восстановления доступа."
+          >
+            <RecoveryCodesPanel />
+          </Panel>
+
           <Panel title="Безопасность сессии">
             <ul className="bullets">
               <li>Сессия хранится в HttpOnly cookie, CSRF-токен — в отдельной cookie.</li>
               <li>Изменяющие запросы требуют совпадения CSRF-токена и проверки Origin.</li>
               <li>После смены пароля все остальные сессии отзываются.</li>
+              <li>Passkey хранит приватный ключ в защищённом чипе устройства.</li>
+              <li>Резервный код сбрасывает пароль, 2FA и passkey; каждый код одноразовый.</li>
               <li>Пароли хранятся в виде Argon2id-хешей, секреты TOTP — в зашифрованном виде.</li>
             </ul>
             {me.enrollment_required ? (

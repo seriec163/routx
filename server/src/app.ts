@@ -15,6 +15,8 @@ import { APP_BUILD_SHA, APP_VERSION } from './version.js';
 import { HttpError } from './lib/errors.js';
 import { registerGuards } from './auth/service.js';
 import { registerAuthRoutes } from './auth/routes.js';
+import { registerWebAuthnRoutes } from './auth/webauthn.js';
+import { registerRecoveryRoutes } from './auth/recovery.js';
 import { registerRouterRoutes } from './routers/routes.js';
 import { registerRouterExtrasRoutes } from './routers/extras.js';
 import { registerRouterConnectionRoutes } from './routers/connections.js';
@@ -276,6 +278,12 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
       secureCookie: config.secureCookie,
       inviteTtlSeconds: 7 * 24 * 60 * 60,
     });
+    await registerWebAuthnRoutes(app, {
+      pool,
+      publicUrl: config.publicUrl,
+      secureCookie: config.secureCookie,
+    });
+    await registerRecoveryRoutes(app, { pool, secureCookie: config.secureCookie });
     const push = initPushService({
       pool,
       dataDir: config.dataDir ?? '/app/data',

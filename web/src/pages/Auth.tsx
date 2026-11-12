@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { browserSupportsWebAuthn, startAuthentication, type PublicKeyCredentialRequestOptionsJSON } from '@simplewebauthn/browser';
 import { api, errorMessage } from '../lib/api';
 import { roleLabel } from '../lib/format';
 import { navigate } from '../lib/router';
@@ -36,6 +37,16 @@ export function LoginPage() {
   const [recoveryBusy, setRecoveryBusy] = useState(false);
   const [recoveryError, setRecoveryError] = useState<string | null>(null);
   const [recoveryDone, setRecoveryDone] = useState(false);
+  const [recoveryMode, setRecoveryMode] = useState<'totp' | 'code'>('totp');
+  const [backupCode, setBackupCode] = useState('');
+  const [backupPassword, setBackupPassword] = useState('');
+  const [backupRepeat, setBackupRepeat] = useState('');
+  const [backupBusy, setBackupBusy] = useState(false);
+  const [backupError, setBackupError] = useState<string | null>(null);
+  const [passkeyBusy, setPasskeyBusy] = useState(false);
+  const [passkeyError, setPasskeyError] = useState<string | null>(null);
+
+  const canUsePasskey = browserSupportsWebAuthn() && window.isSecureContext;
 
   useEffect(() => {
     if (step !== 'mfa' || secondsLeft <= 0) return;
@@ -67,6 +78,40 @@ export function LoginPage() {
       setError(errorMessage(caught));
     } finally {
       setBusy(false);
+    }
+  }
+
+  async function loginWithPasskey(): Promise<void> {
+    setPasskeyBusy(true);
+    setPasskeyError(null);
+    try {
+      const { challenge_id, options } = await api<{
+        challenge_id: string;
+        options: PublicKeyCredentialRequestOptionsJSON;
+      }>('/api/v1/auth/webauthn/login/options', { method: 'POST', body: {} });
+
+      let response;
+      try {
+        response = await startAuthentication({ optionsJSON: options });
+      } catch (caught) {
+        if (caught instanceof Error && caught.name === 'NotAllowedError') {
+          setPasskeyError('Подтверждение отменено. Можно войти по паролю.');
+        } else {
+          setPasskeyError('Passkey не найден на этом устройстве. Войдите по паролю.');
+        }
+        return;
+      }
+
+      await api('/api/v1/auth/webauthn/login/verify', {
+        method: 'POST',
+        body: { challenge_id, response },
+      });
+      await reload();
+      navigate('/');
+    } catch (caught) {
+      setPasskeyError(errorMessage(caught));
+    } finally {
+      setPasskeyBusy(false);
     }
   }
 
@@ -119,6 +164,31 @@ export function LoginPage() {
     }
   }
 
+  async function submitBackupCode(): Promise<void> {
+    setBackupError(null);
+    if (backupPassword.length < 12) {
+      setBackupError('Пароль должен быть не короче 12 символов');
+      return;
+    }
+    if (backupPassword !== backupRepeat) {
+      setBackupError('Пароли не совпадают');
+      return;
+    }
+    setBackupBusy(true);
+    try {
+      await api('/api/v1/auth/recovery/use', {
+        method: 'POST',
+        body: { code: backupCode.trim(), password: backupPassword },
+      });
+      await reload();
+      navigate('/');
+    } catch (caught) {
+      setBackupError(errorMessage(caught));
+    } finally {
+      setBackupBusy(false);
+    }
+  }
+
   return (
     <div className="auth-shell">
       <aside className="auth-aside">
@@ -150,6 +220,23 @@ export function LoginPage() {
           <form className="auth-card" onSubmit={submitPassword}>
             <h2>Вход</h2>
             <p className="page-sub">Используйте учётную запись, выданную администратором.</p>
+
+            {canUsePasskey ? (
+              <div className="stack" style={{ marginBottom: 14 }}>
+                <Button
+                  type="button"
+                  variant="subtle"
+                  onClick={() => void loginWithPasskey()}
+                  busy={passkeyBusy}
+                >
+                  Войти по passkey (Face ID / Touch ID)
+                </Button>
+                {passkeyError ? <ErrorBanner message={passkeyError} /> : null}
+                <p className="muted-text small" style={{ margin: 0 }}>
+                  Passkey добавляется вручную в «Учётной записи» после входа по паролю.
+                </p>
+              </div>
+            ) : null}
 
             {error ? <ErrorBanner message={error} /> : null}
 
@@ -195,80 +282,162 @@ export function LoginPage() {
               </button>
             ) : null}
             {showRecovery ? (
-              recoveryDone ? (
-                <InfoBanner>
-                  Пароль изменён. Войдите с новым паролем и кодом из приложения-аутентификатора.
-                </InfoBanner>
-              ) : (
-                <div className="stack" style={{ marginTop: 12 }}>
-                  <p className="page-sub" style={{ margin: 0 }}>
-                    Сброс по коду из приложения-аутентификатора. Почта не нужна, но 2FA должен
-                    быть уже включён.
-                  </p>
-                  {recoveryError ? <ErrorBanner message={recoveryError} /> : null}
-                  <Field label="E-mail" htmlFor="recovery-email">
-                    <TextInput
-                      id="recovery-email"
-                      type="email"
-                      value={email}
-                      onChange={setEmail}
-                      autoComplete="username"
-                      required
-                    />
-                  </Field>
-                  <Field label="Код из приложения" htmlFor="recovery-code">
-                    <TextInput
-                      id="recovery-code"
-                      value={recoveryCode}
-                      onChange={setRecoveryCode}
-                      placeholder="123456"
-                      autoComplete="one-time-code"
-                      required
-                    />
-                  </Field>
-                  <Field
-                    label="Новый пароль"
-                    htmlFor="recovery-password"
-                    hint="Не короче 12 символов и хотя бы 3 класса символов"
-                  >
-                    <TextInput
-                      id="recovery-password"
-                      type="password"
-                      value={recoveryPassword}
-                      onChange={setRecoveryPassword}
-                      autoComplete="new-password"
-                      required
-                    />
-                  </Field>
-                  <Field label="Повторите пароль" htmlFor="recovery-repeat">
-                    <TextInput
-                      id="recovery-repeat"
-                      type="password"
-                      value={recoveryRepeat}
-                      onChange={setRecoveryRepeat}
-                      autoComplete="new-password"
-                      required
-                    />
-                  </Field>
+              <div className="stack" style={{ marginTop: 12 }}>
+                <div className="row" style={{ gap: 8 }}>
                   <Button
                     type="button"
-                    onClick={() => void submitRecovery()}
-                    busy={recoveryBusy}
-                    disabled={
-                      !email ||
-                      recoveryCode.trim().length < 6 ||
-                      recoveryPassword.length < 12 ||
-                      recoveryPassword !== recoveryRepeat
-                    }
+                    size="sm"
+                    variant={recoveryMode === 'totp' ? 'subtle' : 'ghost'}
+                    onClick={() => setRecoveryMode('totp')}
                   >
-                    Сбросить пароль
+                    Код 2FA
                   </Button>
-                  <p className="muted-text small">
-                    Нет доступа к телефону? Попросите суперадминистратора создать одноразовую
-                    ссылку: «Пользователи» → «Сбросить пароль». Ссылка действует 1 час.
-                  </p>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant={recoveryMode === 'code' ? 'subtle' : 'ghost'}
+                    onClick={() => setRecoveryMode('code')}
+                  >
+                    Резервный код
+                  </Button>
                 </div>
-              )
+
+                {recoveryMode === 'totp' ? (
+                  recoveryDone ? (
+                    <InfoBanner>
+                      Пароль изменён. Войдите с новым паролем и кодом из
+                      приложения-аутентификатора.
+                    </InfoBanner>
+                  ) : (
+                    <>
+                      <p className="page-sub" style={{ margin: 0 }}>
+                        Сброс по коду из приложения-аутентификатора. Почта не нужна, но 2FA
+                        должен быть уже включён.
+                      </p>
+                      {recoveryError ? <ErrorBanner message={recoveryError} /> : null}
+                      <Field label="E-mail" htmlFor="recovery-email">
+                        <TextInput
+                          id="recovery-email"
+                          type="email"
+                          value={email}
+                          onChange={setEmail}
+                          autoComplete="username"
+                          required
+                        />
+                      </Field>
+                      <Field label="Код из приложения" htmlFor="recovery-code">
+                        <TextInput
+                          id="recovery-code"
+                          value={recoveryCode}
+                          onChange={setRecoveryCode}
+                          placeholder="123456"
+                          autoComplete="one-time-code"
+                          required
+                        />
+                      </Field>
+                      <Field
+                        label="Новый пароль"
+                        htmlFor="recovery-password"
+                        hint="Не короче 12 символов и хотя бы 3 класса символов"
+                      >
+                        <TextInput
+                          id="recovery-password"
+                          type="password"
+                          value={recoveryPassword}
+                          onChange={setRecoveryPassword}
+                          autoComplete="new-password"
+                          required
+                        />
+                      </Field>
+                      <Field label="Повторите пароль" htmlFor="recovery-repeat">
+                        <TextInput
+                          id="recovery-repeat"
+                          type="password"
+                          value={recoveryRepeat}
+                          onChange={setRecoveryRepeat}
+                          autoComplete="new-password"
+                          required
+                        />
+                      </Field>
+                      <Button
+                        type="button"
+                        onClick={() => void submitRecovery()}
+                        busy={recoveryBusy}
+                        disabled={
+                          !email ||
+                          recoveryCode.trim().length < 6 ||
+                          recoveryPassword.length < 12 ||
+                          recoveryPassword !== recoveryRepeat
+                        }
+                      >
+                        Сбросить пароль
+                      </Button>
+                      <p className="muted-text small">
+                        Нет доступа к телефону? Используйте резервный код или аварийный сброс
+                        через CLI на сервере.
+                      </p>
+                    </>
+                  )
+                ) : (
+                  <>
+                    <p className="page-sub" style={{ margin: 0 }}>
+                      Один из 10 резервных кодов. Он сбросит пароль, 2FA и все passkey, после
+                      чего вы войдёте автоматически.
+                    </p>
+                    {backupError ? <ErrorBanner message={backupError} /> : null}
+                    <Field
+                      label="Резервный код"
+                      htmlFor="backup-code"
+                      hint="Формат XXXX-XXXX-XXXX-XXXX."
+                    >
+                      <TextInput
+                        id="backup-code"
+                        value={backupCode}
+                        onChange={setBackupCode}
+                        placeholder="XXXX-XXXX-XXXX-XXXX"
+                        autoComplete="one-time-code"
+                      />
+                    </Field>
+                    <Field
+                      label="Новый пароль"
+                      htmlFor="backup-password"
+                      hint="Не короче 12 символов и хотя бы 3 класса символов"
+                    >
+                      <TextInput
+                        id="backup-password"
+                        type="password"
+                        value={backupPassword}
+                        onChange={setBackupPassword}
+                        autoComplete="new-password"
+                      />
+                    </Field>
+                    <Field label="Повторите пароль" htmlFor="backup-repeat">
+                      <TextInput
+                        id="backup-repeat"
+                        type="password"
+                        value={backupRepeat}
+                        onChange={setBackupRepeat}
+                        autoComplete="new-password"
+                      />
+                    </Field>
+                    <Button
+                      type="button"
+                      onClick={() => void submitBackupCode()}
+                      busy={backupBusy}
+                      disabled={
+                        !backupCode.trim() ||
+                        backupPassword.length < 12 ||
+                        backupPassword !== backupRepeat
+                      }
+                    >
+                      Восстановить доступ
+                    </Button>
+                    <p className="muted-text small">
+                      Если резервных кодов нет, остаётся аварийный сброс через CLI на сервере.
+                    </p>
+                  </>
+                )}
+              </div>
             ) : null}
             <p className="auth-fineprint">
               Регистрация только по приглашению. Нет доступа — обратитесь к суперадминистратору.
