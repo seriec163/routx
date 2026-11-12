@@ -9,6 +9,7 @@ declare module 'fastify' {
       mfaPassed: boolean;
       impersonatedBy?: string | null;
       impersonatorEmail?: string | null;
+      mobileDeviceId?: string | null;
     };
     agent?: {
       routerId: string;

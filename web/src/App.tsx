@@ -15,6 +15,8 @@ import { JobsPage } from './pages/Jobs';
 import { LoginPage, InvitePage, ResetPasswordPage, BrandMark } from './pages/Auth';
 import { InstallPage } from './pages/Install';
 import { MobileApp } from './mobile/MobileApp';
+import { MobileAuthScreen } from './mobile/MobileAuthScreen';
+import { isMobileBound, isMobileClient } from './mobile/deviceId';
 import { RouterDetailPage } from './pages/RouterDetail';
 import { RouterOnboardingPage } from './pages/RouterOnboarding';
 import { RoutersPage } from './pages/Routers';
@@ -169,6 +171,10 @@ function Root() {
           </div>
         </div>
       );
+    }
+    if (route.segments[0] === 'login') return <LoginPage />;
+    if (isMobileClient() && (route.segments[0] === 'app' || isMobileBound())) {
+      return <MobileAuthScreen />;
     }
     return <LoginPage />;
   }

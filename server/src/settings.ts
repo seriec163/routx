@@ -34,7 +34,7 @@ export interface PlatformSettings {
 
 export const DEFAULT_SETTINGS: PlatformSettings = {
   mfaPolicy: 'all',
-  sessionDays: 30,
+  sessionDays: 45,
   limits: {
     routersPerUser: 10,
     usersPerInstance: 20,

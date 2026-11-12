@@ -3,6 +3,7 @@ import { BrandMark } from './Auth';
 import { Button, ErrorBanner, InfoBanner, Spinner } from '../components/ui';
 import { api, errorMessage } from '../lib/api';
 import { navigate } from '../lib/router';
+import { getDeviceId, markMobileBound } from '../mobile/deviceId';
 import { useSession } from '../session';
 
 interface BeforeInstallPromptEvent extends Event {
@@ -76,7 +77,7 @@ export function InstallPage({
       try {
         const response = await api<ExchangeResponse>('/api/v1/mobile/exchange', {
           method: 'POST',
-          body: { token },
+          body: { token, device_id: getDeviceId() || undefined },
         });
         if (!active) return;
         await onLoggedInRef.current();
@@ -84,6 +85,7 @@ export function InstallPage({
         if (response.router_id) {
           window.localStorage.setItem('rc.mobile.router', response.router_id);
         }
+        markMobileBound();
         // Сразу в приложение: инструкция по установке живёт в верхней плашке
         // на главном экране, а не отдельной страницей после QR.
         navigate('/app', { replace: true });

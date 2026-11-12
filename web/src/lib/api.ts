@@ -106,6 +106,14 @@ export async function api<T>(path: string, options: RequestOptions = {}): Promis
 
     if (!response.ok) {
       const body = (payload ?? {}) as ApiErrorBody;
+      if (response.status === 401) {
+        const pathname = new URL(path, window.location.origin).pathname;
+        // Сами auth- и mobile-маршруты обрабатывают 401 локально;
+        // для остальных API просим SessionProvider перепроверить сессию.
+        const silent =
+          pathname.startsWith('/api/v1/auth/') || pathname.startsWith('/api/v1/mobile/');
+        if (!silent) window.dispatchEvent(new Event('rc:unauthorized'));
+      }
       throw new ApiError(
         response.status,
         body.error?.code ?? `http_${response.status}`,

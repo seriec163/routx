@@ -4,6 +4,7 @@ import { roleLabel } from '../lib/format';
 import { navigate } from '../lib/router';
 import { Button, ErrorBanner, Field, InfoBanner, Spinner, TextInput } from '../components/ui';
 import { LogoMark } from '../components/Logo';
+import { isMobileClient } from '../mobile/deviceId';
 import { useSession } from '../session';
 
 interface LoginResponse {
@@ -184,6 +185,15 @@ export function LoginPage() {
             >
               Забыли пароль?
             </button>
+            {isMobileClient() ? (
+              <button
+                type="button"
+                className="link auth-link-left"
+                onClick={() => navigate('/app')}
+              >
+                Войти по QR-коду с роутера
+              </button>
+            ) : null}
             {showRecovery ? (
               recoveryDone ? (
                 <InfoBanner>

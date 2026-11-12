@@ -13,6 +13,7 @@ import {
   CSRF_COOKIE,
   IMPERSONATION_COOKIE,
   MFA_TICKET_TTL_SECONDS,
+  clearDeviceCookie,
   clearSessionCookies,
   consumeMfaTicket,
   createMfaTicket,
@@ -550,6 +551,12 @@ export async function registerAuthRoutes(app: FastifyInstance, ctx: RouteContext
           'update sessions set revoked_at = now() where user_id = $1 and revoked_at is null',
           [reset.user_id],
         );
+        await client.query(
+          `update mobile_devices
+              set revoked_at = now(), revoked_by = 'password_reset', device_token_hash = null
+            where user_id = $1 and revoked_at is null`,
+          [reset.user_id],
+        );
         await client.query('commit');
         resetMfa = reset.reset_mfa;
         user = { id: reset.user_id, email: reset.email, role: reset.role };
@@ -671,6 +678,12 @@ export async function registerAuthRoutes(app: FastifyInstance, ctx: RouteContext
         );
         await client.query(
           'update sessions set revoked_at = now() where user_id = $1 and revoked_at is null',
+          [user.id],
+        );
+        await client.query(
+          `update mobile_devices
+              set revoked_at = now(), revoked_by = 'password_reset', device_token_hash = null
+            where user_id = $1 and revoked_at is null`,
           [user.id],
         );
         await client.query('commit');
@@ -844,6 +857,22 @@ export async function registerAuthRoutes(app: FastifyInstance, ctx: RouteContext
         }
       }
       await revokeSession(pool, auth.sessionId);
+      if (auth.mobileDeviceId) {
+        // Явный выход с телефона отвязывает устройство: иначе следующая
+        // загрузка приложения молча восстановила бы сессию.
+        await pool.query(
+          `update mobile_devices
+              set revoked_at = now(), revoked_by = 'logout', device_token_hash = null
+            where id = $1 and revoked_at is null`,
+          [auth.mobileDeviceId],
+        );
+        await pool.query(
+          `update sessions set revoked_at = now()
+            where mobile_device_id = $1 and revoked_at is null`,
+          [auth.mobileDeviceId],
+        );
+      }
+      clearDeviceCookie(reply, ctx.secureCookie);
       clearSessionCookies(reply);
       await audit(pool, {
         actorId: auth.userId,
@@ -932,6 +961,14 @@ export async function registerAuthRoutes(app: FastifyInstance, ctx: RouteContext
     await pool.query(
       'update sessions set revoked_at = now() where user_id = $1 and id <> $2 and revoked_at is null',
       [auth.userId, auth.sessionId],
+    );
+    // Смена пароля должна выкидывать и привязанные телефоны, иначе
+    // приложение молча восстановит сессию по cookie устройства.
+    await pool.query(
+      `update mobile_devices
+          set revoked_at = now(), revoked_by = 'password_change', device_token_hash = null
+        where user_id = $1 and id is distinct from $2 and revoked_at is null`,
+      [auth.userId, auth.mobileDeviceId],
     );
     await audit(pool, {
       actorId: auth.userId,

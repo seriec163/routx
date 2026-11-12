@@ -3,11 +3,19 @@ import type { Pool } from 'pg';
 import { sha256, sha256Hex, randomToken } from '../lib/crypto.js';
 import { HttpError, forbidden, unauthorized } from '../lib/errors.js';
 import { uuidv7 } from '../lib/ids.js';
-import type { PlatformSettings } from '../settings.js';
+import { loadSettings, type PlatformSettings } from '../settings.js';
 
 export const SESSION_COOKIE = 'rc_session';
 export const CSRF_COOKIE = 'rc_csrf';
 export const IMPERSONATION_COOKIE = 'rc_admin_session';
+/**
+ * Долгоживущая привязка устройства. Это HttpOnly-cookie, а не сессия:
+ * по ней приложение получает новую сессию, пока телефон не отвязан.
+ * 400 дней — практический максимум, который не срезают браузеры;
+ * при активности срок продлевается вместе с сессией.
+ */
+export const DEVICE_COOKIE = 'rc_device';
+export const DEVICE_TOKEN_DAYS = 400;
 export const MFA_TICKET_TTL_SECONDS = 300;
 
 export interface AuthUser {
@@ -22,6 +30,7 @@ export interface AuthUser {
   lastName?: string | null;
   impersonatedBy?: string | null;
   impersonatorEmail?: string | null;
+  mobileDeviceId: string | null;
 }
 
 export type Role = 'superadmin' | 'admin' | 'user';
@@ -55,6 +64,16 @@ export function cookieOptions(config: { secure: boolean; days: number }) {
     sameSite: 'strict' as const,
     path: '/',
     maxAge: config.days * 24 * 60 * 60,
+  };
+}
+
+export function deviceCookieOptions(config: { secure: boolean }) {
+  return {
+    httpOnly: true,
+    secure: config.secure,
+    sameSite: 'strict' as const,
+    path: '/',
+    maxAge: DEVICE_TOKEN_DAYS * 24 * 60 * 60,
   };
 }
 
@@ -118,10 +137,48 @@ export function clearSessionCookies(reply: FastifyReply): void {
   reply.clearCookie(IMPERSONATION_COOKIE, { path: '/' });
 }
 
+export function setDeviceCookie(
+  reply: FastifyReply,
+  token: string,
+  options: { secure: boolean },
+): void {
+  reply.setCookie(DEVICE_COOKIE, token, deviceCookieOptions(options));
+}
+
+export function clearDeviceCookie(reply: FastifyReply, secure: boolean): void {
+  reply.clearCookie(DEVICE_COOKIE, {
+    path: '/',
+    httpOnly: true,
+    secure,
+    sameSite: 'strict',
+  });
+}
+
+export interface ResolvedSession extends AuthUser {
+  csrfHash: Buffer;
+  createdAt: Date;
+  expiresAt: Date;
+}
+
+/**
+ * Продлевать сессию, пока ей пользуются. Порог — половина исходного срока:
+ * сессия на 45 дней продлевается примерно раз в 22 дня. Короткие сессии
+ * (вход под пользователем на 2 часа) не трогаем.
+ */
+export function shouldRenewSession(
+  session: { createdAt: Date; expiresAt: Date; impersonatedBy?: string | null },
+  now = Date.now(),
+): boolean {
+  if (session.impersonatedBy) return false;
+  const total = session.expiresAt.getTime() - session.createdAt.getTime();
+  if (total < 24 * 60 * 60 * 1000) return false;
+  return session.expiresAt.getTime() - now < total / 2;
+}
+
 export async function resolveSession(
   pool: Pool,
   token: string,
-): Promise<(AuthUser & { csrfHash: Buffer }) | null> {
+): Promise<ResolvedSession | null> {
   const result = await pool.query<{
     session_id: string;
     csrf_hash: Buffer;
@@ -133,9 +190,12 @@ export async function resolveSession(
     mobile_device_id: string | null;
     impersonated_by: string | null;
     impersonator_email: string | null;
+    created_at: Date;
+    expires_at: Date;
   }>(
     `select s.id as session_id, s.csrf_hash, s.mfa_passed, s.mobile_device_id,
             s.impersonated_by, imp.email as impersonator_email,
+            s.created_at, s.expires_at,
             u.id as user_id, u.email, u.role, u.totp_enabled
        from sessions s
        join users u on u.id = s.user_id
@@ -178,6 +238,9 @@ export async function resolveSession(
     csrfHash: row.csrf_hash,
     impersonatedBy: row.impersonated_by,
     impersonatorEmail: row.impersonator_email,
+    mobileDeviceId: row.mobile_device_id,
+    createdAt: row.created_at,
+    expiresAt: row.expires_at,
   };
 }
 
@@ -236,6 +299,7 @@ export function registerGuards(app: FastifyInstance, pool: Pool, options: GuardO
       mfaPassed: session.mfaPassed,
       impersonatedBy: session.impersonatedBy ?? null,
       impersonatorEmail: session.impersonatorEmail ?? null,
+      mobileDeviceId: session.mobileDeviceId,
     };
 
     if (!session.mfaPassed && !config?.allowPendingMfa) {
@@ -254,9 +318,86 @@ export function registerGuards(app: FastifyInstance, pool: Pool, options: GuardO
         throw forbidden('CSRF-токен недействителен');
       }
     }
+
+    await ensureDeviceBinding(pool, request, reply, session, options);
+    await renewSessionIfNeeded(pool, request, reply, session, token, options);
   });
 
   void options.agentPaths;
+}
+
+/**
+ * Выдаёт rc_device существующим мобильным сессиям, созданным до появления
+ * привязки. Достаточно одного запроса после обновления панели — и телефон
+ * сможет восстанавливать сессию без нового QR.
+ */
+async function ensureDeviceBinding(
+  pool: Pool,
+  request: FastifyRequest,
+  reply: FastifyReply,
+  session: ResolvedSession,
+  options: GuardOptions,
+): Promise<void> {
+  if (!session.mobileDeviceId) return;
+  const existing = request.cookies[DEVICE_COOKIE];
+  if (typeof existing === 'string' && existing !== '') return;
+
+  const token = randomToken(32);
+  const result = await pool.query(
+    `update mobile_devices
+        set device_token_hash = $2, device_token_created_at = now()
+      where id = $1 and revoked_at is null and device_token_hash is null`,
+    [session.mobileDeviceId, sha256(token)],
+  );
+  if ((result.rowCount ?? 0) > 0) {
+    setDeviceCookie(reply, token, { secure: options.secureCookie });
+  }
+}
+
+/**
+ * Продление активной сессии. Cookie переставляются с тем же токеном,
+ * поэтому параллельные вкладки не мешают друг другу: CSRF-значение
+ * берётся из запроса и не меняется.
+ */
+async function renewSessionIfNeeded(
+  pool: Pool,
+  request: FastifyRequest,
+  reply: FastifyReply,
+  session: ResolvedSession,
+  token: string,
+  options: GuardOptions,
+): Promise<void> {
+  if (!shouldRenewSession(session)) return;
+
+  const settings = await loadSettings(pool);
+  const newExpiresAt = new Date(Date.now() + settings.sessionDays * 24 * 60 * 60 * 1000);
+  if (newExpiresAt.getTime() <= session.expiresAt.getTime()) return;
+
+  await pool.query(
+    'update sessions set expires_at = $2 where id = $1 and revoked_at is null',
+    [session.sessionId, newExpiresAt],
+  );
+
+  reply.setCookie(
+    SESSION_COOKIE,
+    token,
+    cookieOptions({ secure: options.secureCookie, days: settings.sessionDays }),
+  );
+
+  const csrf = request.cookies[CSRF_COOKIE];
+  if (typeof csrf === 'string' && csrf !== '') {
+    reply.setCookie(CSRF_COOKIE, csrf, {
+      ...cookieOptions({ secure: options.secureCookie, days: settings.sessionDays }),
+      httpOnly: false,
+    });
+  }
+
+  // Привязка телефона должна жить вместе с сессией: пока приложение
+  // открывают, срок cookie устройства тоже продлевается.
+  const deviceToken = request.cookies[DEVICE_COOKIE];
+  if (typeof deviceToken === 'string' && deviceToken !== '') {
+    setDeviceCookie(reply, deviceToken, { secure: options.secureCookie });
+  }
 }
 
 function assertSameOrigin(request: FastifyRequest): void {

@@ -26,6 +26,19 @@ interface RouteContext {
 
 type Auth = NonNullable<FastifyRequest['auth']>;
 
+/**
+ * Полный отзыв доступа пользователя: сессии и долгоживущие привязки
+ * телефонов. Без второго шага PWA восстановила бы сессию по rc_device.
+ */
+async function revokeUserDevices(pool: Pool, userId: string, by: string): Promise<void> {
+  await pool.query(
+    `update mobile_devices
+        set revoked_at = now(), revoked_by = $2, device_token_hash = null
+      where user_id = $1 and revoked_at is null`,
+    [userId, by],
+  );
+}
+
 interface ManagedUserRow {
   id: string;
   role: string;
@@ -284,6 +297,7 @@ export async function registerUserRoutes(app: FastifyInstance, ctx: RouteContext
       await pool.query('update sessions set revoked_at = now() where user_id = $1 and revoked_at is null', [
         params.id,
       ]);
+      await revokeUserDevices(pool, params.id, 'user_suspended');
     }
 
     await audit(pool, {
@@ -314,6 +328,7 @@ export async function registerUserRoutes(app: FastifyInstance, ctx: RouteContext
       'update sessions set revoked_at = now() where user_id = $1 and revoked_at is null',
       [params.id],
     );
+    await revokeUserDevices(pool, params.id, 'admin_revoke_sessions');
     await audit(pool, {
       actorId: auth.userId,
       actorRole: auth.role,
@@ -356,6 +371,7 @@ export async function registerUserRoutes(app: FastifyInstance, ctx: RouteContext
     await pool.query('update sessions set revoked_at = now() where user_id = $1 and revoked_at is null', [
       params.id,
     ]);
+    await revokeUserDevices(pool, params.id, 'user_archived');
     await audit(pool, {
       actorId: auth.userId,
       actorRole: auth.role,

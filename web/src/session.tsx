@@ -1,5 +1,15 @@
-import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
-import { api, errorMessage } from './lib/api';
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from 'react';
+import { api, ApiError, errorMessage } from './lib/api';
+import { clearMobileBound, isMobileClient, markMobileBound } from './mobile/deviceId';
 
 export interface SessionUser {
   id: string;
@@ -46,30 +56,77 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   const [me, setMe] = useState<Me | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const refreshAttempted = useRef(false);
+  const inFlight = useRef<Promise<Me | null> | null>(null);
 
-  const reload = useCallback(async (): Promise<Me | null> => {
-    try {
-      const payload = await api<Me>('/api/v1/auth/me');
-      setMe(payload);
-      setError(null);
-      return payload;
-    } catch (caught) {
-      const message = errorMessage(caught);
-      setMe(null);
-      // 401/unauthorized means not logged in - not an error to show
-      if (message.toLowerCase().includes('вход') || message.toLowerCase().includes('авториз')) {
+  const reload = useCallback((): Promise<Me | null> => {
+    if (inFlight.current) return inFlight.current;
+
+    const run = (async (): Promise<Me | null> => {
+      try {
+        let payload: Me;
+        try {
+          payload = await api<Me>('/api/v1/auth/me');
+        } catch (caught) {
+          const unauthorized = caught instanceof ApiError && caught.status === 401;
+          if (!unauthorized || !isMobileClient() || refreshAttempted.current) throw caught;
+
+          // Сессия истекла, но телефон привязан: пробуем восстановить
+          // доступ по HttpOnly-cookie устройства без повторного QR.
+          refreshAttempted.current = true;
+          try {
+            await api('/api/v1/mobile/refresh', { method: 'POST', body: {} });
+            markMobileBound();
+            refreshAttempted.current = false;
+            payload = await api<Me>('/api/v1/auth/me');
+          } catch {
+            throw caught;
+          }
+        }
+
+        setMe(payload);
+        if (isMobileClient()) markMobileBound();
         setError(null);
-      } else {
-        setError(message);
+        return payload;
+      } catch (caught) {
+        const message = errorMessage(caught);
+        setMe(null);
+        // 401 — это не ошибка, а обычное состояние «нужно войти».
+        const unauthorized = caught instanceof ApiError && caught.status === 401;
+        if (
+          unauthorized ||
+          message.toLowerCase().includes('вход') ||
+          message.toLowerCase().includes('авториз')
+        ) {
+          setError(null);
+        } else {
+          setError(message);
+        }
+        return null;
+      } finally {
+        setLoading(false);
       }
-      return null;
-    } finally {
-      setLoading(false);
-    }
+    })();
+
+    inFlight.current = run;
+    void run.finally(() => {
+      if (inFlight.current === run) inFlight.current = null;
+    });
+    return run;
   }, []);
 
   useEffect(() => {
     void reload();
+  }, [reload]);
+
+  // Любой фоновой запрос, получивший 401, запускает одну общую проверку
+  // сессии. Так PWA не залипает на «просроченных» данных.
+  useEffect(() => {
+    const handler = () => {
+      void reload();
+    };
+    window.addEventListener('rc:unauthorized', handler);
+    return () => window.removeEventListener('rc:unauthorized', handler);
   }, [reload]);
 
   const logout = useCallback(async () => {
@@ -78,6 +135,8 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     } catch {
       // Сессия могла уже истечь — это не мешает выйти локально.
     }
+    clearMobileBound();
+    refreshAttempted.current = false;
     setMe(null);
     setError(null);
   }, []);
