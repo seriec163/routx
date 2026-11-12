@@ -1,0 +1,13 @@
+{
+	"admin/services/routx": {
+		"title": "RoutX",
+		"order": 61,
+		"action": {
+			"type": "view",
+			"path": "routx/status"
+		},
+		"depends": {
+			"acl": [ "luci-app-routx" ]
+		}
+	}
+}

@@ -1,0 +1,2 @@
+#!/bin/sh
+exec /usr/bin/ucode -L /usr/lib/routx-agent /usr/lib/routx-agent/jn_cli.uc "$@"

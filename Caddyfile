@@ -1,0 +1,30 @@
+# Необязательный reverse proxy для RoutX.
+# Запуск: docker compose --profile proxy up -d
+#
+# RC_DOMAIN — публичное имя (или localhost для локальной проверки).
+# RC_TLS_MODE — "internal" для локального CA либо e-mail для ACME/Let's Encrypt.
+#
+# Приложение само выставляет CSP и базовые security-заголовки; здесь добавляются
+# только HSTS и скрытие версии сервера.
+
+{$RC_DOMAIN:localhost} {
+	tls {$RC_TLS_MODE:internal}
+
+	encode zstd gzip
+
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		-Server
+	}
+
+	reverse_proxy app:3000 {
+		health_uri /healthz
+		health_interval 30s
+		health_timeout 5s
+	}
+
+	log {
+		output stdout
+		format console
+	}
+}

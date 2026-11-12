@@ -1,0 +1,38 @@
+# Зависимости и сборка
+node_modules/
+dist/
+coverage/
+*.tsbuildinfo
+
+# Локальная конфигурация и секреты
+.env
+.env.*
+!.env.example
+
+# Логи и временные файлы
+*.log
+npm-debug.log*
+.DS_Store
+Thumbs.db
+
+# Редакторы
+.vscode/
+.idea/
+
+# Клоны upstream только для аудита, в поставку не входят
+/audit/
+
+# Локальные данные Docker Compose (если используются bind-mounts)
+pgdata/
+caddy_data/
+caddy_config/
+backups/
+
+# Agent dist
+agent/dist/
+
+# Временные артефакты сборки apk и браузерных проверок
+tmp_apk_root/
+tmp/
+.playwright-mcp/
+service-picker.png

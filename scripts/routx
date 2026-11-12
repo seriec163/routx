@@ -1,0 +1,1412 @@
+#!/bin/sh
+# RoutX CLI: установка, обновление и обслуживание панели.
+# Работает в Docker и без Docker, на POSIX sh (OpenWrt ash, Debian dash).
+
+set -eu
+
+CLI_VERSION="1.0.0"
+DEFAULT_DIR="${ROUTX_DIR:-/opt/routx}"
+DEFAULT_REPO="https://github.com/seriec163/routx.git"
+DEFAULT_REF="main"
+
+DIR="$DEFAULT_DIR"
+MODE=""
+ENV_FILE=""
+DOMAIN=""
+TLS_EMAIL=""
+PUBLIC_URL_ARG=""
+PORT_ARG=""
+BIND_ARG=""
+ADMIN_EMAIL_ARG=""
+ADMIN_PASSWORD_ARG=""
+DB_URL_ARG=""
+DB_NAME_ARG=""
+DB_USER_ARG=""
+DB_PASSWORD_ARG=""
+NO_BUILD=0
+BUILD=0
+NO_SERVICE=0
+NO_CADDY=0
+INSTALL_DEPS=0
+FORCE_ENV=0
+WITH_PROXY=0
+YES=0
+PURGE=0
+FOLLOW=0
+CADDY_READY=0
+REF="$DEFAULT_REF"
+REPO_URL="$DEFAULT_REPO"
+ARCHIVE_URL=""
+UPDATER_BIN="/usr/local/bin/routx-updater"
+UPDATER_UNIT="/etc/systemd/system/routx-updater.service"
+
+die() { printf 'Ошибка: %s\n' "$*" >&2; exit 1; }
+warn() { printf 'Внимание: %s\n' "$*" >&2; }
+info() { printf '%s\n' "$*"; }
+has() { command -v "$1" >/dev/null 2>&1; }
+
+prompt() {
+	__text="$1"
+	__default="${2:-}"
+	if (exec </dev/tty) 2>/dev/null; then
+		printf '%s' "$__text" > /dev/tty
+		IFS= read -r __answer < /dev/tty || __answer=""
+	else
+		printf '%s' "$__text" >&2
+		IFS= read -r __answer || __answer=""
+	fi
+	[ -n "$__answer" ] || __answer="$__default"
+	printf '%s' "$__answer"
+}
+
+confirm() {
+	__text="$1"
+	__default="${2:-y}"
+	__answer=$(prompt "$__text " "$__default")
+	case "$__answer" in
+		y|Y|yes|YES|да|Да|д) return 0 ;;
+		*) return 1 ;;
+	esac
+}
+
+prompt_secret() {
+	__text="$1"
+	if (exec </dev/tty) 2>/dev/null; then
+		printf '%s' "$__text" > /dev/tty
+		__saved=""
+		if has stty; then
+			__saved=$(stty -g < /dev/tty 2>/dev/null || true)
+			stty -echo < /dev/tty 2>/dev/null || true
+		fi
+		IFS= read -r __answer < /dev/tty || __answer=""
+		if [ -n "$__saved" ]; then
+			stty "$__saved" < /dev/tty 2>/dev/null || stty echo < /dev/tty 2>/dev/null || true
+		elif has stty; then
+			stty echo < /dev/tty 2>/dev/null || true
+		fi
+		printf '\n' > /dev/tty
+	else
+		printf '%s' "$__text" >&2
+		IFS= read -r __answer || __answer=""
+	fi
+	printf '%s' "$__answer"
+}
+
+ask_interactive() {
+	[ "$YES" -eq 1 ] && return 0
+	if [ "$FORCE_ENV" -eq 0 ] && [ -f "$ENV_FILE" ] && { [ -n "$(env_get RC_DOMAIN)" ] || [ -n "$(env_get RC_PUBLIC_URL)" ]; }; then
+		return 0
+	fi
+
+	info ""
+	info "RoutX — установка"
+	info "Нажмите Enter, чтобы принять значение в скобках."
+	info ""
+
+	if [ -z "$DOMAIN" ] && [ -z "$PUBLIC_URL_ARG" ]; then
+		__answer=$(prompt "Домен панели [localhost]: " "")
+		if [ -n "$__answer" ]; then
+			case "$__answer" in
+				*://*) __answer=$(printf '%s' "$__answer" | sed 's#^[A-Za-z][A-Za-z0-9+.-]*://##') ;;
+			esac
+			__answer=${__answer%%/*}
+			case "$__answer" in
+				*" "*) die "Некорректный домен" ;;
+			esac
+			DOMAIN="$__answer"
+		fi
+	fi
+
+	if [ -n "$DOMAIN" ] && [ -z "$TLS_EMAIL" ]; then
+		TLS_EMAIL=$(prompt "E-mail для Let's Encrypt (Enter — пропустить): " "")
+	fi
+
+	if [ -z "$ADMIN_EMAIL_ARG" ]; then
+		__default_email=$(env_get RC_BOOTSTRAP_EMAIL)
+		if [ -z "$__default_email" ]; then
+			if [ -n "$DOMAIN" ]; then
+				__default_email="admin@$DOMAIN"
+			else
+				__default_email="admin@routx.local"
+			fi
+		fi
+		ADMIN_EMAIL_ARG=$(prompt "E-mail администратора [$__default_email]: " "$__default_email")
+	fi
+
+	if [ -z "$ADMIN_PASSWORD_ARG" ]; then
+		__answer=$(prompt_secret "Пароль администратора (Enter — сгенерировать): ")
+		while [ -n "$__answer" ] && [ "${#__answer}" -lt 12 ]; do
+			warn "Пароль должен быть не короче 12 символов."
+			__answer=$(prompt_secret "Пароль администратора (Enter — сгенерировать): ")
+		done
+		[ -n "$__answer" ] && ADMIN_PASSWORD_ARG="$__answer"
+	fi
+
+	if [ -z "$PORT_ARG" ] && [ -z "$(env_get RC_PORT)" ] && [ "$MODE" = native ]; then
+		PORT_ARG=$(prompt "Порт приложения [3000]: " "3000")
+	fi
+
+	info ""
+	info "  режим: ${MODE}"
+	[ -n "$DOMAIN" ] && info "  домен: $DOMAIN"
+	info "  админ: $ADMIN_EMAIL_ARG"
+	info ""
+	if ! confirm "Начать установку? [Y/n]:" "y"; then
+		info "Отменено."
+		exit 0
+	fi
+}
+
+usage() {
+	cat <<'EOF'
+RoutX CLI — установка и обслуживание панели RoutX.
+
+Использование:
+  routx                    установить (нативно, спросит домен)
+  routx install [параметры]
+  routx update
+  routx rollback
+  routx updater install|status
+  routx status
+  routx logs [-f]
+  routx restart | stop | start
+  routx doctor
+  routx uninstall [--purge]
+  routx version
+  routx help
+
+Команда install (по умолчанию — нативная установка):
+  --docker                 установить через Docker Compose
+  --native                 установить без Docker (Node.js + PostgreSQL)
+  --dir PATH               каталог установки (по умолчанию /opt/routx)
+  --domain HOST            публичный домен; для native настраивает Caddy
+  --tls-email EMAIL        e-mail для Let's Encrypt
+  --public-url URL         публичный адрес панели
+  --port PORT              порт приложения (по умолчанию 3000)
+  --bind ADDR              адрес прослушивания (по умолчанию 127.0.0.1)
+  --admin-email EMAIL      e-mail первого администратора
+  --admin-password PASS    пароль первого администратора
+  --db-url URL             готовая PostgreSQL-строка (native)
+  --db-name NAME           имя локальной БД (native, по умолчанию router_control)
+  --db-user USER           пользователь локальной БД (native)
+  --db-password PASS       пароль локальной БД (native)
+  --with-proxy             поднять Caddy (Docker) / создать Caddyfile (native)
+  --build                  собрать Docker-образ локально вместо pull
+  --no-build               не пересобирать образ (устарело, теперь pull по умолчанию)
+  --no-service             не создавать systemd-сервис (native)
+  --no-caddy               не устанавливать и не настраивать Caddy (native)
+  --install-deps           установить Node.js и PostgreSQL (Debian/Ubuntu)
+  --force-env              пересоздать .env (старый сохраняется в .env.bak.*)
+  --yes                    без вопросов, значения по умолчанию
+
+Без --yes установщик интерактивно спросит домен, e-mail для Let's Encrypt,
+e-mail администратора, пароль и порт.
+
+Переменные окружения:
+  ROUTX_DIR, ROUTX_MODE=docker|native, ROUTX_REPO_URL, ROUTX_REF,
+  ROUTX_ARCHIVE_URL.
+
+Примеры:
+  sudo routx
+  sudo routx install --domain panel.example.com --tls-email admin@example.com --yes
+  sudo routx install --docker --domain panel.example.com --tls-email admin@example.com
+  sudo routx update            # скачать свежий образ
+  sudo routx update --build    # собрать из исходников
+  sudo routx rollback          # вернуть предыдущий образ
+  sudo routx updater install   # разрешить обновление из панели
+  routx status
+  routx logs -f
+EOF
+}
+
+gen_secret() {
+	__bytes=${1:-32}
+	if has openssl; then
+		openssl rand -hex "$__bytes"
+		return 0
+	fi
+	if [ -r /dev/urandom ]; then
+		od -An -N "$__bytes" -tx1 /dev/urandom | tr -d ' \n'
+		return 0
+	fi
+	__seed="$(date +%s)-$$-${RANDOM:-0}"
+	printf '%s' "$__seed" | sha256sum | cut -c1-$((__bytes * 2))
+}
+
+version_ge() {
+	awk -v a="$1" -v b="$2" 'BEGIN {
+		split(a, x, "."); split(b, y, ".");
+		for (i = 1; i <= 3; i++) {
+			if ((x[i] + 0) > (y[i] + 0)) exit 0;
+			if ((x[i] + 0) < (y[i] + 0)) exit 1;
+		}
+		exit 0;
+	}'
+}
+
+env_get() {
+	[ -f "$ENV_FILE" ] || return 0
+	awk -v k="$1" 'index($0, k "=") == 1 { sub(/^[^=]*=/, ""); print; exit }' "$ENV_FILE"
+}
+
+env_has() {
+	[ -f "$ENV_FILE" ] && grep -q "^$1=" "$ENV_FILE"
+}
+
+set_env() {
+	__k="$1"
+	__v="$2"
+	[ -f "$ENV_FILE" ] || : > "$ENV_FILE"
+	if grep -q "^$__k=" "$ENV_FILE"; then
+		__tmp="$ENV_FILE.tmp.$$"
+		awk -v k="$__k" -v v="$__v" 'BEGIN { done = 0 }
+			index($0, k "=") == 1 { print k "=" v; done = 1; next }
+			{ print }
+			END { if (!done) print k "=" v }' "$ENV_FILE" > "$__tmp"
+		mv "$__tmp" "$ENV_FILE"
+	else
+		printf '%s=%s\n' "$__k" "$__v" >> "$ENV_FILE"
+	fi
+	chmod 600 "$ENV_FILE" 2>/dev/null || true
+}
+
+download() {
+	__url="$1"
+	__out="$2"
+	if has curl; then
+		curl -fsSL "$__url" -o "$__out"
+	elif has wget; then
+		wget -qO "$__out" "$__url"
+	else
+		die "Нужен curl или wget"
+	fi
+}
+
+http_get() {
+	if has curl; then
+		curl -fsS "$1"
+	elif has wget; then
+		wget -qO- "$1"
+	else
+		return 1
+	fi
+}
+
+resolve_dir() {
+	case "$DIR" in
+		/*) ;;
+		*) DIR="$(pwd)/$DIR" ;;
+	esac
+	mkdir -p "$DIR"
+	ENV_FILE="$DIR/.env"
+}
+
+detect_mode() {
+	if [ -n "$MODE" ]; then
+		return 0
+	fi
+	if [ -f "$DIR/.routx-mode" ]; then
+		MODE=$(cat "$DIR/.routx-mode" 2>/dev/null || true)
+	fi
+	if [ -z "$MODE" ] && [ -f "$ENV_FILE" ] && grep -q '^DATABASE_URL=' "$ENV_FILE" && [ ! -f "$DIR/docker-compose.yml" ]; then
+		MODE=native
+	fi
+	if [ -z "$MODE" ] && [ -f "$DIR/docker-compose.yml" ] && has docker; then
+		MODE=docker
+	fi
+	if [ -z "$MODE" ]; then
+		MODE=native
+	fi
+}
+
+compose() {
+	if has docker && docker compose version >/dev/null 2>&1; then
+		docker compose --env-file "$ENV_FILE" -f "$DIR/docker-compose.yml" "$@"
+	elif has docker-compose; then
+		docker-compose --env-file "$ENV_FILE" -f "$DIR/docker-compose.yml" "$@"
+	else
+		die "Docker Compose не найден"
+	fi
+}
+
+load_runtime() {
+	resolve_dir
+	detect_mode
+	PORT=$(env_get RC_PORT)
+	[ -n "$PORT" ] || PORT=3000
+	BIND=$(env_get RC_BIND_ADDR)
+	[ -n "$BIND" ] || BIND=127.0.0.1
+	PUBLIC_URL=$(env_get RC_PUBLIC_URL)
+	[ -n "$PUBLIC_URL" ] || PUBLIC_URL="http://127.0.0.1:$PORT"
+	WITH_PROXY=0
+	case "$(env_get COMPOSE_PROFILES)" in
+		*proxy*) WITH_PROXY=1 ;;
+	esac
+	if [ -n "$(env_get RC_DOMAIN)" ]; then
+		WITH_PROXY=1
+	fi
+}
+
+wait_ready() {
+	__i=0
+	while [ "$__i" -lt 60 ]; do
+		if http_get "http://127.0.0.1:$PORT/readyz" >/dev/null 2>&1; then
+			return 0
+		fi
+		sleep 2
+		__i=$((__i + 1))
+	done
+	return 1
+}
+
+check_docker() {
+	has docker || die "Docker не найден. Установите Docker 24+ или используйте --native."
+	docker compose version >/dev/null 2>&1 || has docker-compose || die "Docker Compose v2 не найден."
+	if ! docker info >/dev/null 2>&1; then
+		die "Нет доступа к Docker. Запустите с sudo или добавьте пользователя в группу docker."
+	fi
+}
+
+install_debian_deps() {
+	[ -f /etc/debian_version ] || die "--install-deps поддерживается для Debian/Ubuntu. Установите Node.js 22.12+ и PostgreSQL 16 вручную."
+	if [ "$(id -u)" -eq 0 ]; then
+		SUDO=""
+	elif has sudo && sudo -n true 2>/dev/null; then
+		SUDO="sudo"
+	else
+		die "Для --install-deps нужен root или sudo без пароля."
+	fi
+	export DEBIAN_FRONTEND=noninteractive
+	$SUDO apt-get update
+	$SUDO apt-get install -y curl ca-certificates gnupg postgresql postgresql-client
+	if ! has node || ! version_ge "$(node -p 'process.versions.node' 2>/dev/null || echo 0)" "22.12.0"; then
+		if [ -n "$SUDO" ]; then
+			curl -fsSL https://deb.nodesource.com/setup_24.x | $SUDO -E bash -
+		else
+			curl -fsSL https://deb.nodesource.com/setup_24.x | bash -
+		fi
+		$SUDO apt-get install -y nodejs
+	fi
+	if has systemctl; then
+		$SUDO systemctl enable --now postgresql 2>/dev/null || true
+	fi
+	info "Зависимости Debian/Ubuntu установлены."
+}
+
+check_native() {
+	NEED_DEPS=0
+	if ! has node; then
+		NEED_DEPS=1
+	elif ! version_ge "$(node -p 'process.versions.node' 2>/dev/null || echo 0)" "22.12.0"; then
+		NEED_DEPS=1
+	fi
+	has npm || NEED_DEPS=1
+	if [ -z "$DB_URL_ARG" ] && ! has psql; then
+		NEED_DEPS=1
+	fi
+	if [ "$NEED_DEPS" -eq 1 ]; then
+		if [ "$INSTALL_DEPS" -eq 0 ] && [ -f /etc/debian_version ] && [ "$YES" -eq 1 ]; then
+			INSTALL_DEPS=1
+		fi
+		if [ "$INSTALL_DEPS" -eq 0 ] && [ -f /etc/debian_version ] && [ "$YES" -eq 0 ]; then
+			if confirm "Не хватает Node.js/PostgreSQL. Установить зависимости Debian/Ubuntu? [Y/n]:" "y"; then
+				INSTALL_DEPS=1
+			fi
+		fi
+		if [ "$INSTALL_DEPS" -eq 1 ]; then
+			install_debian_deps
+		else
+			die "Не хватает зависимостей. Для Debian/Ubuntu: sudo routx install --native --install-deps ...; или установите Node.js 22.12+, PostgreSQL 16, npm и psql."
+		fi
+	fi
+	has node || die "Node.js не найден. Нужен Node.js 22.12+."
+	NODE_VERSION=$(node -p 'process.versions.node')
+	version_ge "$NODE_VERSION" "22.12.0" || die "Нужен Node.js 22.12+, установлен $NODE_VERSION."
+	has npm || die "npm не найден."
+	if [ -z "$DB_URL_ARG" ] && ! has psql; then
+		die "psql не найден. Установите postgresql-client или передайте --db-url."
+	fi
+}
+
+prepare_env() {
+	FIRST_INSTALL=0
+	if [ ! -f "$ENV_FILE" ]; then
+		FIRST_INSTALL=1
+		umask 077
+		: > "$ENV_FILE"
+	elif [ "$FORCE_ENV" -eq 1 ]; then
+		mv "$ENV_FILE" "$ENV_FILE.bak.$(date +%s)"
+		FIRST_INSTALL=1
+		: > "$ENV_FILE"
+	fi
+
+	PORT="${PORT_ARG:-$(env_get RC_PORT)}"
+	[ -n "$PORT" ] || PORT=3000
+	BIND="${BIND_ARG:-$(env_get RC_BIND_ADDR)}"
+	[ -n "$BIND" ] || BIND=127.0.0.1
+
+	PUBLIC_URL="${PUBLIC_URL_ARG:-$(env_get RC_PUBLIC_URL)}"
+	if [ -n "$DOMAIN" ]; then
+		PUBLIC_URL="https://$DOMAIN"
+	fi
+	if [ "$MODE" = docker ] && [ "$WITH_PROXY" -eq 1 ] && [ -z "$DOMAIN" ] && [ -z "$PUBLIC_URL_ARG" ] && [ -z "$(env_get RC_PUBLIC_URL)" ]; then
+		PUBLIC_URL="https://localhost"
+	fi
+	[ -n "$PUBLIC_URL" ] || PUBLIC_URL="http://127.0.0.1:$PORT"
+
+	COOKIE_SECURE="auto"
+	case "$PUBLIC_URL" in
+		https://*) COOKIE_SECURE=true ;;
+	esac
+	TRUST="false"
+	if [ -n "$DOMAIN" ] || [ "$COOKIE_SECURE" = true ] || { [ "$MODE" = docker ] && [ "$WITH_PROXY" -eq 1 ]; }; then
+		TRUST="true"
+	fi
+
+	ADMIN_EMAIL="${ADMIN_EMAIL_ARG:-$(env_get RC_BOOTSTRAP_EMAIL)}"
+	[ -n "$ADMIN_EMAIL" ] || ADMIN_EMAIL="admin@routx.local"
+	ADMIN_PASSWORD="${ADMIN_PASSWORD_ARG:-$(env_get RC_BOOTSTRAP_PASSWORD)}"
+	ADMIN_PASSWORD_GENERATED=0
+	if [ -z "$ADMIN_PASSWORD" ]; then
+		ADMIN_PASSWORD=$(gen_secret 12)
+		ADMIN_PASSWORD_GENERATED=1
+	fi
+	[ "${#ADMIN_PASSWORD}" -ge 12 ] || die "Пароль администратора должен быть не короче 12 символов."
+
+	MASTER_KEY=$(env_get RC_MASTER_KEY)
+	MASTER_KEY_GENERATED=0
+	if [ -z "$MASTER_KEY" ] && [ -f "$DIR/data/master.key" ]; then
+		MASTER_KEY=$(tr -d '\r\n' < "$DIR/data/master.key")
+	fi
+	if [ -z "$MASTER_KEY" ]; then
+		MASTER_KEY=$(gen_secret 32)
+		MASTER_KEY_GENERATED=1
+	fi
+	[ "${#MASTER_KEY}" -ge 32 ] || die "RC_MASTER_KEY должен быть не короче 32 символов."
+
+	POSTGRES_PASSWORD=$(env_get POSTGRES_PASSWORD)
+	[ -n "$POSTGRES_PASSWORD" ] || POSTGRES_PASSWORD=$(gen_secret 24)
+	POSTGRES_DB="${DB_NAME_ARG:-$(env_get POSTGRES_DB)}"
+	[ -n "$POSTGRES_DB" ] || POSTGRES_DB=router_control
+	POSTGRES_USER="${DB_USER_ARG:-$(env_get POSTGRES_USER)}"
+	[ -n "$POSTGRES_USER" ] || POSTGRES_USER=router_control
+
+	set_env NODE_ENV production
+	LOG_LEVEL=$(env_get LOG_LEVEL)
+	[ -n "$LOG_LEVEL" ] || LOG_LEVEL=info
+	set_env LOG_LEVEL "$LOG_LEVEL"
+	set_env RC_MASTER_KEY "$MASTER_KEY"
+	set_env RC_PUBLIC_URL "$PUBLIC_URL"
+	set_env RC_COOKIE_SECURE "$COOKIE_SECURE"
+	set_env TRUST_PROXY "$TRUST"
+	set_env RC_BOOTSTRAP_EMAIL "$ADMIN_EMAIL"
+	set_env RC_BOOTSTRAP_PASSWORD "$ADMIN_PASSWORD"
+	set_env RC_BIND_ADDR "$BIND"
+	set_env RC_PORT "$PORT"
+	set_env MIGRATE_ON_START false
+
+	if [ "$MODE" = docker ] && [ -n "$DOMAIN" ]; then
+		set_env RC_DOMAIN "$DOMAIN"
+		set_env RC_TLS_MODE "${TLS_EMAIL:-internal}"
+		set_env COMPOSE_PROFILES proxy
+		WITH_PROXY=1
+	fi
+	if [ "$MODE" = docker ] && [ "$WITH_PROXY" -eq 1 ]; then
+		set_env COMPOSE_PROFILES proxy
+	fi
+
+	if [ "$MODE" = docker ]; then
+		set_env HOST 0.0.0.0
+		set_env PORT 3000
+		set_env POSTGRES_DB "$POSTGRES_DB"
+		set_env POSTGRES_USER "$POSTGRES_USER"
+		set_env POSTGRES_PASSWORD "$POSTGRES_PASSWORD"
+		set_env POSTGRES_PORT 5432
+		set_env RC_MASTER_KEY_FILE /app/data/master.key
+	else
+		set_env HOST "$BIND"
+		set_env PORT "$PORT"
+		set_env RC_MASTER_KEY_FILE "$DIR/data/master.key"
+		set_env RC_AGENT_DIST "$DIR/agent/dist"
+		set_env WEB_DIST "$DIR/web/dist"
+		set_env MIGRATIONS_DIR "$DIR/server/migrations"
+		set_env POSTGRES_DB "$POSTGRES_DB"
+		set_env POSTGRES_USER "$POSTGRES_USER"
+		set_env POSTGRES_PASSWORD "$POSTGRES_PASSWORD"
+	fi
+
+	printf '%s\n' "$MODE" > "$DIR/.routx-mode"
+	set_env ROUTX_DIR "$DIR"
+	chmod 600 "$ENV_FILE"
+}
+
+write_master_key() {
+	[ "$MODE" = native ] || return 0
+	mkdir -p "$DIR/data"
+	printf '%s\n' "$MASTER_KEY" > "$DIR/data/master.key"
+	chmod 600 "$DIR/data/master.key"
+}
+
+write_native_caddyfile() {
+	[ "$MODE" = native ] || return 0
+	[ -n "$DOMAIN" ] || [ "$WITH_PROXY" -eq 1 ] || return 0
+	__site="${DOMAIN:-localhost}"
+	printf '%s {\n\treverse_proxy 127.0.0.1:%s\n}\n' "$__site" "$PORT" > "$DIR/Caddyfile.routx"
+	chmod 644 "$DIR/Caddyfile.routx" 2>/dev/null || true
+}
+
+setup_caddy_native() {
+	[ "$MODE" = native ] || return 0
+	[ -n "$DOMAIN" ] || return 0
+	CADDY_READY=0
+	if [ "$NO_CADDY" -eq 1 ]; then
+		warn "Caddy не настраивался (--no-caddy). Конфиг: $DIR/Caddyfile.routx"
+		return 0
+	fi
+	if ! has caddy && [ -f /etc/debian_version ]; then
+		__sudo=""
+		if [ "$(id -u)" -ne 0 ] && has sudo && sudo -n true 2>/dev/null; then
+			__sudo="sudo"
+		fi
+		if [ "$(id -u)" -eq 0 ] || [ -n "$__sudo" ]; then
+			info "Устанавливаю Caddy для HTTPS..."
+			$__sudo apt-get update >/dev/null 2>&1 || true
+			$__sudo DEBIAN_FRONTEND=noninteractive apt-get install -y caddy >/dev/null 2>&1 || warn "Не удалось установить Caddy через apt."
+		fi
+	fi
+	if ! has caddy; then
+		warn "Caddy не найден. HTTPS-конфиг готов: $DIR/Caddyfile.routx"
+		warn "Установите Caddy и добавьте строку: import $DIR/Caddyfile.routx"
+		return 0
+	fi
+	if [ "$(id -u)" -ne 0 ]; then
+		warn "Для настройки Caddy нужен root. Конфиг: $DIR/Caddyfile.routx"
+		return 0
+	fi
+	__main=/etc/caddy/Caddyfile
+	mkdir -p /etc/caddy 2>/dev/null || true
+	if [ ! -s "$__main" ]; then
+		{
+			if [ -n "$TLS_EMAIL" ]; then
+				printf '{\n\temail %s\n}\n\n' "$TLS_EMAIL"
+			fi
+			printf 'import %s\n' "$DIR/Caddyfile.routx"
+		} > "$__main"
+	elif ! grep -Fq "$DIR/Caddyfile.routx" "$__main" 2>/dev/null; then
+		printf '\nimport %s\n' "$DIR/Caddyfile.routx" >> "$__main"
+	fi
+	if ! caddy validate --config "$__main" --adapter caddyfile >/dev/null 2>&1; then
+		warn "Caddyfile не прошёл проверку. Исправьте /etc/caddy/Caddyfile вручную."
+		return 0
+	fi
+	if has systemctl && systemctl list-unit-files caddy.service 2>/dev/null | grep -q '^caddy\.service'; then
+		systemctl enable caddy >/dev/null 2>&1 || true
+		if systemctl is-active caddy >/dev/null 2>&1; then
+			systemctl reload caddy >/dev/null 2>&1 || systemctl restart caddy >/dev/null 2>&1 || true
+		else
+			systemctl restart caddy >/dev/null 2>&1 || true
+		fi
+		if systemctl is-active caddy >/dev/null 2>&1; then
+			CADDY_READY=1
+			info "Caddy запущен: https://$DOMAIN"
+			return 0
+		fi
+	fi
+	warn "Caddy установлен, но сервис не запущен. Проверьте: systemctl status caddy"
+}
+
+setup_postgres() {
+	DB_HOST="${DB_HOST:-127.0.0.1}"
+	DB_PORT="${DB_PORT:-5432}"
+	DB_NAME="${DB_NAME_ARG:-$POSTGRES_DB}"
+	DB_USER="${DB_USER_ARG:-$POSTGRES_USER}"
+	DB_PASS="${DB_PASSWORD_ARG:-$POSTGRES_PASSWORD}"
+
+	case "$DB_NAME$DB_USER" in
+		*[!A-Za-z0-9_]*) die "Имя БД и пользователя: только A-Za-z0-9_." ;;
+	esac
+	case "$DB_PASS" in
+		*\'*|*\\*) die "Пароль БД содержит кавычку/обратный слэш. Используйте --db-url." ;;
+	esac
+
+	PG_ADMIN_MODE=""
+	if has sudo && sudo -n -u postgres true 2>/dev/null; then
+		PG_ADMIN_MODE=sudo
+	elif [ "$(id -u)" -eq 0 ] && has su; then
+		PG_ADMIN_MODE=su
+	elif PGCONNECT_TIMEOUT=3 psql -w -U postgres -h "$DB_HOST" -p "$DB_PORT" -d postgres -c 'select 1' >/dev/null 2>&1; then
+		PG_ADMIN_MODE=direct
+	else
+		die "Не удалось подключиться к PostgreSQL как postgres. Передайте --db-url."
+	fi
+
+	run_pg_file() {
+		case "$PG_ADMIN_MODE" in
+			sudo) sudo -u postgres psql -v ON_ERROR_STOP=1 -f "$1" postgres ;;
+			su) su - postgres -c "psql -v ON_ERROR_STOP=1 -f '$1' postgres" ;;
+			direct) psql -w -U postgres -h "$DB_HOST" -p "$DB_PORT" -v ON_ERROR_STOP=1 -f "$1" postgres ;;
+		esac
+	}
+
+	run_pg_query() {
+		case "$PG_ADMIN_MODE" in
+			sudo) sudo -u postgres psql -tAc "$1" postgres ;;
+			su) su - postgres -c "psql -tAc \"$1\" postgres" ;;
+			direct) psql -w -U postgres -h "$DB_HOST" -p "$DB_PORT" -tAc "$1" postgres ;;
+		esac
+	}
+
+	run_createdb() {
+		case "$PG_ADMIN_MODE" in
+			sudo) sudo -u postgres createdb -O "$DB_USER" "$DB_NAME" ;;
+			su) su - postgres -c "createdb -O '$DB_USER' '$DB_NAME'" ;;
+			direct) createdb -w -U postgres -h "$DB_HOST" -p "$DB_PORT" -O "$DB_USER" "$DB_NAME" ;;
+		esac
+	}
+
+	SQL_FILE=$(mktemp)
+	cat > "$SQL_FILE" <<SQL
+DO \$\$
+BEGIN
+  IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = '$DB_USER') THEN
+    CREATE ROLE "$DB_USER" LOGIN PASSWORD '$DB_PASS';
+  ELSE
+    ALTER ROLE "$DB_USER" WITH LOGIN PASSWORD '$DB_PASS';
+  END IF;
+END
+\$\$;
+SQL
+	run_pg_file "$SQL_FILE" || { rm -f "$SQL_FILE"; die "Не удалось создать роль PostgreSQL."; }
+	rm -f "$SQL_FILE"
+
+	if ! run_pg_query "SELECT 1 FROM pg_database WHERE datname = '$DB_NAME'" | grep -q 1; then
+		run_createdb || die "Не удалось создать базу $DB_NAME."
+	fi
+
+	if ! PGPASSWORD="$DB_PASS" psql -w -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "$DB_NAME" -c 'select 1' >/dev/null 2>&1; then
+		die "Не удалось подключиться к $DB_NAME от $DB_USER."
+	fi
+
+	DB_PASS_URL="$DB_PASS"
+	if has node; then
+		DB_PASS_URL=$(node -e 'process.stdout.write(encodeURIComponent(process.argv[1]))' "$DB_PASS")
+	fi
+	DATABASE_URL="postgres://$DB_USER:$DB_PASS_URL@$DB_HOST:$DB_PORT/$DB_NAME"
+	set_env DATABASE_URL "$DATABASE_URL"
+	set_env POSTGRES_DB "$DB_NAME"
+	set_env POSTGRES_USER "$DB_USER"
+	set_env POSTGRES_PASSWORD "$DB_PASS"
+	info "PostgreSQL: база $DB_NAME, пользователь $DB_USER"
+}
+
+install_systemd() {
+	[ "$NO_SERVICE" -eq 0 ] || return 0
+	if ! has systemctl; then
+		warn "systemd не найден. Запустите вручную: cd $DIR && set -a; . ./.env; set +a; node server/dist/index.js"
+		return 0
+	fi
+	if [ "$(id -u)" -ne 0 ]; then
+		warn "Для создания systemd-сервиса нужен root. Запустите install с sudo."
+		return 0
+	fi
+
+	SERVICE_USER=routx
+	if ! id "$SERVICE_USER" >/dev/null 2>&1; then
+		if has useradd; then
+			useradd --system --home "$DIR" --shell /usr/sbin/nologin "$SERVICE_USER" 2>/dev/null || SERVICE_USER=root
+		elif has adduser; then
+			adduser -S -D -H -h "$DIR" -s /sbin/nologin "$SERVICE_USER" 2>/dev/null || SERVICE_USER=root
+		else
+			SERVICE_USER=root
+		fi
+	fi
+
+	mkdir -p "$DIR/data"
+	chmod -R a+rX "$DIR" 2>/dev/null || true
+	chown -R "$SERVICE_USER" "$DIR/data" 2>/dev/null || true
+	chmod 700 "$DIR/data" 2>/dev/null || true
+	if [ -f "$DIR/data/master.key" ]; then
+		chmod 600 "$DIR/data/master.key" 2>/dev/null || true
+	fi
+	chown "$SERVICE_USER" "$ENV_FILE" 2>/dev/null || true
+	chmod 600 "$ENV_FILE" 2>/dev/null || true
+
+	NODE_BIN=$(command -v node)
+	cat > /etc/systemd/system/routx.service <<EOF
+[Unit]
+Description=RoutX panel
+After=network-online.target postgresql.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=$SERVICE_USER
+WorkingDirectory=$DIR
+EnvironmentFile=$ENV_FILE
+ExecStart=$NODE_BIN $DIR/server/dist/index.js
+Restart=always
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ReadWritePaths=$DIR/data
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+	systemctl daemon-reload
+	systemctl enable routx >/dev/null 2>&1 || true
+	systemctl restart routx
+}
+
+install_cli_link() {
+	if [ "$(id -u)" -eq 0 ]; then
+		mkdir -p /usr/local/bin 2>/dev/null || true
+		if [ -d /usr/local/bin ]; then
+			cat > /usr/local/bin/routx <<EOF
+#!/bin/sh
+ROUTX_DIR="$DIR" exec sh "$DIR/scripts/routx" "\$@"
+EOF
+			chmod 755 /usr/local/bin/routx 2>/dev/null || true
+			info "  CLI:     /usr/local/bin/routx"
+			return 0
+		fi
+	fi
+	info "  CLI:     $DIR/scripts/routx"
+	info "           добавьте в PATH или запускайте по полному пути"
+}
+
+print_summary() {
+	info ""
+	info "RoutX установлен."
+	info "  режим:   $MODE"
+	info "  каталог: $DIR"
+	info "  адрес:   $PUBLIC_URL"
+	info "  админ:   $ADMIN_EMAIL"
+	if [ "$ADMIN_PASSWORD_GENERATED" -eq 1 ]; then
+		info "  пароль:  $ADMIN_PASSWORD"
+		info "           (сохраните его; больше он не показывается)"
+	else
+		info "  пароль:  не менялся (RC_BOOTSTRAP_PASSWORD в .env)"
+	fi
+	if [ "$MODE" = docker ]; then
+		info "  логи:    routx logs"
+		info "  статус:  routx status"
+	else
+		info "  сервис:  systemctl status routx"
+		info "  логи:    routx logs"
+	fi
+	if [ "$MODE" = native ] && [ -f "$DIR/Caddyfile.routx" ]; then
+		if [ "$CADDY_READY" -eq 1 ]; then
+			info "  HTTPS:   https://$DOMAIN (Caddy)"
+		else
+			info "  Caddy:   $DIR/Caddyfile.routx"
+			info "           подключите его в /etc/caddy/Caddyfile или используйте nginx"
+		fi
+	fi
+	info ""
+}
+
+install_updater() {
+	if [ "$MODE" != docker ]; then
+		warn "Updater из панели поддерживается только для Docker-установки."
+		return 0
+	fi
+	if [ "$(id -u)" -ne 0 ]; then
+		warn "Для установки updater нужен root: sudo routx updater install"
+		return 0
+	fi
+
+	mkdir -p "$DIR/update" "$DIR/updater"
+	# update/ доступен панели (запросы и статус), updater/ — только root.
+	chmod 1777 "$DIR/update" 2>/dev/null || true
+	chmod 755 "$DIR/updater" 2>/dev/null || true
+
+	cat > "$DIR/updater/updater.sh" <<'UPDATER'
+#!/bin/sh
+set -u
+DIR="${ROUTX_DIR:-/opt/routx}"
+UPDATE_DIR="$DIR/update"
+mkdir -p "$UPDATE_DIR" 2>/dev/null || true
+touch "$UPDATE_DIR/.updater-installed" 2>/dev/null || true
+
+write_status() {
+	__state="$1"
+	__message="$2"
+	printf '{"state":"%s","message":"%s","updated_at":"%s"}\n' \
+		"$__state" "$__message" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+		> "$UPDATE_DIR/status.json.tmp" 2>/dev/null || return 0
+	mv "$UPDATE_DIR/status.json.tmp" "$UPDATE_DIR/status.json" 2>/dev/null || true
+}
+
+compose() {
+	if docker compose version >/dev/null 2>&1; then
+		docker compose --env-file "$DIR/.env" -f "$DIR/docker-compose.yml" "$@"
+	else
+		docker-compose --env-file "$DIR/.env" -f "$DIR/docker-compose.yml" "$@"
+	fi
+}
+
+app_container() {
+	compose ps -q app 2>/dev/null | head -n 1
+}
+
+wait_healthy() {
+	__i=0
+	while [ "$__i" -lt 90 ]; do
+		__cid=$(app_container)
+		if [ -z "$__cid" ]; then
+			sleep 2
+			__i=$((__i + 1))
+			continue
+		fi
+		__state=$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "$__cid" 2>/dev/null || true)
+		[ "$__state" = "healthy" ] && return 0
+		case "$__state" in
+			exited|dead) return 1 ;;
+		esac
+		sleep 2
+		__i=$((__i + 1))
+	done
+	return 1
+}
+
+snapshot_previous() {
+	__cid=$(app_container)
+	[ -n "$__cid" ] || return 0
+	__image=$(docker inspect -f '{{.Image}}' "$__cid" 2>/dev/null || true)
+	if [ -n "$__image" ]; then
+		printf '%s\n' "$__image" > "$UPDATE_DIR/previous-image" 2>/dev/null || true
+		docker tag "$__image" ghcr.io/seriec163/routx:rollback 2>/dev/null || true
+	fi
+}
+
+do_rollback() {
+	write_status rolling_back "Откатываю предыдущую версию"
+	if ! docker image inspect ghcr.io/seriec163/routx:rollback >/dev/null 2>&1; then
+		write_status rollback_failed "Нет сохранённого образа для отката"
+		return 1
+	fi
+	export ROUTX_IMAGE=ghcr.io/seriec163/routx:rollback
+	if compose up -d --no-deps --force-recreate app >/dev/null 2>&1 && wait_healthy; then
+		unset ROUTX_IMAGE
+		write_status rolled_back "Откат выполнен"
+		return 0
+	fi
+	unset ROUTX_IMAGE
+	write_status rollback_failed "Не удалось запустить предыдущую версию"
+	return 1
+}
+
+do_update() {
+	__target="${1:-}"
+	cd "$DIR" || { write_status failed "Каталог $DIR недоступен"; return 1; }
+	snapshot_previous
+	if [ -n "$__target" ]; then
+		__short=$(printf '%s' "$__target" | cut -c1-7)
+		__image="ghcr.io/seriec163/routx:sha-$__short"
+		write_status pulling "Скачиваю образ $__short"
+		if ! docker pull "$__image" >/dev/null 2>&1; then
+			write_status failed "Образ для $__short ещё не опубликован в registry"
+			return 1
+		fi
+	else
+		__image=""
+		write_status pulling "Скачиваю свежий образ"
+		if ! compose pull app >/dev/null 2>&1; then
+			write_status failed "Не удалось скачать образ из registry"
+			return 1
+		fi
+	fi
+	write_status restarting "Перезапускаю панель"
+	if [ -n "$__image" ]; then
+		export ROUTX_IMAGE="$__image"
+		if ! compose up -d --no-deps app >/dev/null 2>&1; then
+			unset ROUTX_IMAGE
+			do_rollback
+			return 1
+		fi
+		unset ROUTX_IMAGE
+	elif ! compose up -d --no-deps app >/dev/null 2>&1; then
+		do_rollback
+		return 1
+	fi
+	if wait_healthy; then
+		write_status success "Обновление установлено"
+		return 0
+	fi
+	do_rollback
+	return 1
+}
+
+while :; do
+	if [ -f "$UPDATE_DIR/request" ]; then
+		mv "$UPDATE_DIR/request" "$UPDATE_DIR/request.processing" 2>/dev/null || true
+		__action=$(head -n 1 "$UPDATE_DIR/request.processing" 2>/dev/null | tr -d '\r')
+		__target=$(sed -n 's/^target_sha=//p' "$UPDATE_DIR/request.processing" 2>/dev/null | head -n 1 | tr -d '\r')
+		rm -f "$UPDATE_DIR/request.processing"
+		case "$__action" in
+			update) do_update "$__target" ;;
+			rollback) do_rollback ;;
+		esac
+	fi
+	sleep 2
+done
+UPDATER
+	chmod 755 "$DIR/updater/updater.sh"
+
+	if compose config --services 2>/dev/null | grep -qx updater; then
+		compose up -d --force-recreate updater
+		info "  updater: docker compose ps updater"
+	else
+		warn "В docker-compose.yml нет сервиса updater. Обновите compose-файл RoutX."
+	fi
+}
+
+install_docker() {
+	check_docker
+	prepare_env
+	if [ ! -f "$DIR/docker-compose.yml" ]; then
+		die "В $DIR нет docker-compose.yml. Запустите установку из репозитория."
+	fi
+	if [ "$BUILD" -eq 1 ]; then
+		set -- up -d --build
+	elif compose pull; then
+		set -- up -d
+	else
+		warn "Не удалось скачать образ из registry. Собираю локально."
+		set -- up -d --build
+	fi
+	if [ "$WITH_PROXY" -eq 1 ]; then
+		compose --profile proxy "$@"
+	else
+		compose "$@"
+	fi
+	wait_ready || die "Панель не ответила на /readyz. Проверьте: routx logs"
+	install_cli_link
+	install_updater
+	print_summary
+}
+
+install_native() {
+	check_native
+	prepare_env
+	if [ -n "$DB_URL_ARG" ]; then
+		DATABASE_URL="$DB_URL_ARG"
+		set_env DATABASE_URL "$DATABASE_URL"
+	else
+		setup_postgres
+	fi
+	write_master_key
+	write_native_caddyfile
+
+	[ -f "$DIR/package.json" ] || die "В $DIR нет package.json. Запустите установку из репозитория."
+	cd "$DIR"
+	if [ -f package-lock.json ]; then
+		npm ci --no-audit --no-fund
+	else
+		npm install --no-audit --no-fund
+	fi
+	npm run build
+	if ! npm run agent:build; then
+		warn "Пакеты агента не собрались полностью; панель сможет отдать tar.gz/ipk, если они есть."
+	fi
+	node server/dist/migrate-cli.js
+	npm prune --omit=dev
+	install_systemd
+	if [ "$NO_SERVICE" -eq 0 ] && has systemctl && [ "$(id -u)" -eq 0 ]; then
+		wait_ready || die "Панель не ответила на /readyz. Проверьте: journalctl -u routx -n 100"
+	fi
+	setup_caddy_native
+	install_cli_link
+	print_summary
+}
+
+cmd_install() {
+	while [ $# -gt 0 ]; do
+		case "$1" in
+			--docker) MODE=docker; shift ;;
+			--native) MODE=native; shift ;;
+			--dir) [ $# -ge 2 ] || die "--dir требует путь"; DIR=$2; shift 2 ;;
+			--domain) [ $# -ge 2 ] || die "--domain требует значение"; DOMAIN=$2; shift 2 ;;
+			--tls-email) [ $# -ge 2 ] || die "--tls-email требует значение"; TLS_EMAIL=$2; shift 2 ;;
+			--public-url) [ $# -ge 2 ] || die "--public-url требует значение"; PUBLIC_URL_ARG=$2; shift 2 ;;
+			--port) [ $# -ge 2 ] || die "--port требует значение"; PORT_ARG=$2; shift 2 ;;
+			--bind) [ $# -ge 2 ] || die "--bind требует значение"; BIND_ARG=$2; shift 2 ;;
+			--admin-email) [ $# -ge 2 ] || die "--admin-email требует значение"; ADMIN_EMAIL_ARG=$2; shift 2 ;;
+			--admin-password) [ $# -ge 2 ] || die "--admin-password требует значение"; ADMIN_PASSWORD_ARG=$2; shift 2 ;;
+			--db-url) [ $# -ge 2 ] || die "--db-url требует значение"; DB_URL_ARG=$2; shift 2 ;;
+			--db-name) [ $# -ge 2 ] || die "--db-name требует значение"; DB_NAME_ARG=$2; shift 2 ;;
+			--db-user) [ $# -ge 2 ] || die "--db-user требует значение"; DB_USER_ARG=$2; shift 2 ;;
+			--db-password) [ $# -ge 2 ] || die "--db-password требует значение"; DB_PASSWORD_ARG=$2; shift 2 ;;
+			--with-proxy|--proxy) WITH_PROXY=1; shift ;;
+			--build) BUILD=1; shift ;;
+			--no-build) NO_BUILD=1; BUILD=0; shift ;;
+			--no-service) NO_SERVICE=1; shift ;;
+			--no-caddy) NO_CADDY=1; shift ;;
+			--install-deps) INSTALL_DEPS=1; shift ;;
+			--force-env) FORCE_ENV=1; shift ;;
+			--yes|-y) YES=1; shift ;;
+			--help|-h) usage; exit 0 ;;
+			*) die "Неизвестный аргумент install: $1" ;;
+		esac
+	done
+
+	resolve_dir
+	if [ -z "$MODE" ]; then
+		MODE=$(cat "$DIR/.routx-mode" 2>/dev/null || true)
+		[ -n "$MODE" ] || MODE=native
+	fi
+	[ "$MODE" = docker ] || [ "$MODE" = native ] || die "Режим должен быть docker или native."
+	ask_interactive
+	if [ "$MODE" = docker ]; then
+		install_docker
+	else
+		install_native
+	fi
+}
+
+cmd_update() {
+	while [ $# -gt 0 ]; do
+		case "$1" in
+			--dir) DIR=$2; shift 2 ;;
+			--docker) MODE=docker; shift ;;
+			--native) MODE=native; shift ;;
+			--build) BUILD=1; shift ;;
+			--no-build) NO_BUILD=1; BUILD=0; shift ;;
+			--yes|-y) YES=1; shift ;;
+			--help|-h) usage; exit 0 ;;
+			*) die "Неизвестный аргумент update: $1" ;;
+		esac
+	done
+	load_runtime
+	[ -d "$DIR/.git" ] || die "Каталог $DIR не является git-репозиторием. Переустановите одной командой."
+	git -C "$DIR" pull --ff-only || die "git pull не удался. Проверьте локальные изменения."
+	if [ "$MODE" = docker ] && [ "$BUILD" -eq 0 ]; then
+		__cid=$(compose ps -q app 2>/dev/null | head -n 1 || true)
+		if [ -n "$__cid" ]; then
+			__prev=$(docker inspect -f '{{.Image}}' "$__cid" 2>/dev/null || true)
+			if [ -n "$__prev" ]; then
+				docker tag "$__prev" ghcr.io/seriec163/routx:rollback 2>/dev/null || true
+			fi
+		fi
+	fi
+	if [ "$MODE" = docker ]; then
+		if [ "$BUILD" -eq 1 ]; then
+			compose up -d --build
+		elif compose pull; then
+			compose up -d
+		else
+			warn "Не удалось скачать образ из registry. Собираю локально."
+			compose up -d --build
+		fi
+		wait_ready || die "Панель не ответила после обновления."
+		install_updater
+	else
+		cd "$DIR"
+		if [ -f package-lock.json ]; then npm ci --no-audit --no-fund; else npm install --no-audit --no-fund; fi
+		npm run build
+		npm run agent:build || warn "Пакеты агента не собрались полностью."
+		node server/dist/migrate-cli.js
+		npm prune --omit=dev
+		if has systemctl && systemctl list-unit-files routx.service >/dev/null 2>&1; then
+			systemctl restart routx
+		else
+			warn "Сервис routx не найден. Перезапустите процесс вручную."
+		fi
+		wait_ready || die "Панель не ответила после обновления."
+	fi
+	info "RoutX обновлён."
+}
+
+cmd_status() {
+	while [ $# -gt 0 ]; do
+		case "$1" in
+			--dir) DIR=$2; shift 2 ;;
+			--docker) MODE=docker; shift ;;
+			--native) MODE=native; shift ;;
+			--help|-h) usage; exit 0 ;;
+			*) die "Неизвестный аргумент status: $1" ;;
+		esac
+	done
+	load_runtime
+	info "RoutX"
+	info "  режим:   $MODE"
+	info "  каталог: $DIR"
+	info "  адрес:   $PUBLIC_URL"
+	if [ "$MODE" = docker ]; then
+		compose ps
+		if http_get "http://127.0.0.1:$PORT/readyz" >/dev/null 2>&1; then
+			info "  readyz:  ok"
+		else
+			info "  readyz:  недоступен"
+		fi
+	else
+		if has systemctl; then
+			info "  сервис:  $(systemctl is-active routx 2>/dev/null || true)"
+		fi
+		if pgrep -f "$DIR/server/dist/index.js" >/dev/null 2>&1; then
+			info "  процесс: запущен"
+		else
+			info "  процесс: не найден"
+		fi
+		if http_get "http://127.0.0.1:$PORT/readyz" >/dev/null 2>&1; then
+			info "  readyz:  ok"
+		else
+			info "  readyz:  недоступен"
+		fi
+	fi
+}
+
+cmd_logs() {
+	while [ $# -gt 0 ]; do
+		case "$1" in
+			--dir) DIR=$2; shift 2 ;;
+			--docker) MODE=docker; shift ;;
+			--native) MODE=native; shift ;;
+			-f|--follow) FOLLOW=1; shift ;;
+			--help|-h) usage; exit 0 ;;
+			*) die "Неизвестный аргумент logs: $1" ;;
+		esac
+	done
+	load_runtime
+	if [ "$MODE" = docker ]; then
+		if [ "$FOLLOW" -eq 1 ]; then compose logs -f --tail=200 app; else compose logs --tail=200 app; fi
+	else
+		if has journalctl && systemctl list-unit-files routx.service >/dev/null 2>&1; then
+			if [ "$FOLLOW" -eq 1 ]; then journalctl -u routx -n 200 -f; else journalctl -u routx -n 200; fi
+		else
+			warn "journalctl/routx.service не найдены. Смотрите вывод процесса RoutX."
+		fi
+	fi
+}
+
+cmd_service() {
+	__action="$1"
+	shift
+	while [ $# -gt 0 ]; do
+		case "$1" in
+			--dir) DIR=$2; shift 2 ;;
+			--docker) MODE=docker; shift ;;
+			--native) MODE=native; shift ;;
+			--help|-h) usage; exit 0 ;;
+			*) die "Неизвестный аргумент $__action: $1" ;;
+		esac
+	done
+	load_runtime
+	if [ "$MODE" = docker ]; then
+		compose "$__action" app
+	else
+		if has systemctl && systemctl list-unit-files routx.service >/dev/null 2>&1; then
+			systemctl "$__action" routx
+		else
+			die "Сервис routx не найден. Запустите вручную: cd $DIR && node server/dist/index.js"
+		fi
+	fi
+}
+
+cmd_uninstall() {
+	while [ $# -gt 0 ]; do
+		case "$1" in
+			--dir) DIR=$2; shift 2 ;;
+			--docker) MODE=docker; shift ;;
+			--native) MODE=native; shift ;;
+			--purge) PURGE=1; shift ;;
+			--yes|-y) YES=1; shift ;;
+			--help|-h) usage; exit 0 ;;
+			*) die "Неизвестный аргумент uninstall: $1" ;;
+		esac
+	done
+	load_runtime
+	if [ "$YES" -ne 1 ]; then
+		printf 'Удалить установку RoutX в %s? [y/N] ' "$DIR"
+		read -r ANSWER || ANSWER=""
+		case "$ANSWER" in y|Y|yes|YES) ;; *) info "Отменено."; return 0 ;; esac
+	fi
+	if [ "$MODE" = docker ]; then
+		if [ "$PURGE" -eq 1 ]; then
+			compose --profile proxy down -v || compose down -v
+		else
+			compose --profile proxy down || compose down
+		fi
+	else
+		if has systemctl && systemctl list-unit-files routx.service >/dev/null 2>&1; then
+			systemctl disable --now routx || true
+			rm -f /etc/systemd/system/routx.service
+			systemctl daemon-reload
+		fi
+	fi
+	if has systemctl && systemctl list-unit-files routx-updater.service 2>/dev/null | grep -q '^routx-updater\.service'; then
+		systemctl disable --now routx-updater >/dev/null 2>&1 || true
+		rm -f "$UPDATER_UNIT"
+		systemctl daemon-reload >/dev/null 2>&1 || true
+	fi
+	rm -f "$UPDATER_BIN"
+	if [ "$PURGE" -eq 1 ]; then
+		rm -rf "$DIR"
+		info "Каталог $DIR удалён. Базу данных удалите вручную, если нужно."
+	else
+		info "Файлы в $DIR сохранены. Для удаления каталога используйте --purge."
+	fi
+}
+
+cmd_doctor() {
+	while [ $# -gt 0 ]; do
+		case "$1" in
+			--dir) DIR=$2; shift 2 ;;
+			--docker) MODE=docker; shift ;;
+			--native) MODE=native; shift ;;
+			--help|-h) usage; exit 0 ;;
+			*) die "Неизвестный аргумент doctor: $1" ;;
+		esac
+	done
+	load_runtime
+	FAIL=0
+	info "RoutX doctor"
+	info "  CLI:     $CLI_VERSION"
+	info "  режим:   $MODE"
+	info "  каталог: $DIR"
+	[ -f "$ENV_FILE" ] && info "  .env:    есть" || { warn ".env не найден"; FAIL=1; }
+	[ -n "$(env_get RC_MASTER_KEY)" ] && info "  master:  задан" || { warn "RC_MASTER_KEY не задан"; FAIL=1; }
+	PUBLIC_URL=$(env_get RC_PUBLIC_URL)
+	info "  URL:     ${PUBLIC_URL:-не задан}"
+	DB_URL=$(env_get DATABASE_URL)
+	if [ -n "$DB_URL" ]; then
+		info "  БД:      $(printf '%s' "$DB_URL" | sed 's#://[^:]*:[^@]*@#://***:***@#')"
+	else
+		info "  БД:      через Docker Compose"
+	fi
+	if [ "$MODE" = docker ]; then
+		if has docker; then
+			compose ps || FAIL=1
+			compose exec -T db pg_isready >/dev/null 2>&1 && info "  postgres: ok" || { warn "postgres недоступен"; FAIL=1; }
+		else
+			warn "Docker не найден"; FAIL=1
+		fi
+		__upd=$(compose ps -q updater 2>/dev/null | head -n 1 || true)
+		if [ -n "$__upd" ]; then
+			info "  updater: $(docker inspect -f '{{.State.Status}}' "$__upd" 2>/dev/null || echo unknown)"
+		else
+			warn "updater не запущен"; FAIL=1
+		fi
+	else
+		if has systemctl; then
+			info "  сервис:  $(systemctl is-active routx 2>/dev/null || true)"
+		fi
+		if [ -n "$DB_URL" ] && has psql; then
+			if PGCONNECT_TIMEOUT=3 psql -w "$DB_URL" -c 'select 1' >/dev/null 2>&1; then
+				info "  postgres: ok"
+			else
+				warn "PostgreSQL недоступен"; FAIL=1
+			fi
+		fi
+	fi
+	if http_get "http://127.0.0.1:$PORT/readyz" >/dev/null 2>&1; then
+		info "  readyz:  ok"
+	else
+		warn "readyz недоступен на 127.0.0.1:$PORT"; FAIL=1
+	fi
+	if has df; then
+		df -h "$DIR" 2>/dev/null | tail -1 | awk '{ printf "  диск:    %s свободно из %s\n", $4, $2 }'
+	fi
+	if [ "$FAIL" -eq 0 ]; then info "Итог: всё в порядке."; else warn "Есть проблемы, см. выше."; fi
+	return "$FAIL"
+}
+
+cmd_updater() {
+	__action="${1:-install}"
+	if [ $# -gt 0 ]; then
+		shift
+	fi
+	while [ $# -gt 0 ]; do
+		case "$1" in
+			--dir) DIR=$2; shift 2 ;;
+			--help|-h) usage; exit 0 ;;
+			*) die "Неизвестный аргумент updater: $1" ;;
+		esac
+	done
+	case "$__action" in
+		install)
+			MODE=docker
+			resolve_dir
+			if [ -f "$DIR/.routx-mode" ]; then
+				MODE=$(cat "$DIR/.routx-mode" 2>/dev/null || true)
+				[ -n "$MODE" ] || MODE=docker
+			fi
+			install_updater
+			info "Готово. Кнопка обновления станет доступна в настройках панели."
+			;;
+		status)
+			MODE=docker
+			resolve_dir
+			__upd=$(compose ps -q updater 2>/dev/null | head -n 1 || true)
+			if [ -n "$__upd" ]; then
+				info "routx-updater: $(docker inspect -f '{{.State.Status}}' "$__upd" 2>/dev/null || echo unknown)"
+			else
+				info "routx-updater: не запущен"
+			fi
+			;;
+		*) die "Используйте: routx updater install|status" ;;
+	esac
+}
+
+cmd_rollback() {
+	while [ $# -gt 0 ]; do
+		case "$1" in
+			--dir) DIR=$2; shift 2 ;;
+			--docker) MODE=docker; shift ;;
+			--native) MODE=native; shift ;;
+			--help|-h) usage; exit 0 ;;
+			*) die "Неизвестный аргумент rollback: $1" ;;
+		esac
+	done
+	load_runtime
+	[ "$MODE" = docker ] || die "Для native откатите коммит вручную и выполните routx update --build."
+	docker image inspect ghcr.io/seriec163/routx:rollback >/dev/null 2>&1 ||
+		die "Нет сохранённого образа для отката. Он создаётся при обновлении или через панель."
+	export ROUTX_IMAGE=ghcr.io/seriec163/routx:rollback
+	compose up -d --no-deps --force-recreate app
+	wait_ready || die "Панель не ответила после отката. Проверьте: routx logs"
+	info "Откат выполнен: запущен предыдущий образ."
+}
+
+cmd_version() {
+	while [ $# -gt 0 ]; do
+		case "$1" in
+			--dir) DIR=$2; shift 2 ;;
+			--help|-h) usage; exit 0 ;;
+			*) die "Неизвестный аргумент version: $1" ;;
+		esac
+	done
+	info "routx CLI $CLI_VERSION"
+	if [ -f "$DIR/package.json" ]; then
+		__v=$(sed -n 's/.*"version": *"\([^"]*\)".*/\1/p' "$DIR/package.json" | head -1)
+		[ -n "$__v" ] && info "RoutX $__v"
+	fi
+	if [ -d "$DIR/.git" ]; then
+		info "git: $(git -C "$DIR" rev-parse --short HEAD 2>/dev/null || true)"
+	fi
+}
+
+CMD="${1:-install}"
+if [ $# -gt 0 ]; then
+	shift
+fi
+
+case "$CMD" in
+	install) cmd_install "$@" ;;
+	update) cmd_update "$@" ;;
+	rollback) cmd_rollback "$@" ;;
+	updater) cmd_updater "$@" ;;
+	status) cmd_status "$@" ;;
+	logs) cmd_logs "$@" ;;
+	restart) cmd_service restart "$@" ;;
+	stop) cmd_service stop "$@" ;;
+	start) cmd_service start "$@" ;;
+	doctor) cmd_doctor "$@" ;;
+	uninstall) cmd_uninstall "$@" ;;
+	version|--version|-v) cmd_version ;;
+	help|--help|-h) usage ;;
+	*) die "Неизвестная команда: $CMD. Используйте routx help." ;;
+esac

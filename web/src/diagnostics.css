@@ -1,0 +1,336 @@
+/* Диагностика: обзор, карточки проверок и анимации. */
+
+.diag-report {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.diag-hero {
+  position: relative;
+  display: flex;
+  gap: 22px;
+  align-items: center;
+  padding: 22px;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  background:
+    radial-gradient(120% 160% at 0% 0%, rgba(61, 220, 154, 0.12), transparent 55%),
+    var(--panel-strong);
+  overflow: hidden;
+}
+
+.diag-hero::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(110deg, transparent 20%, rgba(85, 200, 245, 0.08) 50%, transparent 80%);
+  transform: translateX(-120%);
+  animation: diag-shimmer 7s linear infinite;
+  pointer-events: none;
+}
+
+.diag-orbit {
+  position: relative;
+  width: 96px;
+  height: 96px;
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+}
+
+.diag-orbit-ring {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  border: 1px solid transparent;
+  border-top-color: var(--accent);
+  border-right-color: rgba(85, 200, 245, 0.55);
+  animation: diag-spin 5s linear infinite;
+}
+
+.diag-orbit-ring-b {
+  inset: 10px;
+  border-top-color: var(--cyan);
+  animation-direction: reverse;
+  animation-duration: 3.6s;
+}
+
+.diag-orbit-core {
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-size: 1.35rem;
+  font-weight: 700;
+  animation: diag-pulse 2.6s ease-in-out infinite;
+}
+
+.diag-report-warn .diag-orbit-core {
+  background: var(--warn-soft);
+  color: var(--warn);
+}
+
+.diag-report-warn .diag-orbit-ring {
+  border-top-color: var(--warn);
+}
+
+.diag-report-bad .diag-orbit-core {
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+
+.diag-report-bad .diag-orbit-ring {
+  border-top-color: var(--danger);
+}
+
+.diag-hero-body {
+  flex: 1;
+  min-width: 0;
+}
+
+.diag-hero-body h2 {
+  margin: 2px 0 4px;
+  font-size: 1.35rem;
+}
+
+.diag-meter {
+  height: 8px;
+  max-width: 520px;
+  margin: 12px 0 8px;
+  border-radius: 999px;
+  background: rgba(148, 163, 184, 0.14);
+  overflow: hidden;
+}
+
+.diag-meter span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, var(--accent), var(--cyan));
+  animation: diag-grow 1.1s cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+
+.diag-report-warn .diag-meter span {
+  background: linear-gradient(90deg, var(--warn), #ffd08a);
+}
+
+.diag-report-bad .diag-meter span {
+  background: linear-gradient(90deg, var(--danger), #ff9aa8);
+}
+
+.diag-hero-meta {
+  margin: 0;
+  color: var(--faint);
+  font-size: 0.78rem;
+}
+
+.diag-checks {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 12px;
+}
+
+.diag-check {
+  display: flex;
+  gap: 12px;
+  padding: 14px;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  background: var(--panel-strong);
+  opacity: 0;
+  animation: diag-card-in 0.45s ease both;
+}
+
+.diag-check-icon {
+  width: 30px;
+  height: 30px;
+  flex: 0 0 auto;
+  border-radius: 9px;
+  display: grid;
+  place-items: center;
+  font-weight: 700;
+  background: rgba(148, 163, 184, 0.12);
+  color: var(--muted);
+}
+
+.diag-check-ok .diag-check-icon {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.diag-check-warn .diag-check-icon {
+  background: var(--warn-soft);
+  color: var(--warn);
+}
+
+.diag-check-bad .diag-check-icon {
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+
+.diag-check h3 {
+  margin: 0 0 3px;
+  font-size: 0.86rem;
+}
+
+.diag-check p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.78rem;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.diag-native {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.diag-native-intro {
+  padding: 12px 14px;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  background: rgba(85, 200, 245, 0.06);
+  color: var(--muted);
+}
+
+.diag-native-intro p {
+  margin: 0;
+}
+
+.diag-native-section {
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  overflow: hidden;
+  background: var(--panel-strong);
+  animation: diag-card-in 0.45s ease both;
+}
+
+.diag-native-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: center;
+  padding: 11px 14px;
+  border-bottom: 1px solid var(--border);
+  background: rgba(148, 163, 184, 0.05);
+}
+
+.diag-native-title {
+  font-weight: 600;
+  font-size: 0.88rem;
+}
+
+.diag-native-count {
+  color: var(--faint);
+  font-size: 0.72rem;
+}
+
+.diag-native-lines {
+  list-style: none;
+  margin: 0;
+  padding: 8px 10px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.diag-line {
+  display: flex;
+  gap: 9px;
+  padding: 5px 6px;
+  border-radius: 7px;
+  font-size: 0.82rem;
+  line-height: 1.45;
+}
+
+.diag-line-icon {
+  width: 18px;
+  flex: 0 0 auto;
+  text-align: center;
+}
+
+.diag-line-body {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.diag-line-hint {
+  color: var(--muted);
+  font-size: 0.76rem;
+  line-height: 1.45;
+  border-left: 2px solid rgba(148, 163, 184, 0.35);
+  padding-left: 8px;
+}
+
+.diag-line-ok { color: #b9f5d9; }
+.diag-line-warn { color: #ffe2a8; }
+.diag-line-bad { color: #ffbcc5; }
+.diag-line-neutral { color: var(--muted); }
+.diag-line-info { color: var(--text); }
+
+.diag-config {
+  margin: 0;
+  padding: 14px;
+  background: rgba(2, 6, 23, 0.55);
+  color: #cbd5e1;
+  font-family: var(--mono);
+  font-size: 0.76rem;
+  line-height: 1.55;
+  max-height: 380px;
+  overflow: auto;
+  white-space: pre-wrap;
+}
+
+@keyframes diag-spin {
+  to { transform: rotate(360deg); }
+}
+
+@keyframes diag-pulse {
+  0%, 100% { transform: scale(1); box-shadow: 0 0 0 0 rgba(61, 220, 154, 0.25); }
+  50% { transform: scale(1.06); box-shadow: 0 0 0 9px rgba(61, 220, 154, 0); }
+}
+
+@keyframes diag-grow {
+  from { width: 0; }
+}
+
+@keyframes diag-card-in {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: none; }
+}
+
+@keyframes diag-shimmer {
+  0% { transform: translateX(-120%); }
+  60%, 100% { transform: translateX(120%); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .diag-orbit-ring,
+  .diag-orbit-core,
+  .diag-hero::after,
+  .diag-check,
+  .diag-native-section,
+  .diag-meter span {
+    animation: none;
+    opacity: 1;
+  }
+}
+
+@media (max-width: 720px) {
+  .diag-hero {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+  .diag-orbit {
+    width: 76px;
+    height: 76px;
+  }
+}

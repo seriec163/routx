@@ -1,0 +1,98 @@
+# RoutX на OpenWrt: Docker Compose + Caddy (HTTPS на 443)
+#
+# Особенности роутера:
+#  - приложение доступно только через Caddy (порт 3000 слушает loopback);
+#  - 443 занят Caddy, LuCI переведён на 8443;
+#  - порт 80 не используется RoutX (на роутере он может быть занят другим сервисом).
+#
+# Запуск:  docker compose up -d
+# Файл .env должен лежать рядом и содержать секреты.
+
+name: routx
+
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-router_control}
+      POSTGRES_USER: ${POSTGRES_USER:-router_control}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\""]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    security_opt:
+      - no-new-privileges:true
+
+  app:
+    image: ${ROUTX_IMAGE:-ghcr.io/seriec163/routx:latest}
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      HOST: 0.0.0.0
+      PORT: 3000
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      DATABASE_URL: postgres://${POSTGRES_USER:-router_control}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-router_control}
+      RC_MASTER_KEY: ${RC_MASTER_KEY}
+      RC_MASTER_KEY_FILE: /app/data/master.key
+      RC_PUBLIC_URL: ${RC_PUBLIC_URL}
+      RC_COOKIE_SECURE: ${RC_COOKIE_SECURE:-false}
+      RC_VAPID_PUBLIC_KEY: ${RC_VAPID_PUBLIC_KEY:-}
+      RC_VAPID_PRIVATE_KEY: ${RC_VAPID_PRIVATE_KEY:-}
+      RC_VAPID_SUBJECT: ${RC_VAPID_SUBJECT:-mailto:admin@example.com}
+      MIGRATE_ON_START: "false"
+      TRUST_PROXY: ${TRUST_PROXY:-false}
+    ports:
+      # Только loopback: снаружи панель доступна через Caddy по HTTPS.
+      - "127.0.0.1:3000:3000"
+    volumes:
+      - rc_data:/app/data
+      - ./update:/app/update
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+
+  updater:
+    image: docker:24-cli
+    restart: unless-stopped
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ${ROUTX_DIR:-/opt/routx}:${ROUTX_DIR:-/opt/routx}
+    environment:
+      ROUTX_DIR: ${ROUTX_DIR:-/opt/routx}
+    command: ["sh", "${ROUTX_DIR:-/opt/routx}/updater/updater.sh"]
+    security_opt:
+      - no-new-privileges:true
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    depends_on:
+      app:
+        condition: service_healthy
+    environment:
+      RC_DOMAIN: ${RC_DOMAIN:?set RC_DOMAIN in .env}
+    ports:
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    security_opt:
+      - no-new-privileges:true
+
+volumes:
+  pgdata:
+  rc_data:
+  caddy_data:
+  caddy_config:

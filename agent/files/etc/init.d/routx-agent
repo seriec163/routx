@@ -1,0 +1,20 @@
+#!/bin/sh /etc/rc.common
+START=99
+STOP=10
+USE_PROCD=1
+
+start_service() {
+	config_load routx
+	config_get enabled main enabled '0'
+	[ "$enabled" = "1" ] || return 0
+	procd_open_instance
+	procd_set_param command /usr/bin/ucode -L /usr/lib/routx-agent /usr/lib/routx-agent/jn_cli.uc run
+	procd_set_param respawn
+	procd_set_param stdout 1
+	procd_set_param stderr 1
+	procd_close_instance
+}
+
+stop_service() {
+	return 0
+}
