@@ -1105,10 +1105,10 @@ export async function monitorProbe(ctx: HandlerContext, job: JobRow): Promise<Js
       type: 'diagnostics',
       routerId,
       requestedBy: null,
-      timeoutSeconds: 120,
+      timeoutSeconds: 240,
       maxAttempts: 1,
       idempotencyKey: `auto_diag:${routerId}:${bucket}`,
-      payload: { kind: 'quick', auto: true },
+      payload: { kind: 'full', auto: true },
     });
   }
 
@@ -1380,11 +1380,22 @@ export async function diagnostics(ctx: HandlerContext, job: JobRow): Promise<Jso
       ? ((report as { checks: Array<{ name?: unknown; state?: unknown; details?: unknown }> })
           .checks)
       : [];
+    const product = router.rows[0]?.product ?? 'unknown';
     for (const check of checks) {
       const name = typeof check.name === 'string' ? check.name : '';
       const state = typeof check.state === 'string' ? check.state : '';
       const details = typeof check.details === 'string' ? check.details : '';
       if (!details) continue;
+      // У Tachyon свой движок tachyon-core, а не отдельный sing-box.
+      // Эти проверки для него не применимы и только засоряют журнал.
+      if (
+        product === 'tachyon' &&
+        (name === 'sing_box_service' ||
+          name === 'sing_box_version' ||
+          name === 'tachyon_sing_box_status')
+      ) {
+        continue;
+      }
       const isLog = name === 'tachyon_logs' || name === 'sing_box_logs';
       if (!isLog && state === 'ok') continue;
       const level = state === 'error' ? 'error' : state === 'warning' ? 'warn' : 'info';
