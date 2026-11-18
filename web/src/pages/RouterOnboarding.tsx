@@ -195,6 +195,12 @@ export function RouterOnboardingPage() {
     : 0;
   const tokenExpired = Boolean(token) && tokenLeft <= 0;
 
+  useEffect(() => {
+    if (templateId) return;
+    const preferred = templatesList.find((item) => item.is_default) ?? templatesList[0];
+    if (preferred) setTemplateId(preferred.id);
+  }, [templateId, templatesList]);
+
   const summary = useMemo(() => {
     const payload = report?.payload;
     const checks =
@@ -315,44 +321,18 @@ export function RouterOnboardingPage() {
     setAccess(null);
     setReport(null);
     setPipeline({
-      subscription: subscriptionValue || chosenCatalogId
-        ? { status: 'pending', detail: 'Ожидает' }
-        : { status: 'skipped', detail: 'Подписка не указана' },
       template: chosenTemplateId
         ? { status: 'pending', detail: 'Ожидает' }
         : { status: 'skipped', detail: 'Шаблон не выбран' },
+      subscription: subscriptionValue || chosenCatalogId
+        ? { status: 'pending', detail: 'Ожидает' }
+        : { status: 'skipped', detail: 'Подписка не указана' },
       access: { status: 'pending', detail: 'Ожидает' },
       diagnostics: { status: 'pending', detail: 'Ожидает' },
     });
 
     let firstError: string | null = null;
-
-    if (subscriptionValue || chosenCatalogId) {
-      setItem(
-        'subscription',
-        'running',
-        chosenCatalogId ? 'Добавляем подписку из каталога…' : 'Сохраняем и применяем подписку…',
-      );
-      try {
-        const body = chosenCatalogId
-          ? { kind: 'subscription', subscription_id: chosenCatalogId }
-          : { kind: 'subscription', label: 'Подписка', value: subscriptionValue };
-        const response = await api<{ job: Job }>(`/api/v1/routers/${routerId}/connections`, {
-          method: 'POST',
-          body,
-        });
-        await waitJob(response.job.id, 300_000);
-        setItem(
-          'subscription',
-          'success',
-          chosenCatalogId ? 'Подписка из каталога добавлена' : 'Подписка сохранена и применена',
-        );
-      } catch (caught) {
-        const message = errorMessage(caught);
-        setItem('subscription', 'error', message);
-        firstError = firstError ?? message;
-      }
-    }
+    let defaultSection = '';
 
     if (chosenTemplateId) {
       setItem('template', 'running', 'Назначаем шаблон…');
@@ -374,6 +354,9 @@ export function RouterOnboardingPage() {
           const applyRunId =
             typeof diffJob.result?.apply_run_id === 'string' ? diffJob.result.apply_run_id : null;
           if (!applyRunId) throw new Error('Сервер не вернул результат сравнения');
+          if (typeof diffJob.result?.default_section === 'string') {
+            defaultSection = diffJob.result.default_section;
+          }
 
           const detail = await api<ApplyRunDetail>(`/api/v1/apply-runs/${applyRunId}`);
           const items = detail.items?.length ?? 0;
@@ -402,6 +385,42 @@ export function RouterOnboardingPage() {
       } catch (caught) {
         const message = errorMessage(caught);
         setItem('template', 'error', message);
+        firstError = firstError ?? message;
+      }
+    }
+
+    if (subscriptionValue || chosenCatalogId) {
+      setItem(
+        'subscription',
+        'running',
+        chosenCatalogId ? 'Добавляем подписку из каталога…' : 'Сохраняем и применяем подписку…',
+      );
+      try {
+        const body = chosenCatalogId
+          ? {
+              kind: 'subscription',
+              subscription_id: chosenCatalogId,
+              ...(defaultSection ? { section: defaultSection } : {}),
+            }
+          : {
+              kind: 'subscription',
+              label: 'Подписка',
+              value: subscriptionValue,
+              ...(defaultSection ? { section: defaultSection } : {}),
+            };
+        const response = await api<{ job: Job }>(`/api/v1/routers/${routerId}/connections`, {
+          method: 'POST',
+          body,
+        });
+        await waitJob(response.job.id, 300_000);
+        setItem(
+          'subscription',
+          'success',
+          chosenCatalogId ? 'Подписка из каталога добавлена' : 'Подписка сохранена и применена',
+        );
+      } catch (caught) {
+        const message = errorMessage(caught);
+        setItem('subscription', 'error', message);
         firstError = firstError ?? message;
       }
     }
@@ -847,8 +866,8 @@ export function RouterOnboardingPage() {
           <div className="onb-check-list">
             {(
               [
-                ['subscription', 'Подписка'],
                 ['template', 'Шаблон'],
+                ['subscription', 'Подписка'],
                 ['access', 'Заблокированный сайт'],
                 ['diagnostics', 'Быстрая диагностика'],
               ] as Array<[PipelineKey, string]>

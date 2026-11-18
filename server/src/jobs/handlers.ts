@@ -9,6 +9,8 @@ import {
   diffHash,
   applySectionMap,
   mapTemplateSections,
+  materializePresetForSection,
+  presetFromPayload,
   resolveManagedSection,
   sanitizeAgentState,
   stateHash,
@@ -311,8 +313,37 @@ export async function diffTemplate(ctx: HandlerContext, job: JobRow): Promise<Js
     Object.entries(provided).filter(([, value]) => typeof value === 'string'),
   ) as Record<string, string>;
 
+  // Шаблон-пресет (например, ForFriends) не содержит имён секций: это
+  // действие, ресурсы и настройки. Материализуем его в основную секцию
+  // роутера, иначе на чистой установке не создаётся ни одной включённой
+  // секции и Tachyon/Prokop не могут собрать конфигурацию.
+  const routerSectionRow = await ctx.pool.query<{ managed_section: string | null }>(
+    'select managed_section from routers where id = $1',
+    [routerId],
+  );
+  const configuredSection = routerSectionRow.rows[0]?.managed_section?.trim() || 'rc_main';
+  const hasPreset =
+    Object.keys(payload.sections).length === 0 &&
+    (Boolean(payload.action) ||
+      Object.keys(payload.resources ?? {}).length > 0 ||
+      (payload.manual_domains?.length ?? 0) > 0 ||
+      (payload.manual_ips?.length ?? 0) > 0 ||
+      Object.keys(payload.settings ?? {}).length > 0);
+  let effectivePayload = payload;
+  let materializedSection: string | null = null;
+  if (hasPreset) {
+    effectivePayload = materializePresetForSection(
+      presetFromPayload(payload),
+      configuredSection,
+      true,
+    );
+    materializedSection = configuredSection;
+  }
+
   let mapped;
-  if (Object.keys(providedMap).length > 0) {
+  if (materializedSection) {
+    mapped = { payload: effectivePayload, sectionMap: {}, warnings: [] };
+  } else if (Object.keys(providedMap).length > 0) {
     for (const target of Object.values(providedMap)) {
       const exists = Object.keys(current).some((path) => path.startsWith(`section.${target}.`));
       if (!exists) {
@@ -324,7 +355,7 @@ export async function diffTemplate(ctx: HandlerContext, job: JobRow): Promise<Js
     }
     try {
       mapped = {
-        payload: applySectionMap(payload, providedMap),
+        payload: applySectionMap(effectivePayload, providedMap),
         sectionMap: providedMap,
         warnings: [],
       };
@@ -332,7 +363,7 @@ export async function diffTemplate(ctx: HandlerContext, job: JobRow): Promise<Js
       throw new JobFailure('section_map_invalid', (error as Error).message.slice(0, 500));
     }
   } else {
-    mapped = mapTemplateSections(payload, current);
+    mapped = mapTemplateSections(effectivePayload, current);
   }
 
   const extras = await loadListExtras(ctx.pool, routerId);
@@ -416,6 +447,7 @@ export async function diffTemplate(ctx: HandlerContext, job: JobRow): Promise<Js
       counts,
       total: items.length,
       section_map: mapped.sectionMap,
+      default_section: materializedSection,
       warnings: [...mapped.warnings, ...plan.warnings],
     };
   }
@@ -481,6 +513,7 @@ export async function diffTemplate(ctx: HandlerContext, job: JobRow): Promise<Js
     counts,
     total: items.length,
     section_map: mapped.sectionMap,
+    default_section: materializedSection,
     warnings: mapped.warnings,
   };
 }

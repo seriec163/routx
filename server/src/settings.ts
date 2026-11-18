@@ -5,6 +5,7 @@ export type MfaPolicy = 'all' | 'admins';
 export interface PlatformSettings {
   mfaPolicy: MfaPolicy;
   sessionDays: number;
+  defaultTemplateId: string | null;
   limits: {
     routersPerUser: number;
     usersPerInstance: number;
@@ -35,6 +36,7 @@ export interface PlatformSettings {
 export const DEFAULT_SETTINGS: PlatformSettings = {
   mfaPolicy: 'all',
   sessionDays: 45,
+  defaultTemplateId: null,
   limits: {
     routersPerUser: 10,
     usersPerInstance: 20,
@@ -81,6 +83,7 @@ export async function loadSettings(pool: Pool): Promise<PlatformSettings> {
   const rows = await readRaw(pool, [
     'security.mfa_policy',
     'security.session_days',
+    'default_template_id',
     'limits',
     'monitoring',
     'retention',
@@ -90,6 +93,14 @@ export async function loadSettings(pool: Pool): Promise<PlatformSettings> {
   ]);
 
   const mfa = rows.get('security.mfa_policy')?.value;
+  const defaultTemplateValue = rows.get('default_template_id')?.value as
+    | { value?: unknown }
+    | undefined;
+  const defaultTemplateRaw = defaultTemplateValue?.value;
+  const defaultTemplateId =
+    typeof defaultTemplateRaw === 'string' && defaultTemplateRaw.trim() !== ''
+      ? defaultTemplateRaw.trim()
+      : null;
   const limits = rows.get('limits') ?? {};
   const monitoring = rows.get('monitoring') ?? {};
   const retention = rows.get('retention') ?? {};
@@ -102,6 +113,7 @@ export async function loadSettings(pool: Pool): Promise<PlatformSettings> {
   return {
     mfaPolicy,
     sessionDays: num(rows.get('security.session_days')?.value, DEFAULT_SETTINGS.sessionDays),
+    defaultTemplateId,
     limits: {
       routersPerUser: num(limits.routers_per_user, DEFAULT_SETTINGS.limits.routersPerUser),
       usersPerInstance: num(limits.users_per_instance, DEFAULT_SETTINGS.limits.usersPerInstance),

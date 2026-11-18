@@ -20,6 +20,7 @@ import type {
   SettingsEffective,
   SettingsResponse,
   SettingsStorage,
+  TemplateListItem,
   UpdateStatus,
 } from '../lib/types';
 import { useApi } from '../lib/useApi';
@@ -27,6 +28,7 @@ import { useApi } from '../lib/useApi';
 interface FormState {
   mfaPolicy: 'all' | 'admins';
   sessionDays: number;
+  defaultTemplateId: string | null;
   limits: SettingsEffective['limits'];
   monitoring: SettingsEffective['monitoring'];
   retention: SettingsEffective['retention'];
@@ -39,6 +41,7 @@ function toForm(effective: SettingsEffective): FormState {
   return {
     mfaPolicy: effective.mfaPolicy,
     sessionDays: effective.sessionDays,
+    defaultTemplateId: effective.defaultTemplateId ?? null,
     limits: { ...effective.limits },
     monitoring: { ...effective.monitoring },
     retention: { ...effective.retention },
@@ -74,6 +77,7 @@ export function SettingsPage() {
   const settings = useApi<SettingsResponse>('/api/v1/settings');
   const storage = useApi<SettingsStorage>('/api/v1/settings/storage');
   const updates = useApi<UpdateStatus>('/api/v1/updates');
+  const templates = useApi<{ items: TemplateListItem[] }>('/api/v1/templates');
   const [form, setForm] = useState<FormState | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -167,6 +171,7 @@ export function SettingsPage() {
         body: {
           mfa_policy: form.mfaPolicy,
           session_days: form.sessionDays,
+          default_template_id: form.defaultTemplateId,
           limits: {
             routers_per_user: form.limits.routersPerUser,
             users_per_instance: form.limits.usersPerInstance,
@@ -376,6 +381,33 @@ export function SettingsPage() {
                 value={String(form.sessionDays)}
                 onChange={(value) => numberField('sessionDays', Number(value))}
               />
+            </Field>
+          </Panel>
+
+          <Panel
+            title="Шаблон по умолчанию"
+            subtitle="Его RoutX предложит при добавлении нового роутера и создании первой секции."
+          >
+            {templates.error ? <ErrorBanner message={templates.error} /> : null}
+            <Field
+              label="Шаблон"
+              hint="Если шаблон не выбран, мастер попросит выбрать его вручную."
+            >
+              <Select
+                value={form.defaultTemplateId ?? ''}
+                onChange={(value) =>
+                  setForm({ ...form, defaultTemplateId: value === '' ? null : value })
+                }
+              >
+                <option value="">Не выбран</option>
+                {(templates.data?.items ?? [])
+                  .filter((item) => !item.archived_at)
+                  .map((item) => (
+                    <option key={item.id} value={item.id}>
+                      {item.name} (ред. {item.current_revision})
+                    </option>
+                  ))}
+              </Select>
             </Field>
           </Panel>
 

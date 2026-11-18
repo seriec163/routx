@@ -28,6 +28,40 @@ ARGS_FILE=""
 die() { printf 'Ошибка: %s\n' "$*" >&2; exit 1; }
 has() { command -v "$1" >/dev/null 2>&1; }
 
+# curl нужен для скачивания исходников и установки Node.js. Если его нет,
+# пробуем поставить через штатный пакетный менеджер; иначе остаётся wget.
+ensure_curl() {
+	has curl && return 0
+	if has apt-get; then
+		if [ "$(id -u)" -eq 0 ]; then
+			apt-get update -qq && apt-get install -y -qq curl ca-certificates || true
+		elif has sudo; then
+			sudo apt-get update -qq && sudo apt-get install -y -qq curl ca-certificates || true
+		fi
+	elif has dnf; then
+		if [ "$(id -u)" -eq 0 ]; then
+			dnf install -y curl ca-certificates || true
+		elif has sudo; then
+			sudo dnf install -y curl ca-certificates || true
+		fi
+	elif has yum; then
+		if [ "$(id -u)" -eq 0 ]; then
+			yum install -y curl ca-certificates || true
+		elif has sudo; then
+			sudo yum install -y curl ca-certificates || true
+		fi
+	elif has apk; then
+		if [ "$(id -u)" -eq 0 ]; then
+			apk add --no-cache curl ca-certificates || true
+		elif has sudo; then
+			sudo apk add --no-cache curl ca-certificates || true
+		fi
+	fi
+	has curl && return 0
+	printf 'curl не установлен; используется wget, если он доступен.\n' >&2
+	return 0
+}
+
 usage() {
 	cat <<'EOF'
 RoutX bootstrap installer
@@ -119,6 +153,8 @@ fi
 if [ -z "$ARCHIVE_URL" ]; then
 	ARCHIVE_URL="https://codeload.github.com/seriec163/routx/tar.gz/$REF"
 fi
+
+ensure_curl
 
 if [ -f "$DIR/package.json" ] && [ -f "$DIR/scripts/routx" ]; then
 	:

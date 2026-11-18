@@ -49,6 +49,7 @@ export async function registerTemplateRoutes(app: FastifyInstance, ctx: RouteCon
       .object({ include_archived: z.enum(['true', 'false']).optional() })
       .parse(request.query);
     const includeArchived = query.include_archived === 'true';
+    const settings = await loadSettings(pool);
     const result = await pool.query(
       `select t.id, t.owner_id, u.email as owner_email, t.name, t.description,
               t.schema_version, t.current_revision, t.shared,
@@ -67,8 +68,10 @@ export async function registerTemplateRoutes(app: FastifyInstance, ctx: RouteCon
     return {
       items: result.rows.map((row) => {
         let preset = null;
+        let parsed: ReturnType<typeof templatePayloadSchema.parse> | null = null;
         try {
-          preset = presetFromPayload(templatePayloadSchema.parse(row.payload));
+          parsed = templatePayloadSchema.parse(row.payload);
+          preset = presetFromPayload(parsed);
         } catch {
           preset = null;
         }
@@ -77,6 +80,8 @@ export async function registerTemplateRoutes(app: FastifyInstance, ctx: RouteCon
           payload: undefined,
           preset_action: preset?.action ?? null,
           preset_resources: preset ? Object.keys(preset.resources).length : 0,
+          has_sections: parsed ? Object.keys(parsed.sections).length > 0 : false,
+          is_default: row.id === settings.defaultTemplateId,
         };
       }),
     };

@@ -70,6 +70,7 @@ const patchSchema = z
   .object({
     mfa_policy: z.enum(['all', 'admins']).optional(),
     session_days: z.coerce.number().int().min(1).max(365).optional(),
+    default_template_id: z.string().uuid().nullable().optional(),
     limits: limitsSchema.optional(),
     monitoring: monitoringSchema.optional(),
     retention: retentionSchema.optional(),
@@ -111,7 +112,7 @@ export async function registerSettingsRoutes(
     requireSuperadmin(request);
     const raw = await pool.query<{ key: string; value: Record<string, unknown>; updated_at: Date }>(
       `select key, value, updated_at from settings
-        where key in ('security.mfa_policy','security.session_days','limits','monitoring',
+        where key in ('security.mfa_policy','security.session_days','default_template_id','limits','monitoring',
                       'retention','agent','singbox','features')
         order by key`,
     );
@@ -159,7 +160,12 @@ export async function registerSettingsRoutes(
     const auth = requireSuperadmin(request);
     const body = patchSchema.parse(request.body);
 
-    if (!body.mfa_policy && !body.session_days && RAW_KEYS.every((key) => !body[key])) {
+    if (
+      body.mfa_policy === undefined &&
+      body.session_days === undefined &&
+      body.default_template_id === undefined &&
+      RAW_KEYS.every((key) => !body[key])
+    ) {
       throw badRequest('empty_update', 'Нет изменений');
     }
 
@@ -174,6 +180,14 @@ export async function registerSettingsRoutes(
     }
     if (body.session_days) {
       await updateSetting(pool, 'security.session_days', { value: body.session_days }, auth.userId);
+    }
+    if (body.default_template_id !== undefined) {
+      await updateSetting(
+        pool,
+        'default_template_id',
+        { value: body.default_template_id },
+        auth.userId,
+      );
     }
 
     for (const key of RAW_KEYS) {

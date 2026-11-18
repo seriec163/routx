@@ -117,6 +117,8 @@ export interface TemplateListItem {
   assignment_count: number;
   preset_action?: string | null;
   preset_resources?: number;
+  is_default?: boolean;
+  has_sections?: boolean;
 }
 
 export interface PodkopTemplate {
@@ -658,6 +660,7 @@ export interface NotificationRow {
 export interface SettingsEffective {
   mfaPolicy: 'all' | 'admins';
   sessionDays: number;
+  defaultTemplateId: string | null;
   limits: {
     routersPerUser: number;
     usersPerInstance: number;
