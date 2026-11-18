@@ -5,6 +5,7 @@ export interface RetentionSummary {
   monitoring_samples: number;
   monitoring_rollups: number;
   diagnostics_reports: number;
+  router_logs: number;
   jobs: number;
   job_events: number;
   audit_log: number;
@@ -37,6 +38,7 @@ export async function runRetention(
     monitoring_samples: 0,
     monitoring_rollups: 0,
     diagnostics_reports: 0,
+    router_logs: 0,
     jobs: 0,
     job_events: 0,
     audit_log: 0,
@@ -67,6 +69,7 @@ export async function runRetention(
   await run('monitoring_samples', `delete from monitoring_samples where ts < now() - ($1 || '${DAY}')::interval`, [days]);
   await run('monitoring_rollups', `delete from monitoring_rollups where bucket_start < now() - interval '180 days'`, []);
   await run('diagnostics_reports', 'delete from diagnostics_reports where expires_at < now()', []);
+  await run('router_logs', `delete from router_logs where created_at < now() - ($1 || '${DAY}')::interval`, [days]);
   await run('agent_reports', `delete from agent_reports where created_at < now() - ($1 || '${DAY}')::interval`, [days]);
 
   await run('job_events', `delete from job_events where job_id in (

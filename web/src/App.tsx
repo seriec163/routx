@@ -11,6 +11,7 @@ import { ApplyRunDetailPage, ApplyRunsPage } from './pages/ApplyRuns';
 import { AuditPage } from './pages/Audit';
 import { DashboardPage } from './pages/Dashboard';
 import { DiagnosticDetailPage, DiagnosticsPage } from './pages/Diagnostics';
+import { LogsPage } from './pages/Logs';
 import { JobsPage } from './pages/Jobs';
 import { LoginPage, InvitePage, ResetPasswordPage, BrandMark } from './pages/Auth';
 import { InstallPage } from './pages/Install';
@@ -58,6 +59,7 @@ const NAV: Array<{ section: string; items: NavItem[] }> = [
     section: 'Обслуживание',
     items: [
       { to: '/diagnostics', label: 'Диагностика' },
+      { to: '/logs', label: 'Логи и ошибки' },
       { to: '/rollouts', label: 'Поэтапное обновление' },
     ],
   },
@@ -409,6 +411,8 @@ function renderRoute(
       return <RedirectTo to="/routers" />;
     case 'diagnostics':
       return second ? <DiagnosticDetailPage id={second} /> : <DiagnosticsPage />;
+    case 'logs':
+      return <LogsPage />;
     case 'singbox':
       return <RedirectTo to="/rollouts" />;
     case 'rollouts':

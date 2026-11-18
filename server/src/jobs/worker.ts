@@ -166,11 +166,13 @@ export class JobWorker {
           code: failure.code,
           message: failure.message,
         });
+        await this.recordJobError(job, 'warn', failure.code, failure.message);
       } else if (failure.terminal === 'timeout') {
         await finishJob(this.pool, job.id, 'timeout', null, {
           code: failure.code,
           message: failure.message,
         });
+        await this.recordJobError(job, 'error', failure.code, failure.message);
       } else if (
         RETRYABLE.has(failure.code) &&
         job.attempt < job.max_attempts &&
@@ -187,10 +189,37 @@ export class JobWorker {
           code: failure.code,
           message: failure.message,
         });
+        await this.recordJobError(job, 'error', failure.code, failure.message);
       }
       this.log.warn({ job: job.id, code: failure.code, err: failure.message }, 'задача не выполнена');
     } finally {
       clearInterval(renew);
+    }
+  }
+
+  /** Записывает терминальную ошибку задачи в журнал роутера. */
+  private async recordJobError(
+    job: JobRow,
+    level: 'error' | 'warn',
+    code: string,
+    message: string,
+  ): Promise<void> {
+    if (!job.router_id) return;
+    try {
+      await this.pool.query(
+        `insert into router_logs (id, router_id, source, level, message, context, job_id)
+         values ($1,$2,'job',$3,$4,$5::jsonb,$6)`,
+        [
+          randomUUID(),
+          job.router_id,
+          level,
+          message.slice(0, 20_000),
+          JSON.stringify({ job_id: job.id, type: job.type, code }),
+          job.id,
+        ],
+      );
+    } catch (error) {
+      this.log.warn({ err: error, job: job.id }, 'не удалось сохранить ошибку задачи в журнал');
     }
   }
 

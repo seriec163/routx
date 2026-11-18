@@ -1094,6 +1094,24 @@ export async function monitorProbe(ctx: HandlerContext, job: JobRow): Promise<Js
     [routerId, asString(raw.sing_box_version)],
   );
 
+  // Служба упала или остановлена — автоматически снимаем быструю
+  // диагностику с логами Tachyon/sing-box. Один запуск в час на роутер,
+  // чтобы не заваливать очередь при долгой аварии.
+  const rawServiceState = asString(raw.service_state) ?? '';
+  const rawHealth = asString(raw.health) ?? '';
+  if (rawHealth === 'failed' || rawServiceState.includes('stopped')) {
+    const bucket = new Date().toISOString().slice(0, 13);
+    await enqueueJob(ctx.pool, {
+      type: 'diagnostics',
+      routerId,
+      requestedBy: null,
+      timeoutSeconds: 120,
+      maxAttempts: 1,
+      idempotencyKey: `auto_diag:${routerId}:${bucket}`,
+      payload: { kind: 'quick', auto: true },
+    });
+  }
+
   // Переходы состояния прокси: попап «VPN не работает» и «VPN снова работает».
   // Не показываем «VPN не работает» во время планового перезапуска VPN
   // и сразу после перезагрузки роутера: это ожидаемо, а не авария.
@@ -1354,6 +1372,39 @@ export async function diagnostics(ctx: HandlerContext, job: JobRow): Promise<Jso
       ctx.settings.retention.days,
     ],
   );
+
+  // Каталогизируем не только отчёт, но и сами логи/ошибки. Иначе, чтобы
+  // посмотреть причину сбоя, приходится каждый раз заново идти на роутер.
+  try {
+    const checks = Array.isArray((report as { checks?: unknown }).checks)
+      ? ((report as { checks: Array<{ name?: unknown; state?: unknown; details?: unknown }> })
+          .checks)
+      : [];
+    for (const check of checks) {
+      const name = typeof check.name === 'string' ? check.name : '';
+      const state = typeof check.state === 'string' ? check.state : '';
+      const details = typeof check.details === 'string' ? check.details : '';
+      if (!details) continue;
+      const isLog = name === 'tachyon_logs' || name === 'sing_box_logs';
+      if (!isLog && state === 'ok') continue;
+      const level = state === 'error' ? 'error' : state === 'warning' ? 'warn' : 'info';
+      await ctx.pool.query(
+        `insert into router_logs (id, router_id, source, level, message, context, job_id)
+         values ($1,$2,$3,$4,$5,$6::jsonb,$7)`,
+        [
+          uuidv7(),
+          routerId,
+          name || 'diagnostics',
+          level,
+          details.slice(0, 200_000),
+          JSON.stringify({ kind, state }),
+          job.id,
+        ],
+      );
+    }
+  } catch (error) {
+    ctx.log.warn({ err: error, job: job.id }, 'не удалось сохранить логи диагностики');
+  }
 
   return { report_id: id, kind, sha256: digest };
 }

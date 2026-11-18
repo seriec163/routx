@@ -92,6 +92,7 @@ const LOG_TABLES = [
   'monitoring_samples',
   'monitoring_rollups',
   'diagnostics_reports',
+  'router_logs',
   'agent_reports',
   'notifications',
   'router_snapshots',
