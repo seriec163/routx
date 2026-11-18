@@ -43,6 +43,7 @@ interface PackageStatus {
   products: Array<{ product: string; files: number; bytes: number; fetched_at: string | null }>;
   releases: Array<{ repo: string; tag: string; fetched_at: string }>;
   syncing: boolean;
+  progress: string | null;
   last_started: string | null;
   last_finished: string | null;
   last_error: string | null;
@@ -456,7 +457,11 @@ export function SettingsPage() {
               </strong>
             </div>
             {packages.data?.syncing ? (
-              <InfoBanner>Синхронизация идёт в фоне — это может занять минуту.</InfoBanner>
+              <InfoBanner>
+                Синхронизация идёт в фоне
+                {packages.data.progress ? `: ${packages.data.progress}` : ''}. Это может занять
+                несколько минут.
+              </InfoBanner>
             ) : null}
             {packages.data?.last_error ? (
               <ErrorBanner message={packages.data.last_error} />

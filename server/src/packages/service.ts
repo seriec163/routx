@@ -9,6 +9,7 @@ const GITHUB_API = 'https://api.github.com';
 const GITHUB_RAW = 'https://raw.githubusercontent.com';
 const GITHUB_DOWNLOAD = 'https://github.com';
 const USER_AGENT = 'routx-panel/package-mirror';
+const REQUEST_TIMEOUT_MS = 300_000;
 
 type Product = 'tachyon' | 'forkop' | 'podkop';
 type AssetFilter = 'all' | 'arch' | 'tachyon-core';
@@ -92,6 +93,7 @@ let syncPromise: Promise<SyncSummary> | null = null;
 let lastStarted: Date | null = null;
 let lastFinished: Date | null = null;
 let lastError: string | null = null;
+let syncProgress: string | null = null;
 
 export interface SyncSummary {
   products: Array<{ product: Product; files: number; bytes: number; tags: Record<string, string> }>;
@@ -104,6 +106,7 @@ export interface PackageStatus {
   products: Array<{ product: string; files: number; bytes: number; fetched_at: string | null }>;
   releases: Array<{ repo: string; tag: string; fetched_at: string }>;
   syncing: boolean;
+  progress: string | null;
   last_started: string | null;
   last_finished: string | null;
   last_error: string | null;
@@ -129,6 +132,7 @@ async function fetchBuffer(url: string, headers: Record<string, string> = {}): P
   const response = await fetch(url, {
     headers: { 'user-agent': USER_AGENT, ...headers },
     redirect: 'follow',
+    signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
   });
   if (!response.ok) {
     throw new Error(`HTTP ${response.status} при загрузке ${url}`);
@@ -143,6 +147,7 @@ async function fetchJson<T>(url: string): Promise<T> {
       accept: 'application/vnd.github+json',
     },
     redirect: 'follow',
+    signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
   });
   if (!response.ok) {
     throw new Error(`HTTP ${response.status} при запросе ${url}`);
@@ -269,6 +274,7 @@ async function syncRepo(
   let bytes = releaseContent.length;
   for (const asset of release.assets ?? []) {
     if (!assetMatches(repo.filter, asset.name)) continue;
+    syncProgress = `${key}/${asset.name}`;
     const existing = await pool.query<{ size_bytes: string; storage_path: string }>(
       `select size_bytes, storage_path from package_mirror
         where repo = $1 and kind = 'asset' and name = $2 and tag = $3`,
@@ -339,29 +345,40 @@ export async function syncPackages(
   const products = new Map<Product, { files: number; bytes: number; tags: Record<string, string> }>();
   const releaseCached = new Set<string>();
 
-  for (const repo of REPOS) {
-    const result = await syncRepo(pool, dataDir, publicUrl, repo, errors);
-    const current = products.get(repo.product) ?? { files: 0, bytes: 0, tags: {} };
-    current.files += result.files;
-    current.bytes += result.bytes;
-    if (result.tag) {
-      current.tags[repoKey(repo.owner, repo.repo)] = result.tag;
-      releaseCached.add(repoKey(repo.owner, repo.repo));
+  const syncGroup = async (repos: RepoConfig[]): Promise<void> => {
+    for (const repo of repos) {
+      syncProgress = `${repo.owner}/${repo.repo}`;
+      const result = await syncRepo(pool, dataDir, publicUrl, repo, errors);
+      const current = products.get(repo.product) ?? { files: 0, bytes: 0, tags: {} };
+      current.files += result.files;
+      current.bytes += result.bytes;
+      if (result.tag) {
+        current.tags[repoKey(repo.owner, repo.repo)] = result.tag;
+        releaseCached.add(repoKey(repo.owner, repo.repo));
+      }
+      products.set(repo.product, current);
     }
-    products.set(repo.product, current);
-  }
+  };
+
+  // Сначала небольшие и нужные всем пакеты, установщики и Podkop; тяжёлое
+  // ядро Forkop (85 МБ для aarch64) качаем последним, чтобы оно не
+  // задерживало появление установщиков.
+  const mainRepos = REPOS.filter((repo) => repo.repo !== 'sing-box-forkop');
+  const largeRepos = REPOS.filter((repo) => repo.repo === 'sing-box-forkop');
+  await syncGroup(mainRepos);
 
   for (const installer of INSTALLERS) {
     const required =
       installer.product === 'tachyon'
         ? ['Dushnilin/tachyon', 'Dushnilin/tachyon-core']
         : installer.product === 'forkop'
-          ? ['ushan0v/forkop', 'ushan0v/sing-box-forkop']
+          ? ['ushan0v/forkop']
           : ['itdoginfo/podkop'];
     if (required.some((repo) => !releaseCached.has(repo))) {
       errors.push(`${installer.product}/${installer.name}: нет релиза в зеркале`);
       continue;
     }
+    syncProgress = `установщик ${installer.product}/${installer.name}`;
     try {
       const source = await fetchBuffer(
         `${GITHUB_RAW}/${installer.owner}/${installer.repo}/${installer.ref}/${installer.name}`,
@@ -393,6 +410,7 @@ export async function syncPackages(
   }
 
   for (const raw of RAW_FILES) {
+    syncProgress = `конфигурация ${raw.name}`;
     try {
       const url = `${GITHUB_RAW}/${raw.owner}/${raw.repo}/${raw.ref}/${raw.filePath}`;
       const content = await fetchBuffer(url);
@@ -414,6 +432,10 @@ export async function syncPackages(
       errors.push(`${raw.owner}/${raw.repo}/${raw.filePath}: ${(error as Error).message}`);
     }
   }
+
+  // Тяжёлое ядро Forkop — в конце, чтобы не блокировать установщики.
+  await syncGroup(largeRepos);
+  syncProgress = null;
 
   if (errors.length > 0) {
     log?.warn({ errors }, 'зеркало пакетов обновлено с ошибками');
@@ -438,7 +460,11 @@ export function startPackageSync(
   lastError = null;
   syncPromise = (async () => {
     try {
-      return await syncPackages(pool, dataDir, publicUrl, log);
+      const summary = await syncPackages(pool, dataDir, publicUrl, log);
+      if (summary.errors.length > 0) {
+        lastError = summary.errors.join('; ').slice(0, 2000);
+      }
+      return summary;
     } catch (error) {
       lastError = (error as Error).message;
       log?.error({ err: error }, 'не удалось обновить зеркало пакетов');
@@ -446,6 +472,7 @@ export function startPackageSync(
     } finally {
       lastFinished = new Date();
       syncPromise = null;
+      syncProgress = null;
     }
   })();
   return syncPromise;
@@ -481,6 +508,7 @@ export async function getPackageStatus(pool: Pool): Promise<PackageStatus> {
       fetched_at: row.fetched_at.toISOString(),
     })),
     syncing: syncPromise !== null,
+    progress: syncProgress,
     last_started: lastStarted?.toISOString() ?? null,
     last_finished: lastFinished?.toISOString() ?? null,
     last_error: lastError,
