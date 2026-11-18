@@ -7,6 +7,7 @@ import { APP_BUILD_SHA, APP_VERSION } from './version.js';
 import { loadSettings } from './settings.js';
 import { JobWorker } from './jobs/worker.js';
 import { ensureBootstrapAdmin } from './bootstrap.js';
+import { startPackageSync } from './packages/service.js';
 
 const config = loadConfig();
 const db = createDb(config.DATABASE_URL);
@@ -138,6 +139,19 @@ try {
   if (!config.RC_AGENT_REQUIRE_SIGNATURE) {
     app.log.warn('Подпись запросов агента отключена (RC_AGENT_REQUIRE_SIGNATURE=false). Только для лаборатории.');
   }
+
+  // Зеркало пакетов: сразу после старта и затем раз в 6 часов. Сетевые
+  // ошибки не мешают панели работать — остаётся последняя удачная копия.
+  const packageDataDir = path.dirname(config.masterKeyFile);
+  void startPackageSync(db.pool, packageDataDir, config.RC_PUBLIC_URL, app.log).catch(
+    () => undefined,
+  );
+  const packageTimer = setInterval(() => {
+    void startPackageSync(db.pool, packageDataDir, config.RC_PUBLIC_URL, app.log).catch(
+      () => undefined,
+    );
+  }, 6 * 60 * 60 * 1000);
+  packageTimer.unref();
 } catch (error) {
   app.log.error({ err: error }, 'не удалось запустить сервер');
   await worker.stop();

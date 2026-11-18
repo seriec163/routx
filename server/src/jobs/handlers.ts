@@ -2385,7 +2385,7 @@ export async function productSwitch(ctx: HandlerContext, job: JobRow): Promise<J
     ctx,
     job,
     'product_switch',
-    { product: requested, version },
+    { product: requested, version, base_url: ctx.publicUrl },
     1_800_000,
   );
   const product = asString(raw.product) || requested;

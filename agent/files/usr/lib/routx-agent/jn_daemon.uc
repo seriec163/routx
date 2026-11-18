@@ -115,6 +115,9 @@ function handle_command(cmd) {
 		if (op == "product_switch") {
 			let target = util.as_string(args.product);
 			let version = util.as_string(args.version);
+			let panel = util.as_string(args.base_url);
+			if (panel != "")
+				panel = replace(panel, /\/+$/, "");
 			if (target != "tachyon" && target != "forkop" && target != "podkop" && target != "prokop")
 				return { status: "failed", error: { code: "unsupported_product_switch", message: "Переключение на " + target + " пока не поддерживается" } };
 			if (version != "" && match(version, /^[0-9]+([.][0-9]+){2,3}$/) == null)
@@ -149,16 +152,28 @@ function handle_command(cmd) {
 				// снова увидит конфликт.
 				command += "rm -f /etc/init.d/prokop /etc/init.d/podkop /etc/init.d/forkop /usr/bin/prokop /usr/bin/podkop /usr/bin/forkop; ";
 				command += "rm -rf /etc/config/prokop /etc/config/podkop /etc/config/forkop /usr/lib/prokop /usr/lib/podkop /usr/lib/forkop /usr/share/prokop /usr/share/podkop /usr/share/forkop; ";
-				command += "wget -O /tmp/tachyon-setup.sh https://raw.githubusercontent.com/Dushnilin/tachyon/main/install.sh && sh /tmp/tachyon-setup.sh -y --tachyon-core";
+				let tachyon_install = "";
+				if (panel != "")
+					tachyon_install = "wget -O /tmp/tachyon-setup.sh \"" + panel + "/downloads/packages/tachyon/install.sh\" 2>/dev/null || wget -O /tmp/tachyon-setup.sh https://raw.githubusercontent.com/Dushnilin/tachyon/main/install.sh; sh /tmp/tachyon-setup.sh -y --tachyon-core";
+				else
+					tachyon_install = "wget -O /tmp/tachyon-setup.sh https://raw.githubusercontent.com/Dushnilin/tachyon/main/install.sh && sh /tmp/tachyon-setup.sh -y --tachyon-core";
 				if (version != "")
-					command += " --tag " + version;
+					tachyon_install += " --tag " + version;
+				command += tachyon_install;
 			} else {
-				if (current == "tachyon")
-					command += "wget -O /tmp/tachyon-uninstall.sh https://raw.githubusercontent.com/Dushnilin/tachyon/main/uninstall.sh && sh /tmp/tachyon-uninstall.sh -y; ";
+				if (current == "tachyon") {
+					if (panel != "")
+						command += "wget -O /tmp/tachyon-uninstall.sh \"" + panel + "/downloads/packages/tachyon/uninstall.sh\" 2>/dev/null || wget -O /tmp/tachyon-uninstall.sh https://raw.githubusercontent.com/Dushnilin/tachyon/main/uninstall.sh; sh /tmp/tachyon-uninstall.sh -y; ";
+					else
+						command += "wget -O /tmp/tachyon-uninstall.sh https://raw.githubusercontent.com/Dushnilin/tachyon/main/uninstall.sh && sh /tmp/tachyon-uninstall.sh -y; ";
+				}
 				if (target == "podkop") {
 					command += "if command -v opkg >/dev/null 2>&1; then opkg remove --force-depends prokop luci-app-prokop luci-i18n-prokop-ru sing-box-forkop tachyon-core luci-i18n-forkop-ru >/dev/null 2>&1 || true; fi; ";
 					command += "if command -v apk >/dev/null 2>&1; then apk del prokop luci-app-prokop luci-i18n-prokop-ru sing-box-forkop tachyon-core luci-i18n-forkop-ru >/dev/null 2>&1 || true; fi; ";
-					command += "PODKOP_INSTALLER=\"$(wget -qO- https://raw.githubusercontent.com/itdoginfo/podkop/main/install.sh)\" && echo n | sh -c \"$PODKOP_INSTALLER\"; ";
+					if (panel != "")
+						command += "PODKOP_INSTALLER=\"$(wget -qO- \"" + panel + "/downloads/packages/podkop/install.sh\" 2>/dev/null)\"; if [ -z \"$PODKOP_INSTALLER\" ]; then PODKOP_INSTALLER=\"$(wget -qO- https://raw.githubusercontent.com/itdoginfo/podkop/main/install.sh 2>/dev/null)\"; fi; echo n | sh -c \"$PODKOP_INSTALLER\"; ";
+					else
+						command += "PODKOP_INSTALLER=\"$(wget -qO- https://raw.githubusercontent.com/itdoginfo/podkop/main/install.sh)\" && echo n | sh -c \"$PODKOP_INSTALLER\"; ";
 					command += "if ! command -v sing-box >/dev/null 2>&1; then if command -v apk >/dev/null 2>&1; then apk update >/dev/null 2>&1; apk add sing-box >/dev/null 2>&1 || apk add sing-box-tiny >/dev/null 2>&1 || true; else opkg update >/dev/null 2>&1; opkg install sing-box >/dev/null 2>&1 || opkg install sing-box-tiny >/dev/null 2>&1 || true; fi; fi";
 				} else if (target == "prokop") {
 					// Prokop — переименованный Forkop: свой установщик сам
@@ -183,7 +198,10 @@ function handle_command(cmd) {
 					// Forkop не умеет удалять Podkop/Prokop, делаем это сами.
 					command += "if command -v opkg >/dev/null 2>&1; then opkg remove --force-depends prokop luci-app-prokop luci-i18n-prokop-ru podkop luci-app-podkop tachyon-core >/dev/null 2>&1 || true; fi; ";
 					command += "if command -v apk >/dev/null 2>&1; then apk del prokop luci-app-prokop luci-i18n-prokop-ru podkop luci-app-podkop tachyon-core >/dev/null 2>&1 || true; fi; ";
-					command += "wget -qO- https://raw.githubusercontent.com/ushan0v/forkop/main/install.sh | sh -s";
+					if (panel != "")
+						command += "INST=\"$(wget -qO- \"" + panel + "/downloads/packages/forkop/install.sh\" 2>/dev/null)\"; if [ -n \"$INST\" ]; then printf '%s' \"$INST\" | FORKOP_DOWNLOAD_URL=\"" + panel + "/downloads/github\" sh -s; else wget -qO- https://raw.githubusercontent.com/ushan0v/forkop/main/install.sh | sh -s; fi; ";
+					else
+						command += "wget -qO- https://raw.githubusercontent.com/ushan0v/forkop/main/install.sh | sh -s";
 				}
 			}
 			let res = runner.run([ "sh", "-c", command ], 1800);

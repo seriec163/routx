@@ -127,6 +127,8 @@ done
 
 [ -n "$SERVER" ] || { echo "--server is required" >&2; exit 2; }
 [ -n "$TOKEN" ] || { echo "--token is required" >&2; exit 2; }
+PANEL="$SERVER"
+PANEL=$(printf '%s' "$PANEL" | sed 's:/*$::')
 case "$PRODUCT_ARG" in
   ""|prokop|forkop|podkop|tachyon) ;;
   *) echo "--product must be prokop, forkop, podkop or tachyon" >&2; exit 2 ;;
@@ -620,7 +622,11 @@ if ! has_prokop && ! has_forkop && ! has_podkop && ! has_tachyon; then
       fi
       ;;
     forkop)
-      wget -qO- https://raw.githubusercontent.com/ushan0v/forkop/main/install.sh | sh -s
+      if INST="$(wget -qO- "$PANEL/downloads/packages/forkop/install.sh" 2>/dev/null)"; then
+        printf '%s' "$INST" | FORKOP_DOWNLOAD_URL="$PANEL/downloads/github" sh -s
+      else
+        wget -qO- https://raw.githubusercontent.com/ushan0v/forkop/main/install.sh | sh -s
+      fi
       ;;
     podkop)
       REL=$(. /etc/openwrt_release >/dev/null 2>&1; echo "$DISTRIB_RELEASE")
@@ -645,10 +651,11 @@ if ! has_prokop && ! has_forkop && ! has_podkop && ! has_tachyon; then
         pkg_del luci-app-https-dns-proxy
         pkg_del luci-i18n-https-dns-proxy-ru
       fi
-      # Официальный установщик спрашивает только про русскую локализацию:
-      # https-dns-proxy и старый конфиг обработаны выше. Отвечаем "n" —
-      # интерфейс Podkop настраивается в LuCI, а не в RoutX.
-      PODKOP_INSTALLER="$(wget -qO- https://raw.githubusercontent.com/itdoginfo/podkop/main/install.sh 2>/dev/null)" || true
+      # Сначала пробуем установщик из зеркала панели, затем GitHub.
+      PODKOP_INSTALLER="$(wget -qO- "$PANEL/downloads/packages/podkop/install.sh" 2>/dev/null)" || true
+      if [ -z "$PODKOP_INSTALLER" ]; then
+        PODKOP_INSTALLER="$(wget -qO- https://raw.githubusercontent.com/itdoginfo/podkop/main/install.sh 2>/dev/null)" || true
+      fi
       if [ -z "$PODKOP_INSTALLER" ]; then
         echo "Не удалось загрузить установщик Podkop." >&2
         exit 1
@@ -656,7 +663,11 @@ if ! has_prokop && ! has_forkop && ! has_podkop && ! has_tachyon; then
       echo n | sh -c "$PODKOP_INSTALLER" || true
       ;;
     tachyon)
-      wget -O /tmp/tachyon-setup.sh https://raw.githubusercontent.com/Dushnilin/tachyon/main/install.sh && sh /tmp/tachyon-setup.sh -y --tachyon-core
+      if wget -qO /tmp/tachyon-setup.sh "$PANEL/downloads/packages/tachyon/install.sh" 2>/dev/null; then
+        sh /tmp/tachyon-setup.sh -y --tachyon-core
+      else
+        wget -O /tmp/tachyon-setup.sh https://raw.githubusercontent.com/Dushnilin/tachyon/main/install.sh && sh /tmp/tachyon-setup.sh -y --tachyon-core
+      fi
       ;;
   esac
 

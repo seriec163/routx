@@ -30,6 +30,7 @@ import { registerApplyRoutes } from './apply/routes.js';
 import { registerMonitoringRoutes } from './monitoring/routes.js';
 import { registerDiagnosticsRoutes } from './diagnostics/routes.js';
 import { registerLogRoutes } from './logs/routes.js';
+import { registerPackageRoutes } from './packages/routes.js';
 import { registerSingBoxRoutes } from './singbox/routes.js';
 import { registerUserRoutes } from './users/routes.js';
 import { registerSettingsRoutes } from './settings/routes.js';
@@ -311,6 +312,11 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
     await registerMonitoringRoutes(app, { pool });
     await registerDiagnosticsRoutes(app, { pool });
     await registerLogRoutes(app, { pool });
+    await registerPackageRoutes(app, {
+      pool,
+      dataDir: config.dataDir ?? '/app/data',
+      publicUrl: config.publicUrl,
+    });
     await registerSingBoxRoutes(app, { pool });
     await registerUserRoutes(app, {
       pool,

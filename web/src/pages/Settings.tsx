@@ -15,7 +15,7 @@ import {
   useToast,
 } from '../components/ui';
 import { api, errorMessage } from '../lib/api';
-import { formatBytes, formatDate } from '../lib/format';
+import { formatBytes, formatDate, PRODUCT_LABEL } from '../lib/format';
 import type {
   SettingsEffective,
   SettingsResponse,
@@ -35,6 +35,17 @@ interface FormState {
   agent: SettingsEffective['agent'];
   singbox: SettingsEffective['singbox'];
   features: SettingsEffective['features'];
+}
+
+interface PackageStatus {
+  total_files: number;
+  total_bytes: number;
+  products: Array<{ product: string; files: number; bytes: number; fetched_at: string | null }>;
+  releases: Array<{ repo: string; tag: string; fetched_at: string }>;
+  syncing: boolean;
+  last_started: string | null;
+  last_finished: string | null;
+  last_error: string | null;
 }
 
 function toForm(effective: SettingsEffective): FormState {
@@ -78,11 +89,13 @@ export function SettingsPage() {
   const storage = useApi<SettingsStorage>('/api/v1/settings/storage');
   const updates = useApi<UpdateStatus>('/api/v1/updates');
   const templates = useApi<{ items: TemplateListItem[] }>('/api/v1/templates');
+  const packages = useApi<PackageStatus>('/api/v1/packages');
   const [form, setForm] = useState<FormState | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [updateAction, setUpdateAction] = useState<'check' | 'apply' | 'rollback' | null>(null);
   const [confirmUpdate, setConfirmUpdate] = useState<'apply' | 'rollback' | null>(null);
+  const [packageBusy, setPackageBusy] = useState(false);
 
   useEffect(() => {
     if (settings.data?.effective && !form) setForm(toForm(settings.data.effective));
@@ -94,6 +107,19 @@ export function SettingsPage() {
     }, 5000);
     return () => window.clearInterval(timer);
   }, [updates.reload]);
+
+  async function syncPackages(): Promise<void> {
+    setPackageBusy(true);
+    try {
+      await api('/api/v1/packages/sync', { method: 'POST', body: {} });
+      toast.success('Синхронизация зеркала запущена');
+      await packages.reload();
+    } catch (caught) {
+      toast.error(errorMessage(caught));
+    } finally {
+      setPackageBusy(false);
+    }
+  }
 
   async function checkUpdates(): Promise<void> {
     setUpdateAction('check');
@@ -409,6 +435,68 @@ export function SettingsPage() {
                   ))}
               </Select>
             </Field>
+          </Panel>
+
+          <Panel
+            title="Зеркало пакетов"
+            subtitle="Установщики и пакеты Podkop/Forkop/Tachyon на случай недоступного GitHub."
+          >
+            {packages.error ? <ErrorBanner message={packages.error} /> : null}
+            <div className="kv">
+              <span>Всего</span>
+              <strong>
+                {formatBytes(packages.data?.total_bytes ?? 0)} ·{' '}
+                {packages.data?.total_files ?? 0} файлов
+              </strong>
+              <span>Последняя синхронизация</span>
+              <strong>
+                {packages.data?.last_finished
+                  ? formatDate(packages.data.last_finished)
+                  : 'ещё не было'}
+              </strong>
+            </div>
+            {packages.data?.syncing ? (
+              <InfoBanner>Синхронизация идёт в фоне — это может занять минуту.</InfoBanner>
+            ) : null}
+            {packages.data?.last_error ? (
+              <ErrorBanner message={packages.data.last_error} />
+            ) : null}
+            {packages.data && packages.data.products.length > 0 ? (
+              <div className="table-wrap">
+                <table className="table">
+                  <thead>
+                    <tr>
+                      <th>Продукт</th>
+                      <th>Файлы</th>
+                      <th>Размер</th>
+                      <th>Обновлено</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {packages.data.products.map((item) => (
+                      <tr key={item.product}>
+                        <td>{PRODUCT_LABEL[item.product] ?? item.product}</td>
+                        <td>{item.files}</td>
+                        <td>{formatBytes(item.bytes)}</td>
+                        <td className="small">
+                          {item.fetched_at ? formatDate(item.fetched_at) : '—'}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            ) : (
+              <p className="muted-text">Зеркало ещё не заполнено. Запустите синхронизацию.</p>
+            )}
+            <div className="row" style={{ gap: 8, marginTop: 12 }}>
+              <Button onClick={() => void syncPackages()} busy={packageBusy}>
+                Синхронизировать
+              </Button>
+              <Button variant="ghost" onClick={() => void packages.reload()} busy={packages.loading}>
+                Обновить
+              </Button>
+            </div>
           </Panel>
 
           <Panel
