@@ -93,10 +93,7 @@ export async function loadSettings(pool: Pool): Promise<PlatformSettings> {
   ]);
 
   const mfa = rows.get('security.mfa_policy')?.value;
-  const defaultTemplateValue = rows.get('default_template_id')?.value as
-    | { value?: unknown }
-    | undefined;
-  const defaultTemplateRaw = defaultTemplateValue?.value;
+  const defaultTemplateRaw = rows.get('default_template_id')?.value;
   const defaultTemplateId =
     typeof defaultTemplateRaw === 'string' && defaultTemplateRaw.trim() !== ''
       ? defaultTemplateRaw.trim()
