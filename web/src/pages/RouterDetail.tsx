@@ -1876,7 +1876,7 @@ export function RouterDetailPage({ id }: { id: string }) {
         />
         <Stat label="Агент" value={router.agent_version ?? '—'} hint={`Manifest: ${router.manifest_version ?? '—'}`} />
         <Stat
-          label="sing-box"
+          label={router.product === 'tachyon' ? 'Движок' : 'sing-box'}
           value={router.sing_box_version ?? 'не установлен'}
           hint={router.sing_box_variant ?? 'вариант неизвестен'}
         />
@@ -2702,6 +2702,13 @@ export function RouterDetailPage({ id }: { id: string }) {
 
       {tab === 'singbox' ? (
         <div className="stack">
+          {router.product === 'tachyon' ? (
+            <InfoBanner>
+              Tachyon 1.8 и новее используют собственное ядро <strong>tachyon-core</strong>.
+              Варианты sing-box здесь не применяются — обновляйте модуль и ядро на вкладке
+              «Обновления».
+            </InfoBanner>
+          ) : null}
           <Panel
             title="Вариант sing-box"
             subtitle="Prokop удаляет текущий пакет перед установкой нового варианта, затем ставит новый. При неудаче RoutX попробует вернуть предыдущий."

@@ -209,6 +209,17 @@ function sing_box_info(product) {
 	let version = "";
 	let variant = "";
 
+	// Tachyon 1.8+ работает на tachyon-core; команда show_sing_box_version
+	// в нём отсутствует, а старый /usr/bin/sing-box может остаться от 1.7.x.
+	if (product == "tachyon" && util.file_exists("/usr/bin/tachyon-core")) {
+		let core = run.run(["/usr/bin/tachyon-core", "version"], 10);
+		if (core.ok) {
+			let core_match = match(core.stdout, /([0-9]+[.][0-9]+[.][0-9]+)/);
+			if (core_match != null)
+				return { version: core_match[1], variant: "" };
+		}
+	}
+
 	if (product == "forkop" || product == "prokop" || product == "podkop" || product == "tachyon") {
 		let result = run.run_product(product, ["show_sing_box_version"], 15);
 		if (result.ok)
@@ -321,25 +332,32 @@ function ui_state_values(product, ui) {
 	let own = (product == "forkop" || product == "prokop" || product == "podkop" || product == "tachyon") && type(service[product]) == "object"
 		? service[product] : {};
 	let sing_box = type(service.sing_box) == "object" ? service.sing_box : {};
+	let tachyon_core = type(service.tachyon_core) == "object" ? service.tachyon_core : {};
+	// Tachyon 1.8+ перешёл с sing-box на собственное ядро tachyon-core.
+	// Для здоровья и автозапуска смотрим на фактический движок продукта.
+	let engine = length(keys(tachyon_core)) > 0 ? tachyon_core : sing_box;
+	let engine_name = length(keys(tachyon_core)) > 0 ? "tachyon-core" : "sing-box";
 	let present = length(keys(service)) > 0;
 
 	let product_running = util.is_true(own.running);
 	let product_enabled = util.is_true(own.enabled);
+	let engine_running = util.is_true(engine.running);
+	let engine_enabled = util.is_true(engine.enabled);
 	let sing_box_running = util.is_true(sing_box.running);
 	let sing_box_enabled = util.is_true(sing_box.enabled);
 	let dns_configured = util.is_true(own.dns_configured);
-	// Prokop/Forkop/Podkop сами запускают sing-box и штатно отключают его
+	// Prokop/Forkop/Podkop/Tachyon сами запускают движок и штатно отключают его
 	// standalone автозапуск. Для них выключенный /etc/rc.d/S99sing-box — норма,
 	// если продукт включён и запущен.
-	let sing_box_managed = (product == "forkop" || product == "prokop" || product == "podkop" || product == "tachyon") &&
+	let engine_managed = (product == "forkop" || product == "prokop" || product == "podkop" || product == "tachyon") &&
 		product_running && product_enabled;
-	let sing_box_autostart_ok = sing_box_enabled || sing_box_managed;
+	let engine_autostart_ok = engine_enabled || engine_managed;
 
 	let overall = "unknown";
 	if (present) {
-		if (!product_running && !sing_box_running)
+		if (!product_running && !engine_running)
 			overall = "stopped";
-		else if (!product_running || !sing_box_running || !product_enabled || !sing_box_autostart_ok)
+		else if (!product_running || !engine_running || !product_enabled || !engine_autostart_ok)
 			overall = "degraded";
 		else
 			overall = "ok";
@@ -352,10 +370,15 @@ function ui_state_values(product, ui) {
 			overall: overall,
 			product_running: product_running,
 			product_enabled: product_enabled,
-			sing_box_running: sing_box_running,
-			sing_box_enabled: sing_box_enabled,
-			sing_box_managed: sing_box_managed,
-			sing_box_autostart_ok: sing_box_autostart_ok,
+			engine_name: engine_name,
+			engine_running: engine_running,
+			engine_enabled: engine_enabled,
+			// Совместимость со старыми полями: если sing-box в системе уже нет,
+			// отдаём состояние фактического движка (tachyon-core).
+			sing_box_running: length(keys(sing_box)) > 0 ? sing_box_running : engine_running,
+			sing_box_enabled: length(keys(sing_box)) > 0 ? sing_box_enabled : engine_enabled,
+			sing_box_managed: engine_managed,
+			sing_box_autostart_ok: engine_autostart_ok,
 			dns_configured: dns_configured,
 			state_available: present
 		}
