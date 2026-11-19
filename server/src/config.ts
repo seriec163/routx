@@ -31,6 +31,8 @@ const schema = z.object({
     .default('postgres://router_control:router_control@127.0.0.1:5432/router_control'),
   RC_MASTER_KEY: z.string().optional(),
   RC_MASTER_KEY_FILE: z.string().optional(),
+  RC_DATA_DIR: z.string().optional(),
+  RC_PACKAGE_SYNC: booleanFromEnv.default(true),
   WEB_DIST: z.string().optional(),
   MIGRATIONS_DIR: z.string().optional(),
   MIGRATE_ON_START: booleanFromEnv.default(false),
@@ -54,6 +56,7 @@ export type Config = z.infer<typeof schema> & {
   isProduction: boolean;
   masterKeyFile: string;
   masterKeySource: 'file' | 'env';
+  dataDir: string;
 };
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
@@ -95,6 +98,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     RC_MASTER_KEY: masterKey ?? undefined,
     masterKeyFile,
     masterKeySource: fileMasterKey ? ('file' as const) : ('env' as const),
+    dataDir: config.RC_DATA_DIR || path.dirname(masterKeyFile),
     isProduction,
   };
 }

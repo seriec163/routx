@@ -34,5 +34,6 @@ agent/dist/
 # Временные артефакты сборки apk и браузерных проверок
 tmp_apk_root/
 tmp/
+.ci-data/
 .playwright-mcp/
 service-picker.png

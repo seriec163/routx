@@ -37,6 +37,8 @@ jobs:
       NODE_ENV: test
       DATABASE_URL: postgres://router_control:router_control_ci@127.0.0.1:5432/router_control
       RC_MASTER_KEY: ci-master-key-0123456789abcdef0123456789abcdef
+      RC_DATA_DIR: ${{ github.workspace }}/.ci-data
+      RC_PACKAGE_SYNC: 'false'
       POSTGRES_PASSWORD: router_control_ci
       LOG_LEVEL: warn
 
@@ -76,6 +78,7 @@ jobs:
 
       - name: Runtime smoke test
         run: |
+          mkdir -p .ci-data
           node server/dist/index.js &
           server_pid=$!
           trap 'kill "$server_pid" 2>/dev/null || true' EXIT
@@ -102,7 +105,7 @@ jobs:
             if (ready.status !== "ready" || ready.checks.db !== "ok") throw new Error("readyz");
             const meta = await (await fetch(`${base}/api/v1/meta`)).json();
             if (!meta.schema_version || String(meta.schema_version) !== String(ready.schema_version))
-              throw new Error(`schema_version=${meta.schema_version}, ready=${ready.schema_version}`);
+              throw new Error(`meta=${JSON.stringify(meta)} schema_version=${meta.schema_version}, ready=${ready.schema_version}`);
             const html = await (await fetch(`${base}/`)).text();
             if (!html.includes("<div id=\"root\">")) throw new Error("SPA");
             console.log("runtime smoke test: ok");

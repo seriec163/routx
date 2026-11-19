@@ -64,7 +64,7 @@ const app = await buildApp({
     agentPollHoldSeconds: config.RC_AGENT_POLL_HOLD_SECONDS,
     masterKeySource: config.masterKeySource,
     masterKeyFile: config.masterKeyFile,
-    dataDir: path.dirname(config.masterKeyFile),
+    dataDir: config.dataDir,
     migrationsDir:
       config.MIGRATIONS_DIR ??
       fileURLToPath(new URL('../migrations', import.meta.url)),
@@ -142,16 +142,19 @@ try {
 
   // Зеркало пакетов: сразу после старта и затем раз в 6 часов. Сетевые
   // ошибки не мешают панели работать — остаётся последняя удачная копия.
-  const packageDataDir = path.dirname(config.masterKeyFile);
-  void startPackageSync(db.pool, packageDataDir, config.RC_PUBLIC_URL, app.log).catch(
-    () => undefined,
-  );
-  const packageTimer = setInterval(() => {
+  // В CI синхронизацию отключаем: она качает сотни мегабайт с GitHub.
+  const packageDataDir = config.dataDir;
+  if (config.RC_PACKAGE_SYNC) {
     void startPackageSync(db.pool, packageDataDir, config.RC_PUBLIC_URL, app.log).catch(
       () => undefined,
     );
-  }, 6 * 60 * 60 * 1000);
-  packageTimer.unref();
+    const packageTimer = setInterval(() => {
+      void startPackageSync(db.pool, packageDataDir, config.RC_PUBLIC_URL, app.log).catch(
+        () => undefined,
+      );
+    }, 6 * 60 * 60 * 1000);
+    packageTimer.unref();
+  }
 } catch (error) {
   app.log.error({ err: error }, 'не удалось запустить сервер');
   await worker.stop();
