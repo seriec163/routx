@@ -1878,7 +1878,11 @@ export function RouterDetailPage({ id }: { id: string }) {
         <Stat
           label={router.product === 'tachyon' ? 'Движок' : 'sing-box'}
           value={router.sing_box_version ?? 'не установлен'}
-          hint={router.sing_box_variant ?? 'вариант неизвестен'}
+          hint={
+            router.product === 'tachyon'
+              ? 'tachyon-core'
+              : (router.sing_box_variant ?? 'вариант неизвестен')
+          }
         />
       </div>
 
