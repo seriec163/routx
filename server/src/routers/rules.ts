@@ -28,6 +28,23 @@ const SECTION_RE = /^[A-Za-z0-9_.-]{1,64}$/;
 // пробелы, кириллица, эмодзи и слэш допустимы.
 const PROXY_TAG_RE = /^[^\u0000-\u001f\u007f]{1,200}$/;
 
+// Название продукта для сообщений пользователю. Продукт может быть ещё не
+// определён (unknown/conflict) — тогда говорим нейтрально.
+function productLabel(product: string | null | undefined): string {
+  switch (product) {
+    case 'prokop':
+      return 'Prokop';
+    case 'forkop':
+      return 'Forkop';
+    case 'podkop':
+      return 'Podkop';
+    case 'tachyon':
+      return 'Tachyon';
+    default:
+      return 'роутер';
+  }
+}
+
 function textLines(value: string | null | undefined): string[] {
   return (value ?? '')
     .split(/\r?\n/)
@@ -242,7 +259,7 @@ export async function registerRouterRuleRoutes(
         return { job: jobJson(job) };
       }
 
-      // Prokop не может собрать конфигурацию, если не осталось ни одной
+      // Продукт не может собрать конфигурацию, если не осталось ни одной
       // включённой секции. Не даём выключить последнее включённое правило.
       if (!body.enabled) {
         const state = await pool.query<{ managed: Record<string, UciValue> | null }>(
@@ -257,9 +274,10 @@ export async function registerRouterRuleRoutes(
         }
         const targetEnabled = String(managed[`section.${body.section}.enabled`] ?? '1') !== '0';
         if (targetEnabled && enabledSections.size <= 1 && enabledSections.has(body.section)) {
+          const label = productLabel(router.product);
           throw conflict(
             'last_enabled_rule',
-            'Нельзя выключить последнее включённое правило: Prokop не сможет собрать конфигурацию. Сначала включите другое правило.',
+            `Нельзя выключить последнее включённое правило: ${label} не сможет собрать конфигурацию. Сначала включите другое правило.`,
           );
         }
       }

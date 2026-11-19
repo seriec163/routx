@@ -174,6 +174,27 @@ has_tachyon() {
   return 1
 }
 
+# curl нужен для части сценариев и для самого агента. На роутере его может
+# не быть — ставим пакетным менеджером, не прерывая установку.
+ensure_curl() {
+  command -v curl >/dev/null 2>&1 && return 0
+  if command -v opkg >/dev/null 2>&1; then
+    opkg update >/dev/null 2>&1 || true
+    opkg install curl ca-bundle >/dev/null 2>&1 || opkg install curl >/dev/null 2>&1 || true
+  elif command -v apk >/dev/null 2>&1; then
+    apk update >/dev/null 2>&1 || true
+    apk add curl ca-bundle >/dev/null 2>&1 || apk add curl >/dev/null 2>&1 || true
+  fi
+  command -v curl >/dev/null 2>&1
+}
+
+ensure_curl || true
+if command -v curl >/dev/null 2>&1; then
+  echo "curl установлен"
+else
+  echo "curl не установлен; используется wget" >&2
+fi
+
 pkg_has() {
   if command -v opkg >/dev/null 2>&1; then
     opkg list-installed 2>/dev/null | grep -q "^$1 "

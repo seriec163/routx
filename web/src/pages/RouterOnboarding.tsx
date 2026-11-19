@@ -30,7 +30,7 @@ import type {
 import { useApi } from '../lib/useApi';
 import { useSession } from '../session';
 
-type Step = 1 | 2 | 3 | 4;
+type Step = 1 | 2 | 3;
 type PipelineKey = 'subscription' | 'template' | 'access' | 'diagnostics';
 type ItemStatus = 'pending' | 'running' | 'success' | 'skipped' | 'error';
 
@@ -48,10 +48,9 @@ interface AccessResult {
 }
 
 const STEPS: Array<{ id: Step; title: string; hint: string }> = [
-  { id: 1, title: 'Имя и владелец', hint: 'Как называть роутер' },
+  { id: 1, title: 'Имя и настройки', hint: 'Название, подписка и шаблон' },
   { id: 2, title: 'Подключение', hint: 'Одна команда по SSH' },
-  { id: 3, title: 'Подписка и шаблон', hint: 'Что включить' },
-  { id: 4, title: 'Проверка', hint: 'Сайт и диагностика' },
+  { id: 3, title: 'Проверка', hint: 'Сайт и диагностика' },
 ];
 
 const ACCESS_TARGET = 'https://www.youtube.com/generate_204';
@@ -91,7 +90,7 @@ export function RouterOnboardingPage() {
 
   const [step, setStep] = useState<Step>(1);
   const subscriptions = useApi<{ items: CatalogSubscription[] }>(
-    step === 3 ? '/api/v1/subscriptions' : null,
+    step === 1 ? '/api/v1/subscriptions' : null,
   );
   const [name, setName] = useState('');
   const [ownerId, setOwnerId] = useState('');
@@ -145,7 +144,16 @@ export function RouterOnboardingPage() {
         if (data.router.status === 'online' && !advanced.current) {
           advanced.current = true;
           window.setTimeout(() => {
-            if (!cancelled) setStep(3);
+            if (cancelled) return;
+            setStep(3);
+            setPipelineStarted(true);
+            void runPipeline(
+              router!.id,
+              subscription.trim(),
+              catalogId,
+              templateId,
+              applyTemplate,
+            );
           }, 900);
         }
       } catch {
@@ -159,7 +167,7 @@ export function RouterOnboardingPage() {
       cancelled = true;
       window.clearInterval(timer);
     };
-  }, [step, router]);
+  }, [step, router, subscription, catalogId, templateId, applyTemplate]);
 
   // Узнаём текущее состояние автозапуска на шаге 3.
   useEffect(() => {
@@ -257,6 +265,11 @@ export function RouterOnboardingPage() {
 
   async function createRouter(): Promise<void> {
     if (!name.trim()) return;
+    const subscriptionValue = subscription.trim();
+    if (!catalogId && subscriptionValue !== '' && !/^https?:\/\/\S+$/i.test(subscriptionValue)) {
+      setFormError('Ссылка на подписку должна начинаться с http:// или https://');
+      return;
+    }
     setCreating(true);
     setFormError(null);
     try {
@@ -276,19 +289,6 @@ export function RouterOnboardingPage() {
     } finally {
       setCreating(false);
     }
-  }
-
-  function continueFromStep3(): void {
-    if (!router) return;
-    const value = subscription.trim();
-    if (!catalogId && value !== '' && !/^https?:\/\/\S+$/i.test(value)) {
-      setFormError('Ссылка на подписку должна начинаться с http:// или https://');
-      return;
-    }
-    setFormError(null);
-    setStep(4);
-    setPipelineStarted(true);
-    void runPipeline(router.id, value, catalogId, templateId, applyTemplate);
   }
 
   async function enableAutostart(): Promise<void> {
@@ -536,14 +536,14 @@ export function RouterOnboardingPage() {
         title="Добавить роутер"
         subtitle={
           router
-            ? `Роутер «${router.name}» · четыре шага: имя, подключение, подписка и шаблон, проверка.`
-            : 'Четыре шага: имя, подключение, подписка и шаблон, проверка.'
+            ? `Роутер «${router.name}» · три шага: имя и настройки, подключение, проверка.`
+            : 'Три шага: имя и настройки, подключение, проверка.'
         }
       />
 
       <div className="onb-steps">
         {STEPS.map((item) => {
-          const done = step > item.id || (item.id === 2 && online && step >= 3);
+          const done = step > item.id;
           const active = step === item.id;
           return (
             <div
@@ -585,6 +585,83 @@ export function RouterOnboardingPage() {
               </Select>
             </Field>
           ) : null}
+          {catalogList.length > 0 ? (
+            <Field
+              label="Подписка из каталога"
+              hint="Выберите готовую подписку или вставьте ссылку вручную."
+            >
+              <Select
+                value={catalogId}
+                onChange={(value) => {
+                  setCatalogId(value);
+                  if (value) setSubscription('');
+                }}
+              >
+                <option value="">Вставить ссылку вручную</option>
+                {catalogList.map((item) => (
+                  <option key={item.id} value={item.id}>
+                    {item.name}
+                    {item.owner_email ? ` · ${item.owner_email}` : ''}
+                  </option>
+                ))}
+              </Select>
+            </Field>
+          ) : null}
+
+          {selectedCatalog ? (
+            <InfoBanner>
+              Выбрана подписка <strong>{selectedCatalog.name}</strong> из каталога. Ссылка хранится
+              на сервере и не показывается.
+            </InfoBanner>
+          ) : (
+            <Field
+              label="Ссылка на подписку"
+              hint="Ссылка вида https://… Секрет хранится на сервере в зашифрованном виде."
+            >
+              <TextInput
+                value={subscription}
+                onChange={setSubscription}
+                placeholder="https://example.com/sub/…"
+              />
+            </Field>
+          )}
+          {subscriptions.loading && !subscriptions.data ? (
+            <Spinner label="Загружаем каталог подписок…" />
+          ) : null}
+          {subscriptions.error ? <ErrorBanner message={subscriptions.error} /> : null}
+
+          <Field label="Шаблон" hint="Шаблон задаёт списки, DNS и правила. Его можно изменить позже.">
+            <Select value={templateId} onChange={setTemplateId}>
+              <option value="">Без шаблона</option>
+              {templatesList.map((item) => (
+                <option key={item.id} value={item.id}>
+                  {item.name} (ред. {item.current_revision})
+                </option>
+              ))}
+            </Select>
+          </Field>
+
+          {templates.loading && !templates.data ? <Spinner label="Загружаем шаблоны…" /> : null}
+          {templates.data?.items.length === 0 ? (
+            <InfoBanner>
+              Шаблонов пока нет. Создайте шаблон в разделе «Шаблоны», затем вернитесь сюда.
+            </InfoBanner>
+          ) : null}
+
+          {selectedTemplate ? (
+            <label className="check-row">
+              <input
+                type="checkbox"
+                checked={applyTemplate}
+                onChange={(event) => setApplyTemplate(event.target.checked)}
+              />
+              <span>
+                Применить шаблон сразу после установки: панель создаст включённую секцию и
+                импортирует выбранную подписку.
+              </span>
+            </label>
+          ) : null}
+
           <div className="onb-actions">
             <Button onClick={() => void createRouter()} busy={creating} disabled={!name.trim()}>
               Создать и перейти к установке
@@ -703,9 +780,6 @@ export function RouterOnboardingPage() {
             <Button variant="ghost" onClick={() => void api(`/api/v1/routers/${router.id}`).then((data) => setLiveRouter((data as { router: RouterRecord }).router))}>
               Проверить снова
             </Button>
-            <Button onClick={() => setStep(3)} disabled={!online}>
-              Продолжить
-            </Button>
           </div>
         </div>
       ) : null}
@@ -713,135 +787,10 @@ export function RouterOnboardingPage() {
       {step === 3 && router ? (
         <div className="onb-card">
           <div className="onb-hero">
-            <span className="onb-hero-icon">3</span>
-            <div>
-              <h2>Подписка и шаблон</h2>
-              <p>Можно указать одно, оба или пропустить — проверка всё равно запустится.</p>
-            </div>
-          </div>
-          {formError ? <ErrorBanner message={formError} /> : null}
-
-          {catalogList.length > 0 ? (
-            <Field
-              label="Подписка из каталога"
-              hint="Выберите готовую подписку или вставьте ссылку вручную."
-            >
-              <Select
-                value={catalogId}
-                onChange={(value) => {
-                  setCatalogId(value);
-                  if (value) setSubscription('');
-                }}
-              >
-                <option value="">Вставить ссылку вручную</option>
-                {catalogList.map((item) => (
-                  <option key={item.id} value={item.id}>
-                    {item.name}
-                    {item.owner_email ? ` · ${item.owner_email}` : ''}
-                  </option>
-                ))}
-              </Select>
-            </Field>
-          ) : null}
-
-          {selectedCatalog ? (
-            <InfoBanner>
-              Выбрана подписка <strong>{selectedCatalog.name}</strong> из каталога. Ссылка хранится
-              на сервере и не показывается.
-            </InfoBanner>
-          ) : (
-            <Field
-              label="Ссылка на подписку"
-              hint="Ссылка вида https://… Секрет хранится на сервере в зашифрованном виде."
-            >
-              <TextInput
-                value={subscription}
-                onChange={setSubscription}
-                placeholder="https://example.com/sub/…"
-              />
-            </Field>
-          )}
-          {subscriptions.loading && !subscriptions.data ? (
-            <Spinner label="Загружаем каталог подписок…" />
-          ) : null}
-          {subscriptions.error ? <ErrorBanner message={subscriptions.error} /> : null}
-
-          <Field label="Шаблон" hint="Шаблон задаёт списки, DNS и правила. Его можно изменить позже.">
-            <Select value={templateId} onChange={setTemplateId}>
-              <option value="">Без шаблона</option>
-              {templatesList.map((item) => (
-                <option key={item.id} value={item.id}>
-                  {item.name} (ред. {item.current_revision})
-                </option>
-              ))}
-            </Select>
-          </Field>
-
-          {templates.loading && !templates.data ? <Spinner label="Загружаем шаблоны…" /> : null}
-          {templates.data?.items.length === 0 ? (
-            <InfoBanner>
-              Шаблонов пока нет. Можно пропустить этот шаг и создать шаблон позже.
-            </InfoBanner>
-          ) : null}
-
-          {selectedTemplate ? (
-            <label className="check-row">
-              <input
-                type="checkbox"
-                checked={applyTemplate}
-                onChange={(event) => setApplyTemplate(event.target.checked)}
-              />
-              <span>
-                Применить шаблон сразу после проверки (будет создан снимок и выполнен diff)
-              </span>
-            </label>
-          ) : null}
-
-          <div className="onb-autostart">
-            <div>
-              <strong>
-                Автозапуск{' '}
-                {PRODUCT_LABEL[liveRouter?.product ?? router.product ?? 'prokop'] ?? 'Prokop'}
-              </strong>
-              <span>
-                {autostart === null
-                  ? 'Проверяем текущее состояние…'
-                  : autostart
-                    ? 'Включён — после перезагрузки роутера Prokop/Forkop запустится сам и поднимет sing-box.'
-                    : 'Сейчас выключен: после перезагрузки роутера служба и sing-box могут не подняться.'}
-              </span>
-            </div>
-            <Button
-              size="sm"
-              variant={autostart ? 'ghost' : 'subtle'}
-              onClick={() => void enableAutostart()}
-              busy={autostartBusy}
-              disabled={autostart === true}
-            >
-              {autostart ? 'Автостарт включён' : 'Включить автостарт'}
-            </Button>
-          </div>
-
-          <div className="onb-actions">
-            <Button variant="ghost" onClick={() => setStep(2)}>
-              Назад
-            </Button>
-            <Button onClick={continueFromStep3}>
-              {subscription.trim() || catalogId || templateId
-                ? 'Сохранить и проверить'
-                : 'Перейти к проверке'}
-            </Button>
-          </div>
-        </div>
-      ) : null}
-
-      {step === 4 && router ? (
-        <div className="onb-card">
-          <div className="onb-hero">
             <span
               className={`onb-hero-icon ${running ? 'onb-hero-icon-running' : allDone && !hasProblems ? 'onb-hero-icon-ok' : ''}`}
             >
-              {running ? '…' : allDone && !hasProblems ? '✓' : '4'}
+              {running ? '…' : allDone && !hasProblems ? '✓' : '3'}
             </span>
             <div>
               <h2>
@@ -948,6 +897,31 @@ export function RouterOnboardingPage() {
 
           {pipelineError ? <ErrorBanner message={pipelineError} /> : null}
 
+          <div className="onb-autostart">
+            <div>
+              <strong>
+                Автозапуск{' '}
+                {PRODUCT_LABEL[liveRouter?.product ?? router.product ?? 'prokop'] ?? 'Prokop'}
+              </strong>
+              <span>
+                {autostart === null
+                  ? 'Проверяем текущее состояние…'
+                  : autostart
+                    ? 'Включён — после перезагрузки роутера служба запустится сама и поднимет sing-box.'
+                    : 'Сейчас выключен: после перезагрузки роутера служба и sing-box могут не подняться.'}
+              </span>
+            </div>
+            <Button
+              size="sm"
+              variant={autostart ? 'ghost' : 'subtle'}
+              onClick={() => void enableAutostart()}
+              busy={autostartBusy}
+              disabled={autostart === true}
+            >
+              {autostart ? 'Автостарт включён' : 'Включить автостарт'}
+            </Button>
+          </div>
+
           <div className="onb-actions">
             {!running ? (
               <Button variant="subtle" onClick={retryChecks}>
@@ -962,7 +936,7 @@ export function RouterOnboardingPage() {
         </div>
       ) : null}
 
-      {step === 4 && !router ? (
+      {step === 3 && !router ? (
         <Empty>Роутер не создан. Вернитесь на первый шаг.</Empty>
       ) : null}
     </div>
