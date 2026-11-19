@@ -21,6 +21,7 @@ import { registerRouterRoutes } from './routers/routes.js';
 import { registerRouterExtrasRoutes } from './routers/extras.js';
 import { registerRouterConnectionRoutes } from './routers/connections.js';
 import { registerRouterRuleRoutes } from './routers/rules.js';
+import { registerRouterComponentRoutes } from './routers/components.js';
 import { registerMobileRoutes } from './mobile/routes.js';
 import { registerDnsRoutes } from './routers/dns.js';
 import { registerSubscriptionRoutes } from './subscriptions/routes.js';
@@ -300,6 +301,7 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
     await registerRouterExtrasRoutes(app, { pool });
     await registerRouterConnectionRoutes(app, { pool, masterKey: config.masterKey });
     await registerRouterRuleRoutes(app, { pool, masterKey: config.masterKey });
+    await registerRouterComponentRoutes(app, { pool });
     await registerMobileRoutes(app, {
       pool,
       secureCookie: config.secureCookie,

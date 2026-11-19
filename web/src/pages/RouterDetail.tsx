@@ -73,6 +73,7 @@ import { useSession } from '../session';
 
 type TabId =
   | 'overview'
+  | 'updates'
   | 'dns'
   | 'connections'
   | 'lists'
@@ -86,6 +87,7 @@ type TabId =
 
 const TABS: Array<{ id: TabId; label: string }> = [
   { id: 'overview', label: 'Обзор' },
+  { id: 'updates', label: 'Обновления' },
   { id: 'dns', label: 'DNS' },
   { id: 'connections', label: 'Правила и подключения' },
   { id: 'snapshots', label: 'Снимки' },
@@ -148,6 +150,49 @@ interface ProductServiceInfo {
   running: boolean | null;
   enabled: boolean | null;
   status: string | null;
+}
+
+interface TachyonComponentInfo {
+  component: string;
+  current_version?: string;
+  latest_version?: string;
+  status?: string;
+  message?: string;
+  release_url?: string;
+  release_notes?: string;
+  current_sha?: string;
+  latest_sha?: string;
+  success?: boolean;
+}
+
+const TACHYON_COMPONENTS: Array<{
+  id: 'tachyon' | 'tachyon-core';
+  title: string;
+  description: string;
+}> = [
+  {
+    id: 'tachyon',
+    title: 'Модуль Tachyon',
+    description: 'LuCI-интерфейс, CLI и вспомогательные ucode-модули.',
+  },
+  {
+    id: 'tachyon-core',
+    title: 'Ядро Tachyon Core',
+    description: 'Движок маршрутизации, который держит VPN и правила секций.',
+  },
+];
+
+function componentStatusLabel(info: TachyonComponentInfo | undefined): {
+  status: 'success' | 'warning' | 'error';
+  label: string;
+} {
+  if (!info) return { status: 'warning', label: 'нет данных' };
+  if (info.status === 'latest') return { status: 'success', label: 'актуально' };
+  if (info.status === 'outdated' || info.status === 'outdated_same_release') {
+    return { status: 'warning', label: `доступно ${info.latest_version ?? ''}`.trim() };
+  }
+  if (info.status === 'dev') return { status: 'warning', label: 'новее релиза' };
+  return { status: 'warning', label: info.status || 'неизвестно' };
 }
 
 function versionAtLeast(value: string | null | undefined, minimum: string): boolean {
@@ -621,6 +666,16 @@ export function RouterDetailPage({ id }: { id: string }) {
     servers: string[];
   } | null>(null);
   const [dnsApplyOpen, setDnsApplyOpen] = useState(false);
+  const [componentResults, setComponentResults] = useState<TachyonComponentInfo[]>([]);
+  const [componentErrors, setComponentErrors] = useState<
+    Array<{ component: string; message: string }>
+  >([]);
+  const [componentCheckedAt, setComponentCheckedAt] = useState<Date | null>(null);
+  const [componentCheckBusy, setComponentCheckBusy] = useState(false);
+  const [componentUpdating, setComponentUpdating] = useState<string | null>(null);
+  const [componentJob, setComponentJob] = useState<Job | null>(null);
+  const [componentLog, setComponentLog] = useState('');
+  const componentCheckStarted = useRef(false);
 
   const connections = useApi<{ managed_section: string; items: RouterConnection[] }>(
     tab === 'connections' ? `/api/v1/routers/${id}/connections` : null,
@@ -681,6 +736,15 @@ export function RouterDetailPage({ id }: { id: string }) {
       return installed || 'extended';
     });
   }, [router?.sing_box_variant]);
+
+  // При первом открытии вкладки «Обновления» сразу проверяем компоненты Tachyon.
+  useEffect(() => {
+    if (tab !== 'updates' || componentCheckStarted.current) return;
+    if (router?.product !== 'tachyon') return;
+    if (!versionAtLeast(router?.agent_version, '1.5.47')) return;
+    componentCheckStarted.current = true;
+    void runComponentCheck();
+  }, [tab, router?.product, router?.agent_version]);
 
   const routerSectionNames = useMemo(() => {
     const names = new Set<string>();
@@ -882,6 +946,66 @@ export function RouterDetailPage({ id }: { id: string }) {
     } catch (caught) {
       toast.error(errorMessage(caught));
       return null;
+    }
+  }
+
+  async function runComponentCheck(): Promise<void> {
+    if (!router) return;
+    setComponentCheckBusy(true);
+    setComponentErrors([]);
+    setComponentLog('');
+    try {
+      const started = await api<{ job: Job }>(`/api/v1/routers/${id}/components/check`, {
+        method: 'POST',
+      });
+      setComponentJob(started.job);
+      const done = await waitJob(started.job, 360_000);
+      setComponentJob(done);
+      if (done.status !== 'success') {
+        throw new Error(done.error?.message ?? `Проверка завершилась: ${done.status}`);
+      }
+      const result = (done.result ?? {}) as {
+        results?: TachyonComponentInfo[];
+        errors?: Array<{ component: string; message: string }>;
+      };
+      setComponentResults(Array.isArray(result.results) ? result.results : []);
+      setComponentErrors(Array.isArray(result.errors) ? result.errors : []);
+      setComponentCheckedAt(new Date());
+    } catch (caught) {
+      toast.error(errorMessage(caught));
+    } finally {
+      setComponentCheckBusy(false);
+      setComponentJob(null);
+    }
+  }
+
+  async function updateTachyonComponent(component: 'tachyon' | 'tachyon-core'): Promise<void> {
+    if (!router) return;
+    const title = TACHYON_COMPONENTS.find((item) => item.id === component)?.title ?? component;
+    setComponentUpdating(component);
+    setComponentLog('');
+    setComponentErrors([]);
+    try {
+      const started = await api<{ job: Job }>(
+        `/api/v1/routers/${id}/components/${component}/update`,
+        { method: 'POST' },
+      );
+      setComponentJob(started.job);
+      const done = await waitJob(started.job, 1_260_000);
+      setComponentJob(done);
+      const result = (done.result ?? {}) as { log?: string };
+      if (typeof result.log === 'string') setComponentLog(result.log);
+      if (done.status !== 'success') {
+        throw new Error(done.error?.message ?? `Обновление завершилось: ${done.status}`);
+      }
+      toast.success(`${title}: обновление завершено`);
+      setComponentCheckedAt(null);
+      await runComponentCheck();
+      await detail.reload();
+    } catch (caught) {
+      toast.error(errorMessage(caught));
+    } finally {
+      setComponentUpdating(null);
     }
   }
 
@@ -2422,6 +2546,158 @@ export function RouterDetailPage({ id }: { id: string }) {
             </table>
           )}
         </Panel>
+      ) : null}
+
+      {tab === 'updates' ? (
+        <div className="stack">
+          <Panel
+            title="Обновления Tachyon"
+            subtitle="Версии проверяются штатным механизмом Tachyon. Обновление ядра перезапускает маршрутизацию, обновление модуля — LuCI и CLI."
+          >
+            {router?.product !== 'tachyon' ? (
+              <InfoBanner>
+                Раздел доступен только для роутеров на Tachyon. Сейчас установлен{' '}
+                {PRODUCT_LABEL[router?.product ?? ''] ?? router?.product ?? 'другой продукт'}.
+              </InfoBanner>
+            ) : (
+              <>
+                {!versionAtLeast(router?.agent_version, '1.5.47') ? (
+                  <InfoBanner tone="warn">
+                    Агент {router?.agent_version ?? 'неизвестной версии'} не умеет управлять
+                    компонентами Tachyon. Обновите агент до 1.5.47 в разделе «Обновления агентов».
+                  </InfoBanner>
+                ) : null}
+                <div className="row">
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    onClick={() => void runComponentCheck()}
+                    busy={componentCheckBusy}
+                    disabled={!online || componentCheckBusy || componentUpdating !== null}
+                  >
+                    Проверить обновления
+                  </Button>
+                  {componentCheckedAt ? (
+                    <span className="muted-text small">
+                      Проверено {componentCheckedAt.toLocaleTimeString()}
+                    </span>
+                  ) : null}
+                </div>
+
+                {componentErrors.length > 0 ? (
+                  <div className="stack">
+                    {componentErrors.map((entry) => (
+                      <InfoBanner key={entry.component} tone="warn">
+                        {TACHYON_COMPONENTS.find((item) => item.id === entry.component)?.title ??
+                          entry.component}
+                        : {entry.message}
+                      </InfoBanner>
+                    ))}
+                  </div>
+                ) : null}
+
+                {TACHYON_COMPONENTS.map((item) => {
+                  const info = componentResults.find((entry) => entry.component === item.id);
+                  const badge = componentStatusLabel(info);
+                  const busy = componentUpdating === item.id;
+                  const currentVersion = info?.current_version || '—';
+                  const latestVersion = info?.latest_version || '—';
+                  const canUpdate =
+                    online &&
+                    !componentCheckBusy &&
+                    componentUpdating === null &&
+                    versionAtLeast(router?.agent_version, '1.5.47') &&
+                    latestVersion !== '—';
+                  return (
+                    <div
+                      key={item.id}
+                      style={{
+                        border: '1px solid var(--line, rgba(120,90,120,.16))',
+                        borderRadius: 12,
+                        padding: 14,
+                      }}
+                    >
+                      <div
+                        style={{
+                          display: 'flex',
+                          alignItems: 'flex-start',
+                          justifyContent: 'space-between',
+                          gap: 12,
+                          flexWrap: 'wrap',
+                        }}
+                      >
+                        <div>
+                          <strong>{item.title}</strong>
+                          <div className="muted-text small">{item.description}</div>
+                        </div>
+                        <StatusBadge status={badge.status} label={badge.label} />
+                      </div>
+                      <div className="kv" style={{ marginTop: 10 }}>
+                        <span>Установлено</span>
+                        <strong>{currentVersion}</strong>
+                        <span>Последняя</span>
+                        <strong>{latestVersion}</strong>
+                      </div>
+                      {info?.message ? (
+                        <p className="muted-text small">{info.message}</p>
+                      ) : null}
+                      {info?.release_url ? (
+                        <a
+                          className="muted-text small"
+                          href={info.release_url}
+                          target="_blank"
+                          rel="noreferrer"
+                        >
+                          Страница релиза
+                        </a>
+                      ) : null}
+                      <div className="row" style={{ marginTop: 10 }}>
+                        <Button
+                          size="sm"
+                          onClick={() => void updateTachyonComponent(item.id)}
+                          busy={busy}
+                          disabled={!canUpdate}
+                        >
+                          {busy
+                            ? 'Обновляем…'
+                            : info?.status === 'latest'
+                              ? 'Переустановить'
+                              : 'Обновить'}
+                        </Button>
+                      </div>
+                    </div>
+                  );
+                })}
+                {componentCheckBusy ? <Spinner label="Проверяем версии Tachyon…" /> : null}
+              </>
+            )}
+          </Panel>
+
+          {componentJob ? (
+            <JobProgress
+              job={componentJob}
+              label={
+                componentUpdating
+                  ? `Обновление ${componentUpdating === 'tachyon-core' ? 'ядра Tachyon Core' : 'модуля Tachyon'}`
+                  : 'Проверка обновлений Tachyon'
+              }
+            />
+          ) : null}
+
+          {componentLog ? (
+            <Panel
+              title="Журнал обновления"
+              subtitle="Последние строки штатного журнала Tachyon на роутере."
+            >
+              <pre
+                className="mono small"
+                style={{ whiteSpace: 'pre-wrap', maxHeight: 360, overflow: 'auto', margin: 0 }}
+              >
+                {componentLog}
+              </pre>
+            </Panel>
+          ) : null}
+        </div>
       ) : null}
 
       {tab === 'singbox' ? (

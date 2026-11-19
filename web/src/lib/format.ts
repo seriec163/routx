@@ -106,6 +106,8 @@ export const JOB_TYPE: Record<string, string> = {
   sb_versions: 'Версии sing-box',
   sb_install: 'Установка sing-box',
   service_action: 'Служба',
+  component_check: 'Проверка Tachyon',
+  component_update: 'Обновление Tachyon',
   connections_apply: 'Подключения',
   list_connections: 'Чтение подключений',
   manage_connection: 'Изменение подключения',

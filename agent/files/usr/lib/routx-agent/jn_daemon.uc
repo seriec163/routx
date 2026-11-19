@@ -12,6 +12,7 @@ const uci_state = require("jn_uci_state");
 const monitor = require("jn_monitor");
 const self_update = require("jn_self_update");
 const dns_benchmark = require("jn_dns_benchmark");
+const components = require("jn_components");
 const runner = require("jn_run");
 
 function handle_command(cmd) {
@@ -59,6 +60,14 @@ function handle_command(cmd) {
 			let res = dns_benchmark.handle(util.as_string(args.mode));
 			if (!res.ok)
 				return { status: "failed", error: { code: "dns_benchmark_failed", message: util.as_string(res.error) } };
+			return { status: "success", result: res };
+		}
+		if (op == "component_action") {
+			if (product != "tachyon")
+				return { status: "failed", error: { code: "unsupported_product", message: "Обновление компонентов доступно только для Tachyon" } };
+			let res = components.handle(args);
+			if (!res.ok)
+				return { status: "failed", error: { code: "component_action_failed", message: util.as_string(res.error) } };
 			return { status: "success", result: res };
 		}
 		if (op == "reload") {

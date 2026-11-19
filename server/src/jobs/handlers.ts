@@ -1733,6 +1733,109 @@ export async function rebootRouter(ctx: HandlerContext, job: JobRow): Promise<Js
   return { scheduled: true, result: raw };
 }
 
+const TACHYON_COMPONENTS = ['tachyon', 'tachyon-core'] as const;
+
+function componentLabel(component: string): string {
+  return component === 'tachyon-core' ? 'ядро Tachyon Core' : 'модуль Tachyon';
+}
+
+export async function componentCheck(ctx: HandlerContext, job: JobRow): Promise<Json> {
+  requireRouter(job);
+  const raw = await runCommand(ctx, job, 'component_action', { mode: 'check' }, 240_000);
+  return {
+    results: Array.isArray(raw.results) ? raw.results : [],
+    errors: Array.isArray(raw.errors) ? raw.errors : [],
+  };
+}
+
+export async function componentUpdate(ctx: HandlerContext, job: JobRow): Promise<Json> {
+  const routerId = requireRouter(job);
+  const component = asString(job.payload.component) ?? '';
+  if (!(TACHYON_COMPONENTS as readonly string[]).includes(component)) {
+    throw new JobFailure('invalid_payload', 'Неизвестный компонент Tachyon');
+  }
+
+  const started = await runCommand(
+    ctx,
+    job,
+    'component_action',
+    { mode: 'start', component, action: 'update' },
+    90_000,
+  );
+  const nativeJobId = asString(started.job_id) ?? '';
+  if (!nativeJobId) {
+    throw new JobFailure('component_start_failed', 'Tachyon не вернул идентификатор обновления');
+  }
+
+  await setJobPhase(ctx, job.id, `Обновляем ${componentLabel(component)}`, 10);
+
+  const deadline = Date.now() + 840_000;
+  let data: Json = {};
+  while (Date.now() < deadline) {
+    await new Promise((resolve) => setTimeout(resolve, 2000));
+    const status = await runCommand(
+      ctx,
+      job,
+      'component_action',
+      { mode: 'status', job_id: nativeJobId },
+      60_000,
+    );
+    data = asRecord(status.data ?? {});
+    const running = data.running === true || data.running === 1;
+    const message = asString(data.message) ?? '';
+    if (message) {
+      await setJobPhase(ctx, job.id, `Обновляем ${componentLabel(component)}: ${message}`, running ? 50 : 90);
+    }
+    if (!running) break;
+    if (await isCancelRequested(ctx.pool, job.id)) {
+      throw new JobFailure('cancelled', 'Задача отменена', 'cancelled');
+    }
+  }
+
+  if (data.running === true || data.running === 1) {
+    throw new JobFailure(
+      'component_timeout',
+      'Обновление не завершилось за отведённое время. Проверьте журнал Tachyon на роутере.',
+    );
+  }
+
+  const logResult = await runCommand(
+    ctx,
+    job,
+    'component_action',
+    { mode: 'log', job_id: nativeJobId, offset: 0 },
+    60_000,
+  );
+  const fullLog = asString(logResult.log) ?? '';
+  const log = fullLog.length > 12000 ? fullLog.slice(-12000) : fullLog;
+
+  if (data.success === false) {
+    throw new JobFailure(
+      'component_update_failed',
+      asString(data.message) || `Не удалось обновить ${componentLabel(component)}`,
+    );
+  }
+
+  // После обновления обновляем прочитанное состояние, чтобы панель сразу
+  // показала новую версию продукта, не дожидаясь следующего опроса.
+  try {
+    const managed = await readState(ctx, job, 30_000);
+    await recomputeDrift(ctx.pool, routerId, managed);
+  } catch (error) {
+    ctx.log.warn({ err: error, routerId, component }, 'не удалось обновить состояние после компонента');
+  }
+
+  return {
+    component,
+    native_job_id: nativeJobId,
+    status: data,
+    previous_version: asString(data.previous_version) ?? null,
+    current_version: asString(data.current_version) ?? null,
+    latest_version: asString(data.latest_version) ?? null,
+    log,
+  };
+}
+
 export async function reconcile(ctx: HandlerContext, job: JobRow): Promise<Json> {
   const routerId = requireRouter(job);
   if (!ctx.settings.features.autoReconcile) {
@@ -2500,6 +2603,8 @@ export const HANDLERS: Record<string, JobHandler> = {
   sb_install: singBoxInstall,
   service_action: serviceAction,
   reboot: rebootRouter,
+  component_check: componentCheck,
+  component_update: componentUpdate,
   dns_benchmark: dnsBenchmark,
   connections_apply: applyRouterConnections,
   list_connections: listConnections,

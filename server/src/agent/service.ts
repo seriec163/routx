@@ -17,6 +17,7 @@ export const MUTATING_OPS = new Set([
   'service_action',
   'sb_install',
   'product_switch',
+  'component_action',
 ]);
 
 export const READ_OPS = new Set([

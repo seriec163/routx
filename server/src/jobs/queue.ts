@@ -28,6 +28,8 @@ export type JobType =
   | 'service_action'
   | 'reboot'
   | 'dns_benchmark'
+  | 'component_check'
+  | 'component_update'
   | 'connections_apply'
   | 'list_connections'
   | 'manage_connection'
