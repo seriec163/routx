@@ -245,7 +245,7 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
     }
   });
 
-  app.get('/api/v1/meta', async (request, reply) => {
+  app.get('/api/v1/meta', { config: { public: true } }, async (request, reply) => {
     try {
       const schemaVersion = await deps.db.getSchemaVersion();
       return {
