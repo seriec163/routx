@@ -510,6 +510,7 @@ export function RoutersPage() {
                   </th>
                   <th>Роутер</th>
                   <th>Продукт и платформа</th>
+                  <th>RoutX</th>
                   <th>Статус</th>
                   <th>Служба</th>
                   <th>Прокси</th>
@@ -564,6 +565,11 @@ export function RoutersPage() {
                             : `sing-box ${router.sing_box_version ?? '—'}${
                                 router.sing_box_variant ? ` · ${router.sing_box_variant}` : ''
                               }`}
+                        </div>
+                      </td>
+                      <td className="small">
+                        <div className="mono">
+                          {router.agent_version ? `RoutX ${router.agent_version}` : 'RoutX —'}
                         </div>
                       </td>
                       <td>
@@ -724,6 +730,7 @@ export function RoutersPage() {
                       Прокси:{' '}
                       {monitor?.proxy_health ? proxyHealth(monitor.proxy_health) : '—'}
                     </span>
+                    <span>RoutX: {router.agent_version ?? '—'}</span>
                     {tagText ? <span>{tagText}</span> : null}
                     <span>Задержка: {formatMs(monitor?.latency_ms)}</span>
                     <span>Связь: {formatRelative(router.last_seen_at)}</span>
