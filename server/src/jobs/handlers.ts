@@ -1824,6 +1824,11 @@ async function runComponentUpdate(
     );
   }
 
+  // Полные release notes не нужны в результате задачи: они раздувают jobs и
+  // дублируют страницу релиза. Оставляем версии, статус и журнал операции.
+  const status: Json = { ...data };
+  delete status.release_notes;
+
   // После обновления обновляем прочитанное состояние, чтобы панель сразу
   // показала новую версию продукта, не дожидаясь следующего опроса.
   try {
@@ -1836,7 +1841,7 @@ async function runComponentUpdate(
   return {
     component,
     native_job_id: nativeJobId,
-    status: data,
+    status,
     previous_version: asString(data.previous_version) ?? null,
     current_version: asString(data.current_version) ?? null,
     latest_version: asString(data.latest_version) ?? null,

@@ -559,8 +559,11 @@ export function RoutersPage() {
                           {router.arch ? ` · ${router.arch}` : ''}
                         </div>
                         <div className="muted-text">
-                          sing-box {router.sing_box_version ?? '—'}
-                          {router.sing_box_variant ? ` · ${router.sing_box_variant}` : ''}
+                          {router.product === 'tachyon'
+                            ? `движок ${router.sing_box_version ?? '—'}`
+                            : `sing-box ${router.sing_box_version ?? '—'}${
+                                router.sing_box_variant ? ` · ${router.sing_box_variant}` : ''
+                              }`}
                         </div>
                       </td>
                       <td>
@@ -728,8 +731,10 @@ export function RoutersPage() {
 
                   <div className="muted-text small">
                     {PRODUCT_LABEL[router.product] ?? router.product}{' '}
-                    {router.product_version ?? ''} · OpenWrt {router.openwrt_version ?? '—'} ·
-                    sing-box {router.sing_box_version ?? '—'}
+                    {router.product_version ?? ''} · OpenWrt {router.openwrt_version ?? '—'} ·{' '}
+                    {router.product === 'tachyon'
+                      ? `движок ${router.sing_box_version ?? '—'}`
+                      : `sing-box ${router.sing_box_version ?? '—'}`}
                   </div>
 
                   {errorText ? <p className="field-error small">{errorText}</p> : null}
