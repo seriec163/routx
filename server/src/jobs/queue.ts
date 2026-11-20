@@ -169,6 +169,18 @@ export async function claimJob(
           and j.scheduled_at <= now()
           and (j.next_retry_at is null or j.next_retry_at <= now())
           and (
+            j.router_id is null
+            or exists (
+              select 1 from routers r
+               where r.id = j.router_id
+                 and r.archived_at is null
+                 and (
+                   r.status = 'online'
+                   or (j.type = 'product_switch' and r.status = 'conflict')
+                 )
+            )
+          )
+          and (
             j.type = 'monitor'
             or not exists (
               select 1 from jobs active

@@ -6,7 +6,7 @@ import { requireUser } from '../auth/service.js';
 import { badRequest } from '../lib/errors.js';
 import { uuidv7 } from '../lib/ids.js';
 import { enqueueJob, jobJson } from '../jobs/queue.js';
-import { assertOnline, getRouterForMutation } from './service.js';
+import { getRouterForMutation } from './service.js';
 
 interface RouteContext {
   pool: Pool;
@@ -66,22 +66,19 @@ export async function registerRouterComponentRoutes(
           });
           continue;
         }
-        if (router.status !== 'online') {
-          skipped.push({ router_id: routerId, reason: 'Роутер не в сети' });
-          continue;
-        }
-        const isTachyon = router.product === 'tachyon';
+        const knownNonTachyon =
+          router.product !== 'tachyon' && router.product !== 'unknown';
         const targets = {
           routx: body.targets.routx,
-          tachyon: body.targets.tachyon && isTachyon,
-          tachyon_core: body.targets.tachyon_core && isTachyon,
+          tachyon: body.targets.tachyon && !knownNonTachyon,
+          tachyon_core: body.targets.tachyon_core && !knownNonTachyon,
         };
         if (!targets.routx && !targets.tachyon && !targets.tachyon_core) {
           skipped.push({
             router_id: routerId,
-            reason: isTachyon
-              ? 'Не выбран ни один компонент'
-              : 'Компоненты Tachyon не применимы к этому продукту',
+            reason: knownNonTachyon
+              ? 'Компоненты Tachyon не применимы к этому продукту'
+              : 'Не выбран ни один компонент',
           });
           continue;
         }
@@ -124,7 +121,6 @@ export async function registerRouterComponentRoutes(
     const auth = requireUser(request);
     const params = z.object({ id: z.string().uuid() }).parse(request.params);
     const router = await getRouterForMutation(pool, auth, params.id);
-    assertOnline(router);
     if (router.product !== 'tachyon') {
       throw badRequest('component_unsupported', 'Обновления компонентов доступны только для Tachyon');
     }
@@ -161,7 +157,6 @@ export async function registerRouterComponentRoutes(
       .object({ id: z.string().uuid(), component: z.enum(COMPONENTS) })
       .parse(request.params);
     const router = await getRouterForMutation(pool, auth, params.id);
-    assertOnline(router);
     if (router.product !== 'tachyon') {
       throw badRequest('component_unsupported', 'Обновления компонентов доступны только для Tachyon');
     }

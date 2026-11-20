@@ -1740,7 +1740,17 @@ function componentLabel(component: string): string {
 }
 
 export async function componentCheck(ctx: HandlerContext, job: JobRow): Promise<Json> {
-  requireRouter(job);
+  const routerId = requireRouter(job);
+  const router = await ctx.pool.query<{ product: string }>(
+    'select product from routers where id = $1',
+    [routerId],
+  );
+  if (router.rows[0]?.product !== 'tachyon') {
+    throw new JobFailure(
+      'component_unsupported',
+      'Обновления компонентов доступны только для Tachyon',
+    );
+  }
   const raw = await runCommand(ctx, job, 'component_action', { mode: 'check' }, 240_000);
   return {
     results: Array.isArray(raw.results) ? raw.results : [],
@@ -1762,6 +1772,16 @@ async function runComponentUpdate(
   component: string,
 ): Promise<Json> {
   const routerId = requireRouter(job);
+  const routerRow = await ctx.pool.query<{ product: string }>(
+    'select product from routers where id = $1',
+    [routerId],
+  );
+  if (routerRow.rows[0]?.product !== 'tachyon') {
+    throw new JobFailure(
+      'component_unsupported',
+      'Обновления компонентов доступны только для Tachyon',
+    );
+  }
 
   const started = await runCommand(
     ctx,
@@ -1864,6 +1884,13 @@ export async function bulkUpdate(ctx: HandlerContext, job: JobRow): Promise<Json
     throw new JobFailure('invalid_payload', 'Не выбрано ни одного компонента обновления');
   }
 
+  const routerRow = await ctx.pool.query<{ product: string }>(
+    'select product from routers where id = $1',
+    [routerId],
+  );
+  const tachyonApplicable = routerRow.rows[0]?.product === 'tachyon';
+  const skipped: string[] = [];
+
   const results: Record<string, Json> = {};
   const errors: Array<{ target: string; message: string }> = [];
   const fail = (target: string, error: unknown): void => {
@@ -1899,20 +1926,30 @@ export async function bulkUpdate(ctx: HandlerContext, job: JobRow): Promise<Json
   }
 
   if (tachyon) {
-    await setJobPhase(ctx, job.id, 'Обновляем модуль Tachyon', 30);
-    try {
-      results.tachyon = await runComponentUpdate(ctx, job, 'tachyon');
-    } catch (error) {
-      fail('tachyon', error);
+    if (!tachyonApplicable) {
+      results.tachyon = { ok: true, skipped: 'not_tachyon' };
+      skipped.push('tachyon');
+    } else {
+      await setJobPhase(ctx, job.id, 'Обновляем модуль Tachyon', 30);
+      try {
+        results.tachyon = await runComponentUpdate(ctx, job, 'tachyon');
+      } catch (error) {
+        fail('tachyon', error);
+      }
     }
   }
 
   if (tachyonCore) {
-    await setJobPhase(ctx, job.id, 'Обновляем ядро Tachyon Core', 65);
-    try {
-      results['tachyon-core'] = await runComponentUpdate(ctx, job, 'tachyon-core');
-    } catch (error) {
-      fail('tachyon-core', error);
+    if (!tachyonApplicable) {
+      results['tachyon-core'] = { ok: true, skipped: 'not_tachyon' };
+      skipped.push('tachyon-core');
+    } else {
+      await setJobPhase(ctx, job.id, 'Обновляем ядро Tachyon Core', 65);
+      try {
+        results['tachyon-core'] = await runComponentUpdate(ctx, job, 'tachyon-core');
+      } catch (error) {
+        fail('tachyon-core', error);
+      }
     }
   }
 
@@ -1929,6 +1966,7 @@ export async function bulkUpdate(ctx: HandlerContext, job: JobRow): Promise<Json
     ok: errors.length === 0,
     router_id: routerId,
     targets: { routx, tachyon, tachyon_core: tachyonCore },
+    skipped,
     results,
     errors,
   };

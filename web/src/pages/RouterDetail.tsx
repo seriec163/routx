@@ -740,11 +740,12 @@ export function RouterDetailPage({ id }: { id: string }) {
   // При первом открытии вкладки «Обновления» сразу проверяем компоненты Tachyon.
   useEffect(() => {
     if (tab !== 'updates' || componentCheckStarted.current) return;
+    if (!online) return;
     if (router?.product !== 'tachyon') return;
     if (!versionAtLeast(router?.agent_version, '1.5.47')) return;
     componentCheckStarted.current = true;
     void runComponentCheck();
-  }, [tab, router?.product, router?.agent_version]);
+  }, [tab, online, router?.product, router?.agent_version]);
 
   const routerSectionNames = useMemo(() => {
     const names = new Set<string>();

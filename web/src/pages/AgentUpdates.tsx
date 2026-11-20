@@ -60,7 +60,6 @@ export function AgentUpdates() {
         items
           .filter(
             (router) =>
-              router.status !== 'offline' &&
               router.agent_version !== targetVersion &&
               versionAtLeast(router.agent_version, SELF_UPDATE_MIN),
           )
@@ -117,14 +116,33 @@ export function AgentUpdates() {
 
       const data = await routers.reload();
       const list = data?.items ?? [];
-      const failed = ids.filter(
-        (id) => list.find((router) => router.id === id)?.agent_version !== targetVersion,
-      );
+      const pending = ids.filter((id) => {
+        const router = list.find((entry) => entry.id === id);
+        return (
+          router != null &&
+          router.agent_version !== targetVersion &&
+          (router.status === 'offline' || router.status === 'pending')
+        );
+      });
+      const failed = ids.filter((id) => {
+        const router = list.find((entry) => entry.id === id);
+        return (
+          router != null &&
+          router.agent_version !== targetVersion &&
+          !pending.includes(id)
+        );
+      });
       if (failed.length > 0) {
         setError(
           `Не подтвердили версию ${targetVersion}: ${failed
             .map((id) => list.find((router) => router.id === id)?.name ?? id)
             .join(', ')}. Проверьте связь и журнал агента.`,
+        );
+      } else if (pending.length > 0) {
+        setStatus(
+          `Поставлено в очередь: ${pending
+            .map((id) => list.find((router) => router.id === id)?.name ?? id)
+            .join(', ')}. Обновление начнётся, когда роутер подключится.`,
         );
       } else {
         toast.success(`Агент обновлён до ${targetVersion}`);
