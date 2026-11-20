@@ -1749,11 +1749,19 @@ export async function componentCheck(ctx: HandlerContext, job: JobRow): Promise<
 }
 
 export async function componentUpdate(ctx: HandlerContext, job: JobRow): Promise<Json> {
-  const routerId = requireRouter(job);
   const component = asString(job.payload.component) ?? '';
   if (!(TACHYON_COMPONENTS as readonly string[]).includes(component)) {
     throw new JobFailure('invalid_payload', 'Неизвестный компонент Tachyon');
   }
+  return runComponentUpdate(ctx, job, component);
+}
+
+async function runComponentUpdate(
+  ctx: HandlerContext,
+  job: JobRow,
+  component: string,
+): Promise<Json> {
+  const routerId = requireRouter(job);
 
   const started = await runCommand(
     ctx,
@@ -1833,6 +1841,91 @@ export async function componentUpdate(ctx: HandlerContext, job: JobRow): Promise
     current_version: asString(data.current_version) ?? null,
     latest_version: asString(data.latest_version) ?? null,
     log,
+  };
+}
+
+/**
+ * Комплексное обновление одного роутера: агент RoutX, модуль Tachyon и ядро
+ * Tachyon Core. Шаги идут последовательно, потому что агент и продукт не
+ * переносят параллельную установку пакетов.
+ */
+export async function bulkUpdate(ctx: HandlerContext, job: JobRow): Promise<Json> {
+  const routerId = requireRouter(job);
+  const targets = asRecord(job.payload.targets ?? {});
+  const routx = targets.routx === true;
+  const tachyon = targets.tachyon === true;
+  const tachyonCore = targets.tachyon_core === true || targets['tachyon-core'] === true;
+  if (!routx && !tachyon && !tachyonCore) {
+    throw new JobFailure('invalid_payload', 'Не выбрано ни одного компонента обновления');
+  }
+
+  const results: Record<string, Json> = {};
+  const errors: Array<{ target: string; message: string }> = [];
+  const fail = (target: string, error: unknown): void => {
+    const message =
+      error instanceof Error ? error.message.slice(0, 500) : 'Неизвестная ошибка обновления';
+    results[target] = { ok: false, error: message };
+    errors.push({ target, message });
+  };
+
+  if (routx) {
+    await setJobPhase(ctx, job.id, 'Обновляем агент RoutX', 5);
+    try {
+      const base = ctx.publicUrl.replace(/\/+$/, '');
+      const raw = await runCommand(ctx, job, 'self_update', { base_url: base }, 180_000);
+      if (raw.ok === false) {
+        throw new JobFailure(
+          asString(raw.error) || 'agent_update_failed',
+          asString(raw.message) || 'Агент не принял обновление',
+        );
+      }
+      results.routx = {
+        ok: true,
+        scheduled: true,
+        kind: asString(raw.kind) ?? null,
+        version: asString(raw.version) ?? null,
+      };
+      // Агент перезапускается после self_update. Даём ему подняться, чтобы
+      // следующие команды не ждали в очереди слишком долго.
+      await new Promise((resolve) => setTimeout(resolve, 15_000));
+    } catch (error) {
+      fail('routx', error);
+    }
+  }
+
+  if (tachyon) {
+    await setJobPhase(ctx, job.id, 'Обновляем модуль Tachyon', 30);
+    try {
+      results.tachyon = await runComponentUpdate(ctx, job, 'tachyon');
+    } catch (error) {
+      fail('tachyon', error);
+    }
+  }
+
+  if (tachyonCore) {
+    await setJobPhase(ctx, job.id, 'Обновляем ядро Tachyon Core', 65);
+    try {
+      results['tachyon-core'] = await runComponentUpdate(ctx, job, 'tachyon-core');
+    } catch (error) {
+      fail('tachyon-core', error);
+    }
+  }
+
+  // После обновления агента просим свежее состояние, чтобы панель сразу
+  // показала новые версии. Ошибка чтения не должна портить итог обновления.
+  try {
+    const managed = await readState(ctx, job, 30_000);
+    await recomputeDrift(ctx.pool, routerId, managed);
+  } catch (error) {
+    ctx.log.warn({ err: error, routerId }, 'не удалось обновить состояние после комплексного обновления');
+  }
+
+  return {
+    ok: errors.length === 0,
+    router_id: routerId,
+    targets: { routx, tachyon, tachyon_core: tachyonCore },
+    results,
+    errors,
   };
 }
 
@@ -2605,6 +2698,7 @@ export const HANDLERS: Record<string, JobHandler> = {
   reboot: rebootRouter,
   component_check: componentCheck,
   component_update: componentUpdate,
+  bulk_update: bulkUpdate,
   dns_benchmark: dnsBenchmark,
   connections_apply: applyRouterConnections,
   list_connections: listConnections,

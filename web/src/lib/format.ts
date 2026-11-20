@@ -108,6 +108,7 @@ export const JOB_TYPE: Record<string, string> = {
   service_action: 'Служба',
   component_check: 'Проверка Tachyon',
   component_update: 'Обновление Tachyon',
+  bulk_update: 'Комплексное обновление',
   connections_apply: 'Подключения',
   list_connections: 'Чтение подключений',
   manage_connection: 'Изменение подключения',

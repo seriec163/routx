@@ -6,6 +6,7 @@ import {
   Empty,
   ErrorBanner,
   Field,
+  InfoBanner,
   Modal,
   PageHeader,
   Panel,
@@ -22,6 +23,7 @@ import {
   formatDate,
   formatMs,
   formatRelative,
+  JOB_STATUS,
   PRODUCT_LABEL,
   proxyHealth,
   ROUTER_STATUS,
@@ -29,6 +31,7 @@ import {
 import { navigate, useRoute } from '../lib/router';
 import type {
   BindingToken,
+  Job,
   MonitoringItem,
   MonitoringOverview,
   RouterRecord,
@@ -51,6 +54,12 @@ const HEALTH_LABEL: Record<string, string> = {
 };
 
 type ProxyFilter = 'all' | 'healthy' | 'degraded' | 'dead' | 'attention';
+
+interface BulkUpdateResult {
+  batch_id: string;
+  jobs: Array<{ router_id: string; job_id: string }>;
+  skipped: Array<{ router_id: string; reason: string }>;
+}
 
 /**
  * Единая страница парка и мониторинга.
@@ -82,6 +91,17 @@ export function RoutersPage() {
   const [binding, setBinding] = useState<{ router: RouterRecord; token: BindingToken } | null>(null);
   const [purging, setPurging] = useState<RouterRecord | null>(null);
   const [purgeName, setPurgeName] = useState('');
+  const [selected, setSelected] = useState<Set<string>>(() => new Set());
+  const [bulkOpen, setBulkOpen] = useState(false);
+  const [bulkTargets, setBulkTargets] = useState({
+    routx: true,
+    tachyon: true,
+    tachyon_core: true,
+  });
+  const [bulkBusy, setBulkBusy] = useState(false);
+  const [bulkError, setBulkError] = useState<string | null>(null);
+  const [bulkResult, setBulkResult] = useState<BulkUpdateResult | null>(null);
+  const [bulkJobs, setBulkJobs] = useState<Job[]>([]);
 
   const monitorById = useMemo(() => {
     const map = new Map<string, MonitoringItem>();
@@ -125,6 +145,13 @@ export function RoutersPage() {
     );
   }, [activeItems, pendingItems, archivedItems, view, query, proxyFilter, monitorById]);
 
+  const selectableItems = useMemo(
+    () => filtered.filter((item) => !item.archived_at),
+    [filtered],
+  );
+  const allSelected =
+    selectableItems.length > 0 && selectableItems.every((item) => selected.has(item.id));
+
   useEffect(() => {
     const filter = route.query.get('filter');
     if (filter === 'attention') {
@@ -143,6 +170,46 @@ export function RoutersPage() {
     }, 30_000);
     return () => window.clearInterval(timer);
   }, [auto, routers.reload, overview.reload]);
+
+  useEffect(() => {
+    if (!bulkResult || bulkResult.jobs.length === 0) return;
+    let cancelled = false;
+    let timer: number | undefined;
+
+    async function tick(): Promise<void> {
+      try {
+        const jobs = await Promise.all(
+          bulkResult!.jobs.map(async (item) => {
+            const payload = await api<{ job: Job }>(`/api/v1/jobs/${item.job_id}`);
+            return payload.job;
+          }),
+        );
+        if (cancelled) return;
+        setBulkJobs(jobs);
+        if (
+          jobs.every((job) =>
+            ['success', 'failed', 'timeout', 'cancelled'].includes(job.status),
+          )
+        ) {
+          void routers.reload();
+          void overview.reload();
+          const failed = jobs.filter((job) => job.status !== 'success').length;
+          if (failed === 0) toast.success('Комплексное обновление завершено');
+          else toast.error(`Обновление завершено с ошибками: ${failed}`);
+          return;
+        }
+      } catch {
+        // Сеть могла моргнуть — просто повторим.
+      }
+      if (!cancelled) timer = window.setTimeout(() => void tick(), 2500);
+    }
+
+    void tick();
+    return () => {
+      cancelled = true;
+      if (timer) window.clearTimeout(timer);
+    };
+  }, [bulkResult]);
 
   async function checkNow(): Promise<void> {
     const online = (overview.data?.items ?? []).filter((item) => item.status === 'online');
@@ -170,6 +237,68 @@ export function RoutersPage() {
   function reloadAll(): void {
     void routers.reload();
     void overview.reload();
+  }
+
+  function toggleSelection(id: string): void {
+    setSelected((current) => {
+      const next = new Set(current);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  function toggleAllVisible(): void {
+    setSelected((current) => {
+      if (allSelected) {
+        const next = new Set(current);
+        for (const item of selectableItems) next.delete(item.id);
+        return next;
+      }
+      const next = new Set(current);
+      for (const item of selectableItems) next.add(item.id);
+      return next;
+    });
+  }
+
+  function clearSelection(): void {
+    setSelected(new Set());
+  }
+
+  function openBulk(): void {
+    setBulkError(null);
+    setBulkResult(null);
+    setBulkJobs([]);
+    setBulkOpen(true);
+  }
+
+  async function startBulkUpdate(): Promise<void> {
+    if (selected.size === 0) return;
+    setBulkBusy(true);
+    setBulkError(null);
+    try {
+      const result = await api<BulkUpdateResult>('/api/v1/routers/bulk-update', {
+        method: 'POST',
+        body: {
+          router_ids: [...selected],
+          targets: bulkTargets,
+        },
+      });
+      setBulkResult(result);
+      setBulkJobs([]);
+      if (result.jobs.length === 0) {
+        setBulkError('Ни один выбранный роутер не подходит для обновления.');
+      } else {
+        toast.success(`Запущено задач: ${result.jobs.length}`);
+        if (result.skipped.length > 0) {
+          toast.info(`Пропущено роутеров: ${result.skipped.length}`);
+        }
+      }
+    } catch (caught) {
+      setBulkError(errorMessage(caught));
+    } finally {
+      setBulkBusy(false);
+    }
   }
 
   async function archive(): Promise<void> {
@@ -335,6 +464,16 @@ export function RoutersPage() {
             >
               Обновить
             </Button>
+            {selected.size > 0 ? (
+              <>
+                <Button size="sm" variant="subtle" onClick={openBulk}>
+                  Комплексное обновление ({selected.size})
+                </Button>
+                <Button size="sm" variant="ghost" onClick={clearSelection}>
+                  Снять выбор
+                </Button>
+              </>
+            ) : null}
           </div>
         }
       >
@@ -360,6 +499,15 @@ export function RoutersPage() {
             <table className="table">
               <thead>
                 <tr>
+                  <th style={{ width: 36 }}>
+                    <input
+                      type="checkbox"
+                      aria-label="Выбрать все роутеры"
+                      checked={allSelected}
+                      onChange={toggleAllVisible}
+                      disabled={selectableItems.length === 0}
+                    />
+                  </th>
                   <th>Роутер</th>
                   <th>Продукт и платформа</th>
                   <th>Статус</th>
@@ -385,6 +533,15 @@ export function RoutersPage() {
                   const errorText = router.last_error ?? monitor?.last_error ?? null;
                   return (
                     <tr key={router.id}>
+                      <td>
+                        <input
+                          type="checkbox"
+                          aria-label={`Выбрать ${router.name}`}
+                          checked={selected.has(router.id)}
+                          onChange={() => toggleSelection(router.id)}
+                          disabled={Boolean(router.archived_at)}
+                        />
+                      </td>
                       <td>
                         <Link to={`/routers/${router.id}`}>{router.name}</Link>
                         {router.model ? <div className="muted-text small">{router.model}</div> : null}
@@ -531,12 +688,22 @@ export function RoutersPage() {
               return (
                 <article className="router-mobile-card" key={router.id}>
                   <div className="router-mobile-head">
-                    <div>
-                      <Link to={`/routers/${router.id}`}>{router.name}</Link>
-                      <div className="muted-text small">{router.model ?? router.product}</div>
-                      {isAdmin && router.owner_email ? (
-                        <div className="muted-text small">{router.owner_email}</div>
-                      ) : null}
+                    <div style={{ display: 'flex', gap: 10, alignItems: 'flex-start' }}>
+                      <input
+                        type="checkbox"
+                        aria-label={`Выбрать ${router.name}`}
+                        checked={selected.has(router.id)}
+                        onChange={() => toggleSelection(router.id)}
+                        disabled={Boolean(router.archived_at)}
+                        style={{ marginTop: 3 }}
+                      />
+                      <div>
+                        <Link to={`/routers/${router.id}`}>{router.name}</Link>
+                        <div className="muted-text small">{router.model ?? router.product}</div>
+                        {isAdmin && router.owner_email ? (
+                          <div className="muted-text small">{router.owner_email}</div>
+                        ) : null}
+                      </div>
                     </div>
                     {router.archived_at ? (
                       <StatusBadge status="archived" label="В архиве" />
@@ -640,6 +807,144 @@ export function RoutersPage() {
           <li>Метрики, отчёты и журналы хранятся не более 30 дней.</li>
         </ul>
       </details>
+
+      {bulkOpen ? (
+        <Modal
+          title={bulkResult ? 'Комплексное обновление запущено' : 'Комплексное обновление'}
+          onClose={() => setBulkOpen(false)}
+          footer={
+            bulkResult ? (
+              <Button variant="ghost" onClick={() => setBulkOpen(false)}>
+                Закрыть
+              </Button>
+            ) : (
+              <>
+                <Button variant="ghost" onClick={() => setBulkOpen(false)} disabled={bulkBusy}>
+                  Отмена
+                </Button>
+                <Button
+                  onClick={() => void startBulkUpdate()}
+                  busy={bulkBusy}
+                  disabled={
+                    bulkBusy ||
+                    selected.size === 0 ||
+                    (!bulkTargets.routx && !bulkTargets.tachyon && !bulkTargets.tachyon_core)
+                  }
+                >
+                  Запустить обновление
+                </Button>
+              </>
+            )
+          }
+        >
+          {bulkError ? <ErrorBanner message={bulkError} /> : null}
+
+          {!bulkResult ? (
+            <>
+              <p className="page-sub">
+                Выбрано роутеров: <strong>{selected.size}</strong>. Обновление выполняется
+                последовательно: сначала агент RoutX, затем модуль Tachyon, затем ядро Tachyon Core.
+              </p>
+              <div className="stack">
+                <Switch
+                  checked={bulkTargets.routx}
+                  onChange={(value) => setBulkTargets((current) => ({ ...current, routx: value }))}
+                  label="RoutX"
+                  hint="Обновить агент RoutX до версии, которая раздаётся панелью."
+                />
+                <Switch
+                  checked={bulkTargets.tachyon}
+                  onChange={(value) => setBulkTargets((current) => ({ ...current, tachyon: value }))}
+                  label="Tachyon"
+                  hint="Обновить модуль Tachyon: LuCI, CLI и вспомогательные ucode-модули."
+                />
+                <Switch
+                  checked={bulkTargets.tachyon_core}
+                  onChange={(value) =>
+                    setBulkTargets((current) => ({ ...current, tachyon_core: value }))
+                  }
+                  label="Tachyon Core"
+                  hint="Обновить ядро маршрутизации. Tachyon будет кратковременно перезапущен."
+                />
+              </div>
+              <InfoBanner>
+                Компоненты Tachyon обновятся только на роутерах с продуктом Tachyon. Офлайн-роутеры
+                и роутеры с другими продуктами будут пропущены — их список появится после запуска.
+              </InfoBanner>
+            </>
+          ) : (
+            <>
+              <p className="page-sub">
+                Задач запущено: <strong>{bulkResult.jobs.length}</strong>
+                {bulkResult.skipped.length > 0
+                  ? ` · пропущено: ${bulkResult.skipped.length}`
+                  : ''}
+              </p>
+              <div className="stack">
+                {bulkResult.jobs.map((item) => {
+                  const job = bulkJobs.find((entry) => entry.id === item.job_id);
+                  const router = allItems.find((entry) => entry.id === item.router_id);
+                  const phase =
+                    job && typeof job.result?.phase === 'string' ? job.result.phase : null;
+                  const progress =
+                    job && typeof job.result?.progress === 'number'
+                      ? job.result.progress
+                      : null;
+                  return (
+                    <div
+                      key={item.job_id}
+                      style={{
+                        border: '1px solid var(--line, rgba(120,90,120,.16))',
+                        borderRadius: 12,
+                        padding: 12,
+                      }}
+                    >
+                      <div
+                        style={{
+                          display: 'flex',
+                          justifyContent: 'space-between',
+                          gap: 12,
+                          alignItems: 'center',
+                        }}
+                      >
+                        <strong>{router?.name ?? item.router_id}</strong>
+                        {job ? (
+                          <StatusBadge
+                            status={job.status}
+                            label={JOB_STATUS[job.status] ?? job.status}
+                          />
+                        ) : (
+                          <span className="muted-text small">ожидает</span>
+                        )}
+                      </div>
+                      {phase ? (
+                        <div className="muted-text small">
+                          {phase}
+                          {progress != null ? ` · ${progress}%` : ''}
+                        </div>
+                      ) : null}
+                      {job?.error ? (
+                        <div className="field-error small">{job.error.message}</div>
+                      ) : null}
+                    </div>
+                  );
+                })}
+              </div>
+              {bulkResult.skipped.length > 0 ? (
+                <InfoBanner tone="warn">
+                  Пропущены:{' '}
+                  {bulkResult.skipped
+                    .map((item) => {
+                      const router = allItems.find((entry) => entry.id === item.router_id);
+                      return `${router?.name ?? item.router_id} — ${item.reason}`;
+                    })
+                    .join('; ')}
+                </InfoBanner>
+              ) : null}
+            </>
+          )}
+        </Modal>
+      ) : null}
 
       {archiving ? (
         <ConfirmDialog
