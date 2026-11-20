@@ -1,0 +1,39 @@
+#!/bin/sh
+# RoutX helper: run command with clean env and timeouts.
+# Usage: routx-agent-exec <timeout> <stdout> <stderr> -- <argv...>
+TIMEOUT="$1"
+OUT="$2"
+ERR="$3"
+shift 3
+[ "$1" = "--" ] && shift
+export PATH=/usr/sbin:/usr/bin:/sbin:/bin
+export HOME=/root
+
+# coreutils-timeout есть не в каждой прошивке. Без него агент не должен
+# терять возможность выполнять команды: ждём завершения в основном процессе.
+# Фоновый watchdog здесь нельзя: он наследует stdout/stderr (pipe LuCI/rpcd)
+# и не даёт fs.exec завершиться, даже когда команда уже отработала.
+if command -v timeout >/dev/null 2>&1; then
+	exec timeout "$TIMEOUT" "$@" >"$OUT" 2>"$ERR"
+fi
+
+"$@" >"$OUT" 2>"$ERR" &
+PID=$!
+trap 'kill "$PID" 2>/dev/null; exit 143' INT TERM
+
+ELAPSED=0
+while kill -0 "$PID" 2>/dev/null; do
+	if [ "$ELAPSED" -ge "$TIMEOUT" ]; then
+		kill -TERM "$PID" 2>/dev/null
+		sleep 1
+		kill -KILL "$PID" 2>/dev/null
+		break
+	fi
+	sleep 1
+	ELAPSED=$((ELAPSED + 1))
+done
+
+wait "$PID"
+RC=$?
+trap - INT TERM
+exit "$RC"

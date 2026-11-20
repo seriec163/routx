@@ -1,0 +1,134 @@
+#!/bin/sh
+# RoutX: обновление A-записи DuckDNS для публичного IPv4 роутера.
+#
+# Особенности:
+#  - токен читается из отдельного файла 0600 и не попадает в argv, ps и журналы;
+#  - запрос идёт по HTTPS и только при смене IP или раз в force_interval;
+#  - состояние (последний IP и время) хранится в /var/run и очищается при
+#    перезагрузке, поэтому после старта запись обновляется сразу;
+#  - при ошибке повтор через retry_interval, в журнал пишется не чаще раза в час.
+#
+# Управление: /etc/init.d/routx-ddns {start|stop|restart|enable|disable}
+
+. /lib/functions.sh
+
+NAME=routx-ddns
+CONFIG=routx-ddns
+STATE_DIR=/var/run/routx-ddns
+
+enabled=0
+domain=""
+interface="wan"
+check_interval=300
+retry_interval=60
+force_interval=86400
+token_file=/etc/routx-ddns/token
+
+load_config() {
+	config_load "$CONFIG"
+	config_get_bool enabled main enabled 0
+	config_get domain main domain ""
+	config_get interface main interface "wan"
+	config_get check_interval main check_interval 300
+	config_get retry_interval main retry_interval 60
+	config_get force_interval main force_interval 86400
+	config_get token_file main token_file "/etc/routx-ddns/token"
+}
+
+log() {
+	logger -t "$NAME" "$*"
+}
+
+wan_ip() {
+	ifstatus "$interface" 2>/dev/null |
+		jsonfilter -e '@["ipv4-address"][0].address' 2>/dev/null
+}
+
+# $1 = IPv4. Возвращает 0 при OK, 1 при ошибке запроса, 2 при ответе KO.
+duckdns_update() {
+	local sub token response
+	sub=${domain%%.duckdns.org}
+	[ -n "$sub" ] || return 1
+
+	token=$(cat "$token_file" 2>/dev/null)
+	[ -n "$token" ] || return 1
+
+	# curl -K - читает URL из stdin: токена нет в списке процессов.
+	response=$(
+		printf 'url = "https://www.duckdns.org/update?domains=%s&token=%s&ip=%s"\n' \
+			"$sub" "$token" "$1" |
+			curl -fsS --max-time 20 --retry 2 --retry-delay 5 -K - 2>/dev/null
+	) || return 1
+
+	[ "$response" = "OK" ] || return 2
+	return 0
+}
+
+main() {
+	local ip last_ip last_ts now need rc failures
+
+	load_config
+	if [ "$enabled" != 1 ]; then
+		log "disabled in /etc/config/$CONFIG"
+		return 0
+	fi
+	if [ -z "$domain" ]; then
+		log "domain is not set in /etc/config/$CONFIG"
+		return 1
+	fi
+	if [ ! -r "$token_file" ]; then
+		log "token file is not readable: $token_file"
+		return 1
+	fi
+
+	mkdir -p "$STATE_DIR"
+	failures=0
+
+	while :; do
+		ip=$(wan_ip)
+		if [ -z "$ip" ]; then
+			log "interface $interface has no IPv4 address"
+			sleep "$retry_interval"
+			continue
+		fi
+
+		last_ip=$(cat "$STATE_DIR/ip" 2>/dev/null)
+		last_ts=$(cat "$STATE_DIR/ts" 2>/dev/null)
+		now=$(date +%s)
+		need=0
+
+		[ "$ip" != "$last_ip" ] && need=1
+		[ -z "$last_ts" ] && need=1
+		[ $((now - ${last_ts:-0})) -ge "$force_interval" ] && need=1
+
+		if [ "$need" = 0 ]; then
+			sleep "$check_interval"
+			continue
+		fi
+
+		duckdns_update "$ip"
+		rc=$?
+		if [ "$rc" = 0 ]; then
+			printf '%s\n' "$ip" >"$STATE_DIR/ip"
+			printf '%s\n' "$now" >"$STATE_DIR/ts"
+			log "DuckDNS updated: $domain -> $ip"
+			failures=0
+		else
+			failures=$((failures + 1))
+			# Первый сбой и далее раз в час, чтобы не забивать журнал.
+			if [ "$failures" = 1 ] || [ $((failures % 12)) = 0 ]; then
+				if [ "$rc" = 2 ]; then
+					log "DuckDNS rejected the update (KO), attempt $failures"
+				else
+					log "DuckDNS update failed, attempt $failures"
+				fi
+			fi
+			sleep "$retry_interval"
+			continue
+		fi
+
+		sleep "$check_interval"
+	done
+}
+
+main "$@"

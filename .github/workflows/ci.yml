@@ -1,0 +1,112 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    name: typecheck / test / build / migrate / image
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: router_control
+          POSTGRES_USER: router_control
+          POSTGRES_PASSWORD: router_control_ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U router_control -d router_control"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      NODE_ENV: test
+      DATABASE_URL: postgres://router_control:router_control_ci@127.0.0.1:5432/router_control
+      RC_MASTER_KEY: ci-master-key-0123456789abcdef0123456789abcdef
+      RC_DATA_DIR: ${{ github.workspace }}/.ci-data
+      RC_PACKAGE_SYNC: 'false'
+      POSTGRES_PASSWORD: router_control_ci
+      LOG_LEVEL: warn
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Node.js 24
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Unit tests
+        run: npm test
+
+      - name: Build
+        run: npm run build
+
+      - name: Apply migrations
+        run: npm run db:migrate
+
+      - name: Apply migrations again (idempotency)
+        run: npm run db:migrate
+
+      - name: Compose configuration
+        run: docker compose config --quiet
+
+      - name: Docker image build
+        run: docker build --tag routx:ci .
+
+      - name: Runtime smoke test
+        run: |
+          mkdir -p .ci-data
+          node server/dist/index.js &
+          server_pid=$!
+          trap 'kill "$server_pid" 2>/dev/null || true' EXIT
+
+          ready=0
+          for _ in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:3000/readyz >/dev/null; then
+              ready=1
+              break
+            fi
+            sleep 1
+          done
+
+          if [ "$ready" -ne 1 ]; then
+            echo "Сервер не стал ready за 30 секунд" >&2
+            exit 1
+          fi
+
+          node --input-type=module -e '
+            const base = "http://127.0.0.1:3000";
+            const health = await (await fetch(`${base}/healthz`)).json();
+            if (health.status !== "ok") throw new Error("healthz");
+            const ready = await (await fetch(`${base}/readyz`)).json();
+            if (ready.status !== "ready" || ready.checks.db !== "ok") throw new Error("readyz");
+            const meta = await (await fetch(`${base}/api/v1/meta`)).json();
+            if (!meta.schema_version || String(meta.schema_version) !== String(ready.schema_version))
+              throw new Error(`meta=${JSON.stringify(meta)} schema_version=${meta.schema_version}, ready=${ready.schema_version}`);
+            const html = await (await fetch(`${base}/`)).text();
+            if (!html.includes("<div id=\"root\">")) throw new Error("SPA");
+            console.log("runtime smoke test: ok");
+          '

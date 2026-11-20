@@ -1,0 +1,742 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#05080f" />
+    <title>RoutX — управление VPN на роутерах OpenWrt</title>
+    <meta
+      name="description"
+      content="RoutX — self-hosted панель управления VPN и прокси на роутерах OpenWrt: Tachyon, Forkop, Prokop и Podkop. Установка одной командой, 143 списка, правила, мониторинг, три уровня доступа, PWA и обновления с откатом."
+    />
+    <meta
+      name="keywords"
+      content="RoutX, OpenWrt, Tachyon, Forkop, Prokop, Podkop, sing-box, управление VPN на роутерах, VPN, прокси, self-hosted, PWA"
+    />
+    <link rel="canonical" href="https://seriec163.github.io/routx/" />
+    <link rel="icon" href="assets/favicon.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="assets/site.css" />
+
+    <meta property="og:type" content="website" />
+    <meta property="og:locale" content="ru_RU" />
+    <meta property="og:site_name" content="RoutX" />
+    <meta property="og:title" content="RoutX — управление VPN на роутерах OpenWrt" />
+    <meta
+      property="og:description"
+      content="VPN и прокси на роутерах OpenWrt в одном центре управления: Tachyon, Forkop, Prokop и Podkop. Установка одной командой, списки, правила, мониторинг и PWA."
+    />
+    <meta property="og:url" content="https://seriec163.github.io/routx/" />
+    <meta property="og:image" content="https://seriec163.github.io/routx/assets/og.png" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="RoutX — управление VPN на роутерах OpenWrt" />
+    <meta
+      name="twitter:description"
+      content="VPN и прокси на роутерах OpenWrt в одном центре управления: Tachyon, Forkop, Prokop и Podkop. Установка одной командой, списки, правила, мониторинг и PWA."
+    />
+    <meta name="twitter:image" content="https://seriec163.github.io/routx/assets/og.png" />
+
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@type": "SoftwareApplication",
+        "name": "RoutX",
+        "applicationCategory": "NetworkApplication",
+        "operatingSystem": "Linux",
+        "description": "Self-hosted панель управления VPN и прокси на роутерах OpenWrt: Tachyon, Forkop, Prokop, Podkop, списки, правила, мониторинг и PWA.",
+        "url": "https://seriec163.github.io/routx/",
+        "downloadUrl": "https://github.com/seriec163/routx",
+        "license": "https://www.apache.org/licenses/LICENSE-2.0",
+        "offers": { "@type": "Offer", "price": "0", "priceCurrency": "RUB" }
+      }
+    </script>
+  </head>
+  <body>
+    <a class="skip-link" href="#main">Перейти к содержанию</a>
+
+    <svg xmlns="http://www.w3.org/2000/svg" style="display: none" aria-hidden="true">
+      <symbol id="i-grid" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+        <rect x="3" y="3" width="7" height="7" rx="1.5" />
+        <rect x="14" y="3" width="7" height="7" rx="1.5" />
+        <rect x="3" y="14" width="7" height="7" rx="1.5" />
+        <rect x="14" y="14" width="7" height="7" rx="1.5" />
+      </symbol>
+      <symbol id="i-terminal" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+        <rect x="3" y="4" width="18" height="16" rx="2.5" />
+        <path d="m7 9 3 3-3 3" />
+        <path d="M13 15h4" />
+      </symbol>
+      <symbol id="i-swap" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M4 8h13l-3-3" />
+        <path d="M20 16H7l3 3" />
+      </symbol>
+      <symbol id="i-layers" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+        <path d="m12 3 9 5-9 5-9-5 9-5Z" />
+        <path d="m3 12 9 5 9-5" />
+        <path d="m3 16 9 5 9-5" />
+      </symbol>
+      <symbol id="i-chart" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M4 19V5" />
+        <path d="M4 19h16" />
+        <path d="m7 15 4-4 3 2 5-6" />
+      </symbol>
+      <symbol id="i-shield" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M12 3 4.5 6v5.5c0 4.6 3.2 7.8 7.5 9.5 4.3-1.7 7.5-4.9 7.5-9.5V6L12 3Z" />
+        <path d="m9 12 2 2 4-4" />
+      </symbol>
+      <symbol id="i-lock" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+        <rect x="4" y="10" width="16" height="11" rx="2.5" />
+        <path d="M8 10V7a4 4 0 0 1 8 0v3" />
+        <path d="M12 14v3" />
+      </symbol>
+      <symbol id="i-refresh" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M20 7v5h-5" />
+        <path d="M4 17v-5h5" />
+        <path d="M6.1 9a7 7 0 0 1 11.5-2L20 9" />
+        <path d="M17.9 15a7 7 0 0 1-11.5 2L4 15" />
+      </symbol>
+      <symbol id="i-phone" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+        <rect x="7" y="2.5" width="10" height="19" rx="2.5" />
+        <path d="M11 18.5h2" />
+      </symbol>
+      <symbol id="i-github" viewBox="0 0 24 24" fill="currentColor">
+        <path d="M12 .7A11.3 11.3 0 0 0 .7 12a11.3 11.3 0 0 0 7.7 10.8c.6.1.8-.2.8-.6v-2c-3.2.7-3.9-1.5-3.9-1.5-.5-1.3-1.2-1.7-1.2-1.7-1-.7.1-.7.1-.7 1.1.1 1.7 1.2 1.7 1.2 1 1.7 2.6 1.2 3.2.9.1-.7.4-1.2.7-1.5-2.6-.3-5.3-1.3-5.3-5.8 0-1.3.5-2.3 1.2-3.1-.1-.3-.5-1.5.1-3.1 0 0 1-.3 3.2 1.2a11 11 0 0 1 5.8 0c2.2-1.5 3.2-1.2 3.2-1.2.6 1.6.2 2.8.1 3.1.8.8 1.2 1.8 1.2 3.1 0 4.5-2.7 5.5-5.3 5.8.4.4.8 1.1.8 2.2v3.3c0 .4.2.7.8.6A11.3 11.3 0 0 0 23.3 12 11.3 11.3 0 0 0 12 .7Z" />
+      </symbol>
+      <symbol id="i-telegram" viewBox="0 0 24 24" fill="currentColor">
+        <path d="M21.9 4.3c-.3-.3-.8-.3-1.2-.2L2.8 11.2c-.5.2-.8.6-.8 1.1 0 .5.4.9.9 1l4.6 1.4 1.8 5.8c.1.4.5.7.9.7.4 0 .7-.2.9-.5l2.3-3.3 4.5 3.3c.3.2.6.3.9.3.2 0 .3 0 .5-.1.4-.2.6-.5.7-.9l2.6-14.5c.1-.4-.1-.9-.7-1.2ZM9.4 14.4l-.7 3.3-1.2-3.9 9.7-6.6-7.8 7.2Z" />
+      </symbol>
+      <symbol id="i-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="m5 12 4 4L19 6" />
+      </symbol>
+    </svg>
+
+    <header class="nav">
+      <div class="container nav-inner">
+        <a class="brand" href="./" aria-label="RoutX — на главную">
+          <span class="brand-mark" aria-hidden="true">
+            <svg viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M16 36V12h10.2a7.4 7.4 0 0 1 0 14.8H16" />
+              <path d="M25.2 26.2 33.4 34.8" />
+              <circle cx="34" cy="35.4" r="2.1" fill="currentColor" stroke="none" />
+            </svg>
+          </span>
+          <span>
+            RoutX
+            <span class="brand-sub">OpenWrt VPN control plane</span>
+          </span>
+        </a>
+
+        <button class="nav-toggle" type="button" aria-label="Открыть меню" aria-expanded="false">
+          <span></span><span></span><span></span>
+        </button>
+
+        <nav class="nav-links" aria-label="Основная навигация">
+          <a href="#features">Возможности</a>
+          <a href="#roles">Роли</a>
+          <a href="#install">Установка</a>
+          <a href="#architecture">Архитектура</a>
+          <a href="#products">Продукты</a>
+          <a href="#faq">FAQ</a>
+        </nav>
+
+        <div class="nav-actions">
+          <a class="btn btn-ghost" href="https://t.me/unc1escrooge" target="_blank" rel="noreferrer">
+            <svg aria-hidden="true"><use href="#i-telegram"></use></svg>
+            Telegram
+          </a>
+          <a class="btn btn-primary" href="https://github.com/seriec163/routx" target="_blank" rel="noreferrer">
+            <svg aria-hidden="true"><use href="#i-github"></use></svg>
+            GitHub
+          </a>
+        </div>
+      </div>
+    </header>
+
+    <main id="main">
+      <section class="hero">
+        <div class="container hero-grid">
+          <div>
+            <span class="eyebrow"><span class="dot"></span>Self-hosted · Apache-2.0</span>
+            <h1>
+              RoutX
+              <span class="gradient-text" style="display: block; font-size: 0.4em; letter-spacing: -0.02em; margin-top: 10px">
+                один пульт для VPN на роутерах OpenWrt
+              </span>
+            </h1>
+            <p class="hero-lead">
+              Установка, переключение и мониторинг <strong>VPN и прокси</strong> на роутерах:
+              <strong>Tachyon</strong>, <strong>Forkop</strong>, <strong>Prokop</strong> и
+              <strong>Podkop</strong> из одной панели. Списки, правила, подписки, PWA и обновления —
+              без ручной возни с каждым роутером.
+            </p>
+
+            <div class="hero-actions">
+              <a class="btn btn-primary" href="#install">
+                <svg aria-hidden="true"><use href="#i-terminal"></use></svg>
+                Установить за минуту
+              </a>
+              <a class="btn btn-ghost" href="https://github.com/seriec163/routx" target="_blank" rel="noreferrer">
+                <svg aria-hidden="true"><use href="#i-github"></use></svg>
+                Открыть на GitHub
+              </a>
+            </div>
+
+            <div class="quick-install">
+              <code id="hero-install-command">curl -fsSL https://raw.githubusercontent.com/seriec163/routx/main/install.sh | sudo sh</code>
+              <button class="copy-btn" type="button" data-copy="#hero-install-command">Копировать</button>
+            </div>
+
+            <div class="hero-meta">
+              <span class="chip"><span class="chip-dot"></span>Debian / Ubuntu</span>
+              <span class="chip"><b>Docker</b> или native</span>
+              <span class="chip"><b>3</b> уровня доступа</span>
+              <span class="chip">HTTPS через <b>Caddy</b></span>
+            </div>
+          </div>
+
+          <div class="hero-visual" aria-hidden="true">
+            <div class="hero-glow"></div>
+            <div class="dash">
+              <div class="dash-bar">
+                <i></i><i></i><i></i>
+                <span>routx / dashboard</span>
+                <span class="dash-live"><i></i>ONLINE</span>
+              </div>
+              <div class="dash-body">
+                <div class="dash-title">
+                  <strong>Роутеры</strong>
+                  <span>3 из 3 в сети · Tachyon 1.7.15</span>
+                </div>
+                <div class="dash-stats">
+                  <div class="dash-stat"><span>Всего</span><strong>6</strong></div>
+                  <div class="dash-stat"><span>Прокси</span><strong class="ok">5</strong></div>
+                  <div class="dash-stat"><span>Узлы</span><strong class="cy">188</strong></div>
+                </div>
+                <div class="dash-rows">
+                  <div class="dash-row">
+                    <span class="r-dot"></span>
+                    <span><span class="r-name">Квартира</span><br /><span class="r-sub">Tachyon · 12/12 узлов</span></span>
+                    <span class="r-badge">healthy</span>
+                  </div>
+                  <div class="dash-row">
+                    <span class="r-dot"></span>
+                    <span><span class="r-name">Офис</span><br /><span class="r-sub">Tachyon · 8/8 узлов</span></span>
+                    <span class="r-badge">healthy</span>
+                  </div>
+                  <div class="dash-row">
+                    <span class="r-dot warn"></span>
+                    <span><span class="r-name">Дом</span><br /><span class="r-sub">Tachyon · 22/24 узла</span></span>
+                    <span class="r-badge warn">degraded</span>
+                  </div>
+                </div>
+                <div class="dash-chart">
+                  <div class="dash-chart-head"><span>Задержка, 24 ч</span><span>1 142 мс</span></div>
+                  <svg viewBox="0 0 380 70" preserveAspectRatio="none">
+                    <defs>
+                      <linearGradient id="chartFill" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="0" stop-color="#55c8f5" stop-opacity="0.3" />
+                        <stop offset="1" stop-color="#55c8f5" stop-opacity="0" />
+                      </linearGradient>
+                    </defs>
+                    <path d="M0 58 C 35 38, 65 55, 95 44 S 150 51, 185 33 S 240 46, 275 26 S 335 37, 380 18 L 380 70 L 0 70 Z" fill="url(#chartFill)" />
+                    <path d="M0 58 C 35 38, 65 55, 95 44 S 150 51, 185 33 S 240 46, 275 26 S 335 37, 380 18" fill="none" stroke="#55c8f5" stroke-width="2" stroke-linecap="round" />
+                  </svg>
+                </div>
+              </div>
+            </div>
+            <div class="float-card health">
+              <small>Proxy health</small>
+              <strong>12 / 12</strong>
+              <span>живых узлов · live</span>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <div class="container">
+        <div class="product-strip">
+          <span>Работает с</span>
+          <a href="https://github.com/Dushnilin/tachyon" target="_blank" rel="noreferrer"><i></i>Tachyon</a>
+          <a href="https://github.com/ushan0v/forkop" target="_blank" rel="noreferrer"><i></i>Forkop</a>
+          <a href="https://github.com/Asofwar/prokop" target="_blank" rel="noreferrer"><i></i>Prokop</a>
+          <a href="https://github.com/itdoginfo/podkop" target="_blank" rel="noreferrer"><i></i>Podkop</a>
+          <a href="https://github.com/SagerNet/sing-box" target="_blank" rel="noreferrer"><i></i>sing-box</a>
+          <a href="https://github.com/Dushnilin/tachyon-lists" target="_blank" rel="noreferrer"><i></i>tachyon-lists</a>
+        </div>
+      </div>
+
+      <section class="section" id="features">
+        <div class="container">
+          <div class="section-head reveal">
+            <span class="section-kicker">Возможности</span>
+            <h2>Всё управление VPN на роутерах — в одном месте</h2>
+            <p>
+              RoutX закрывает путь от установки агента до тонкой настройки правил и наблюдения за
+              каждым узлом. Не нужно помнить CLI-команды и держать открытыми десять вкладок.
+            </p>
+          </div>
+
+          <div class="feature-grid">
+            <article class="feature-card reveal">
+              <div class="feature-icon"><svg aria-hidden="true"><use href="#i-grid"></use></svg></div>
+              <h3>Единый центр управления</h3>
+              <p>Все VPN-подключения, продукты, версии и статусы роутеров в одной панели. Фильтры и быстрый переход к нужному узлу.</p>
+              <span class="tag">multi-router</span>
+            </article>
+            <article class="feature-card reveal">
+              <div class="feature-icon"><svg aria-hidden="true"><use href="#i-terminal"></use></svg></div>
+              <h3>Установка одной командой</h3>
+              <p>Bootstrap-скрипт скачает исходники с GitHub, запустит мастер и настроит systemd, PostgreSQL и HTTPS.</p>
+              <span class="tag">curl | sudo sh</span>
+            </article>
+            <article class="feature-card reveal">
+              <div class="feature-icon"><svg aria-hidden="true"><use href="#i-swap"></use></svg></div>
+              <h3>Смена продукта</h3>
+              <p>Tachyon, Forkop, Prokop и Podkop. Снимок конфигурации, перенос секций и правил, удаление остатков и откат при ошибке.</p>
+              <span class="tag">one router — one product</span>
+            </article>
+            <article class="feature-card reveal">
+              <div class="feature-icon"><svg aria-hidden="true"><use href="#i-check"></use></svg></div>
+              <h3>Правила и шаблоны</h3>
+              <p>Секции, домены, IP, community lists и подписки. Шаблон — пресет правила без привязки к имени секции.</p>
+              <span class="tag">templates</span>
+            </article>
+            <article class="feature-card reveal">
+              <div class="feature-icon"><svg aria-hidden="true"><use href="#i-refresh"></use></svg></div>
+              <h3>Развёртывание шаблонов</h3>
+              <p>Отметьте роутеры, проверьте diff и разверните шаблон сразу на всех. Снимок перед записью и откат при ошибке.</p>
+              <span class="tag">batch apply</span>
+            </article>
+            <article class="feature-card reveal">
+              <div class="feature-icon"><svg aria-hidden="true"><use href="#i-layers"></use></svg></div>
+              <h3>143 списка tachyon-lists</h3>
+              <p>Поиск, описания, группы и счётчики доменов. Для Tachyon — нативно, для Forkop — rule-set, для Prokop — SRS.</p>
+              <span class="tag">tachyon-lists</span>
+            </article>
+            <article class="feature-card reveal">
+              <div class="feature-icon"><svg aria-hidden="true"><use href="#i-chart"></use></svg></div>
+              <h3>Мониторинг и потери связи</h3>
+              <p>Задержка, живые узлы, direct/VPN IP и топ нестабильных соединений с числом потерь за 24 часа. Без ложных тревог.</p>
+              <span class="tag">24h stats</span>
+            </article>
+            <article class="feature-card reveal">
+              <div class="feature-icon"><svg aria-hidden="true"><use href="#i-shield"></use></svg></div>
+              <h3>Три уровня доступа</h3>
+              <p>Суперадминистратор, администратор своей ветки и пользователь. Каждый видит ровно то, что ему разрешено.</p>
+              <span class="tag">RBAC</span>
+            </article>
+            <article class="feature-card reveal">
+              <div class="feature-icon"><svg aria-hidden="true"><use href="#i-lock"></use></svg></div>
+              <h3>Безопасность по умолчанию</h3>
+              <p>Токены агентов, CSRF, rate limit, аудит действий, мастер-ключ, read-only контейнер, passkey Face ID/Touch ID и одноразовые резервные коды.</p>
+              <span class="tag">audit · passkeys</span>
+            </article>
+            <article class="feature-card reveal">
+              <div class="feature-icon"><svg aria-hidden="true"><use href="#i-refresh"></use></svg></div>
+              <h3>Обновления с откатом</h3>
+              <p>Проверка GitHub, кнопка «Обновить» в настройках и автоматический возврат предыдущего образа, если healthcheck не прошёл.</p>
+              <span class="tag">safe update</span>
+            </article>
+            <article class="feature-card reveal">
+              <div class="feature-icon"><svg aria-hidden="true"><use href="#i-phone"></use></svg></div>
+              <h3>PWA на телефоне</h3>
+              <p>Мобильный интерфейс, push-уведомления, QR-вход и привязка устройства: сессия продлевается сама и не сбрасывается при перезапуске.</p>
+              <span class="tag">installable</span>
+            </article>
+          </div>
+        </div>
+      </section>
+
+      <section class="section" id="roles">
+        <div class="container">
+          <div class="section-head reveal">
+            <span class="section-kicker">Доступ</span>
+            <h2>Кто что видит и может</h2>
+            <p>
+              Иерархия из трёх уровней. Пользователи остаются в ветке администратора, который их
+              пригласил, а суперадминистратор видит всю структуру.
+            </p>
+          </div>
+
+          <div class="role-grid">
+            <article class="role-card reveal">
+              <span class="role-label">Уровень 1</span>
+              <h3>Суперадминистратор</h3>
+              <ul>
+                <li>Все роутеры и все пользователи</li>
+                <li>Настройки панели, аудит и развёртывание</li>
+                <li>Назначение администраторов и веток</li>
+                <li>Вход под любым пользователем для поддержки</li>
+              </ul>
+            </article>
+            <article class="role-card admin reveal">
+              <span class="role-label">Уровень 2</span>
+              <h3>Администратор</h3>
+              <ul>
+                <li>Свои роутеры и роутеры своей ветки</li>
+                <li>Смена продукта, пакеты и развёртывание агента</li>
+                <li>Приглашение и сопровождение своих пользователей</li>
+                <li>Без настроек панели и глобального аудита</li>
+              </ul>
+            </article>
+            <article class="role-card user reveal">
+              <span class="role-label">Уровень 3</span>
+              <h3>Пользователь</h3>
+              <ul>
+                <li>Только свои роутеры</li>
+                <li>Правила, списки, подписки и диагностика</li>
+                <li>Обычные полномочия панели</li>
+                <li>Не видит других пользователей и их роутеры</li>
+              </ul>
+            </article>
+          </div>
+        </div>
+      </section>
+
+      <section class="section" id="install">
+        <div class="container">
+          <div class="section-head reveal">
+            <span class="section-kicker">Быстрый старт</span>
+            <h2>От чистого сервера до панели за пару минут</h2>
+            <p>
+              Подойдёт Debian или Ubuntu. Установщик сам скачает проект с GitHub, спросит домен,
+              почту и пароль администратора, настроит базу и сервис.
+            </p>
+          </div>
+
+          <div class="install-wrap">
+            <div class="panel reveal">
+              <h3>Нативная установка</h3>
+              <p>Node.js и PostgreSQL на сервере, systemd-сервис, HTTPS через Caddy.</p>
+
+              <div class="steps">
+                <div class="step">
+                  <span class="step-num">1</span>
+                  <div>
+                    <h4>Запустите установщик</h4>
+                    <p>Одна команда, без клонирования и ручной сборки.</p>
+                    <div class="code-block">
+                      <pre id="cmd-native">curl -fsSL https://raw.githubusercontent.com/seriec163/routx/main/install.sh | sudo sh</pre>
+                      <button class="copy-btn" type="button" data-copy="#cmd-native">Копировать</button>
+                    </div>
+                  </div>
+                </div>
+                <div class="step">
+                  <span class="step-num">2</span>
+                  <div>
+                    <h4>Ответьте на вопросы мастера</h4>
+                    <p>Домен панели, e-mail для Let's Encrypt, e-mail и пароль администратора, порт.</p>
+                  </div>
+                </div>
+                <div class="step">
+                  <span class="step-num">3</span>
+                  <div>
+                    <h4>Откройте панель</h4>
+                    <p>CLI покажет адрес, логин и пароль. Пароль генерируется один раз — сохраните его.</p>
+                  </div>
+                </div>
+              </div>
+
+              <div class="note">
+                <strong>Минимум:</strong> Debian/Ubuntu, root или sudo, 1–2 ГБ диска. Если не хватает
+                Node.js или PostgreSQL, установщик предложит поставить их сам.
+              </div>
+            </div>
+
+            <div class="panel reveal">
+              <h3>Другие варианты</h3>
+              <p>Тот же CLI, но с явными параметрами или в Docker.</p>
+
+              <div class="option-list">
+                <div class="option">
+                  <strong>Docker</strong>
+                  <code>curl -fsSL https://raw.githubusercontent.com/seriec163/routx/main/install.sh | sudo sh -s -- --docker</code>
+                  <span>Панель, PostgreSQL и Caddy в контейнерах.</span>
+                </div>
+                <div class="option">
+                  <strong>Без вопросов</strong>
+                  <code>... | sudo sh -s -- --domain panel.example.com --tls-email admin@example.com --yes</code>
+                  <span>Для CI, Ansible и автоматической установки.</span>
+                </div>
+                <div class="option">
+                  <strong>Обновление</strong>
+                  <code>sudo routx update</code>
+                  <span>Свежий образ, миграции и перезапуск.</span>
+                </div>
+                <div class="option">
+                  <strong>Откат</strong>
+                  <code>sudo routx rollback</code>
+                  <span>Вернуться к предыдущему образу после неудачного обновления.</span>
+                </div>
+              </div>
+
+              <div class="code-block small" style="margin-top: 18px">
+                <pre id="cmd-clone">git clone https://github.com/seriec163/routx.git
+cd routx
+sudo ./scripts/routx</pre>
+                <button class="copy-btn" type="button" data-copy="#cmd-clone">Копировать</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="section" id="architecture">
+        <div class="container">
+          <div class="section-head reveal">
+            <span class="section-kicker">Архитектура</span>
+            <h2>Просто, безопасно, без входящих портов на роутере</h2>
+            <p>
+              Панель общается с агентом через исходящий long-poll. Агент сам приходит на сервер,
+              поэтому открывать API на роутере не нужно.
+            </p>
+          </div>
+
+          <div class="arch-shell reveal">
+            <svg class="arch-svg" viewBox="0 0 1100 330" role="img" aria-label="Схема архитектуры RoutX">
+              <defs>
+                <marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth">
+                  <path d="M0,0 L0,6 L9,3 z" fill="#64748b" />
+                </marker>
+                <linearGradient id="accentLine" x1="0" y1="0" x2="1" y2="0">
+                  <stop offset="0" stop-color="#3ddc9a" />
+                  <stop offset="1" stop-color="#55c8f5" />
+                </linearGradient>
+              </defs>
+
+              <rect x="40" y="48" width="200" height="78" rx="14" fill="#101a2c" stroke="#263449" />
+              <text x="62" y="80" fill="#e9f0fb" font-size="16" font-weight="700" font-family="system-ui">Браузер / PWA</text>
+              <text x="62" y="101" fill="#94a6c0" font-size="11.5" font-family="system-ui">React · push · QR</text>
+
+              <rect x="326" y="48" width="210" height="78" rx="14" fill="#101a2c" stroke="#263449" />
+              <text x="348" y="80" fill="#e9f0fb" font-size="16" font-weight="700" font-family="system-ui">Caddy</text>
+              <text x="348" y="101" fill="#94a6c0" font-size="11.5" font-family="system-ui">HTTPS · Let's Encrypt</text>
+
+              <rect x="622" y="48" width="230" height="78" rx="14" fill="#101a2c" stroke="#3ddc9a" stroke-opacity="0.55" />
+              <text x="644" y="80" fill="#e9f0fb" font-size="16" font-weight="700" font-family="system-ui">RoutX Panel</text>
+              <text x="644" y="101" fill="#94a6c0" font-size="11.5" font-family="system-ui">Fastify · TypeScript · API</text>
+
+              <rect x="938" y="48" width="122" height="78" rx="14" fill="#101a2c" stroke="#263449" />
+              <text x="958" y="80" fill="#e9f0fb" font-size="15" font-weight="700" font-family="system-ui">PostgreSQL</text>
+              <text x="958" y="101" fill="#94a6c0" font-size="11" font-family="system-ui">состояние</text>
+
+              <line x1="240" y1="87" x2="316" y2="87" stroke="url(#accentLine)" stroke-width="1.6" marker-end="url(#arrow)" />
+              <line x1="536" y1="87" x2="612" y2="87" stroke="url(#accentLine)" stroke-width="1.6" marker-end="url(#arrow)" />
+              <line x1="852" y1="87" x2="928" y2="87" stroke="#64748b" stroke-width="1.5" marker-end="url(#arrow)" />
+              <text x="258" y="78" fill="#64748b" font-size="10" font-family="ui-monospace, monospace">HTTPS</text>
+              <text x="552" y="78" fill="#64748b" font-size="10" font-family="ui-monospace, monospace">proxy</text>
+              <text x="868" y="78" fill="#64748b" font-size="10" font-family="ui-monospace, monospace">SQL</text>
+
+              <rect x="622" y="202" width="230" height="82" rx="14" fill="#101a2c" stroke="#8b5cf6" stroke-opacity="0.55" />
+              <text x="644" y="234" fill="#e9f0fb" font-size="16" font-weight="700" font-family="system-ui">RoutX Agent</text>
+              <text x="644" y="255" fill="#94a6c0" font-size="11.5" font-family="system-ui">ucode · long-poll</text>
+
+              <rect x="326" y="202" width="210" height="82" rx="14" fill="#101a2c" stroke="#263449" />
+              <text x="348" y="234" fill="#e9f0fb" font-size="16" font-weight="700" font-family="system-ui">OpenWrt</text>
+              <text x="348" y="255" fill="#94a6c0" font-size="11.5" font-family="system-ui">24.10 · 25.12 · aarch64</text>
+
+              <rect x="62" y="202" width="178" height="82" rx="14" fill="#101a2c" stroke="#263449" />
+              <text x="84" y="234" fill="#e9f0fb" font-size="15" font-weight="700" font-family="system-ui">Tachyon / sing-box</text>
+              <text x="84" y="255" fill="#94a6c0" font-size="11" font-family="system-ui">Forkop · Prokop · Podkop</text>
+
+              <line x1="622" y1="126" x2="622" y2="192" stroke="#8b5cf6" stroke-width="1.6" stroke-dasharray="6 5" marker-end="url(#arrow)" marker-start="url(#arrow)" />
+              <text x="634" y="166" fill="#a78bfa" font-size="10.5" font-family="ui-monospace, monospace">poll / commands</text>
+              <line x1="612" y1="243" x2="546" y2="243" stroke="#64748b" stroke-width="1.5" marker-end="url(#arrow)" />
+              <line x1="316" y1="243" x2="250" y2="243" stroke="#64748b" stroke-width="1.5" marker-end="url(#arrow)" />
+              <text x="552" y="234" fill="#64748b" font-size="10" font-family="ui-monospace, monospace">uci</text>
+              <text x="258" y="234" fill="#64748b" font-size="10" font-family="ui-monospace, monospace">reload</text>
+
+              <rect x="622" y="300" width="438" height="1" fill="transparent" />
+            </svg>
+
+            <div class="arch-notes">
+              <div class="arch-note">
+                <strong>Панель</strong>
+                <span>Fastify + PostgreSQL, фоновые задания, аудит и PWA.</span>
+              </div>
+              <div class="arch-note">
+                <strong>Агент</strong>
+                <span>Сам ходит на панель, не требует проброса портов и открытого API.</span>
+              </div>
+              <div class="arch-note">
+                <strong>Продукты</strong>
+                <span>RoutX управляет пакетами, версиями, секциями и подписками.</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="section" id="products">
+        <div class="container">
+          <div class="section-head reveal">
+            <span class="section-kicker">Экосистема</span>
+            <h2>Проекты, с которыми работает RoutX</h2>
+            <p>
+              RoutX — панель управления, а продукты и списки развиваются в отдельных открытых
+              проектах. Ссылки ведут на оригинальные репозитории.
+            </p>
+          </div>
+
+          <div class="product-grid">
+            <a class="product-card reveal" href="https://github.com/Dushnilin/tachyon" target="_blank" rel="noreferrer">
+              <div class="p-top"><h3>Tachyon</h3><span class="ext">↗</span></div>
+              <p>VPN/прокси-панель для OpenWrt на sing-box.</p>
+              <span class="p-tag">основной продукт</span>
+            </a>
+            <a class="product-card reveal" href="https://github.com/Dushnilin/tachyon-lists" target="_blank" rel="noreferrer">
+              <div class="p-top"><h3>Tachyon Lists</h3><span class="ext">↗</span></div>
+              <p>143 списка доменов и подсетей с группами и описаниями.</p>
+              <span class="p-tag">каталог</span>
+            </a>
+            <a class="product-card reveal" href="https://github.com/ushan0v/forkop" target="_blank" rel="noreferrer">
+              <div class="p-top"><h3>Forkop</h3><span class="ext">↗</span></div>
+              <p>Прокси-клиент для OpenWrt, форк Podkop.</p>
+              <span class="p-tag">rule-set</span>
+            </a>
+            <a class="product-card reveal" href="https://github.com/Asofwar/prokop" target="_blank" rel="noreferrer">
+              <div class="p-top"><h3>Prokop</h3><span class="ext">↗</span></div>
+              <p>Прокси-клиент для OpenWrt, SRS-списки.</p>
+              <span class="p-tag">SRS</span>
+            </a>
+            <a class="product-card reveal" href="https://github.com/itdoginfo/podkop" target="_blank" rel="noreferrer">
+              <div class="p-top"><h3>Podkop</h3><span class="ext">↗</span></div>
+              <p>VPN и прокси для OpenWrt 24.10+.</p>
+              <span class="p-tag">OpenWrt</span>
+            </a>
+            <a class="product-card reveal" href="https://github.com/itdoginfo/allow-domains" target="_blank" rel="noreferrer">
+              <div class="p-top"><h3>allow-domains</h3><span class="ext">↗</span></div>
+              <p>Готовые списки доменов для маршрутизации.</p>
+              <span class="p-tag">lists</span>
+            </a>
+            <a class="product-card reveal" href="https://github.com/SagerNet/sing-box" target="_blank" rel="noreferrer">
+              <div class="p-top"><h3>sing-box</h3><span class="ext">↗</span></div>
+              <p>Универсальное прокси-ядро под капотом.</p>
+              <span class="p-tag">core</span>
+            </a>
+            <a class="product-card reveal" href="https://github.com/seriec163/routx" target="_blank" rel="noreferrer">
+              <div class="p-top"><h3>RoutX</h3><span class="ext">↗</span></div>
+              <p>Панель управления VPN и прокси на роутерах.</p>
+              <span class="p-tag">Apache-2.0</span>
+            </a>
+          </div>
+        </div>
+      </section>
+
+      <section class="section" id="faq">
+        <div class="container">
+          <div class="section-head reveal">
+            <span class="section-kicker">FAQ</span>
+            <h2>Коротко о главном</h2>
+          </div>
+
+          <div class="faq reveal">
+            <details>
+              <summary>RoutX управляет самим роутером?</summary>
+              <p>
+                Нет. RoutX управляет <strong>VPN/прокси-продуктом на роутере</strong>: установкой
+                Tachyon, Forkop, Prokop или Podkop, версиями, правилами, списками, подписками,
+                агентом и мониторингом. Прошивка, сеть, firewall и LuCI остаются вне панели.
+              </p>
+            </details>
+            <details>
+              <summary>Откуда роутер скачивает агента RoutX?</summary>
+              <p>
+                С самой панели, не с GitHub. Установщик обращается к
+                <code>/agent/install.sh</code>, а пакеты <code>.ipk</code>, <code>.apk</code> и
+                <code>.tar.gz</code> раздаются панелью из <code>/app/agent/dist</code>. GitHub нужен
+                только для сборки образа панели.
+              </p>
+            </details>
+            <details>
+              <summary>Можно ли поставить без Docker?</summary>
+              <p>
+                Да, это режим по умолчанию. Установщик ставит Node.js, PostgreSQL, собирает проект и
+                создаёт systemd-сервис. Docker-вариант включается флагом <code>--docker</code>.
+              </p>
+            </details>
+            <details>
+              <summary>Как обновляется панель и что будет при ошибке?</summary>
+              <p>
+                В настройках есть проверка GitHub и кнопка обновления. Updater скачивает новый образ,
+                перезапускает панель и ждёт healthcheck. Если новая версия не поднялась, автоматически
+                возвращается предыдущий образ. Вручную: <code>sudo routx rollback</code>.
+              </p>
+            </details>
+            <details>
+              <summary>Как добавить администратора и пользователей?</summary>
+              <p>
+                Суперадминистратор приглашает администратора или повышает существующего пользователя.
+                Администратор приглашает только пользователей — они попадают в его ветку. На странице
+                «Пользователи» суперадминистратор видит всю структуру веток.
+              </p>
+            </details>
+            <details>
+              <summary>Поддерживается ли HTTPS?</summary>
+              <p>
+                Да. При установке с доменом CLI ставит и настраивает Caddy, выпускает сертификат
+                Let's Encrypt и проксирует HTTPS на панель. Есть Docker-профиль с Caddy.
+              </p>
+            </details>
+            <details>
+              <summary>Какая лицензия и можно ли использовать коммерчески?</summary>
+              <p>
+                Apache License 2.0. Код можно использовать, изменять и распространять, в том числе
+                коммерчески. При распространении сохраняйте NOTICE и ссылку на оригинальный
+                репозиторий.
+              </p>
+            </details>
+          </div>
+        </div>
+      </section>
+
+      <section class="telegram-section">
+        <div class="container">
+          <div class="telegram-card reveal">
+            <div class="telegram-left">
+              <span class="eyebrow"><span class="dot"></span>Обратная связь</span>
+              <h2>Есть идея или пожелание?</h2>
+              <p>
+                Предложения и пожелания принимаются в Telegram:
+                <strong>@unc1escrooge</strong>. Расскажи, чего не хватает, что улучшить и какой
+                продукт или сценарий стоит поддержать следующим.
+              </p>
+            </div>
+            <a class="btn btn-primary" href="https://t.me/unc1escrooge" target="_blank" rel="noreferrer">
+              <svg aria-hidden="true"><use href="#i-telegram"></use></svg>
+              Написать в Telegram
+            </a>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <footer class="footer">
+      <div class="container">
+        <div class="footer-grid">
+          <a class="footer-brand" href="./">
+            <span class="brand-mark" aria-hidden="true" style="width: 30px; height: 30px; border-radius: 9px">
+              <svg viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round" style="width: 20px; height: 20px">
+                <path d="M16 36V12h10.2a7.4 7.4 0 0 1 0 14.8H16" />
+                <path d="M25.2 26.2 33.4 34.8" />
+                <circle cx="34" cy="35.4" r="2.1" fill="currentColor" stroke="none" />
+              </svg>
+            </span>
+            RoutX
+          </a>
+          <div class="footer-links">
+            <a href="https://github.com/seriec163/routx" target="_blank" rel="noreferrer">GitHub</a>
+            <a href="https://github.com/seriec163/routx/blob/main/docs/runbooks/self-hosting.md" target="_blank" rel="noreferrer">Документация</a>
+            <a href="https://github.com/seriec163/routx/blob/main/LICENSE" target="_blank" rel="noreferrer">Apache-2.0</a>
+            <a href="https://t.me/unc1escrooge" target="_blank" rel="noreferrer">Telegram</a>
+          </div>
+          <div class="footer-note">
+            <span>RoutX · OpenWrt VPN control plane · Tachyon / Forkop / Prokop / Podkop</span>
+            <span>© <span id="year">2026</span> seriec163</span>
+          </div>
+        </div>
+      </div>
+    </footer>
+
+    <script src="assets/site.js" defer></script>
+  </body>
+</html>
