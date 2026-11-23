@@ -158,6 +158,22 @@
 
 ### Спринт 0 — «Секция создаётся, ошибки понятны» (2–3 дня)
 
+Статус: **сделано в ветке `routx-2.0`**.
+
+* 0.1 — `mapTemplateSections()` больше не падает на чистой установке: секции
+  с `action` создаются, в `diff` появляются `add section.<name>.action/enabled`,
+  в результате — предупреждение «Будут созданы: …». При существующей секции
+  поведение прежнее (reuse + warning).
+* 0.2 — `probe` заполняет `router_state.sections` из `managed` (если полного
+  `read_state` ещё не было) и синхронизирует `routers.managed_section`; после
+  `bind` автоматически ставится `refresh_state`; `/routers/:id/state` отдаёт
+  `sections`.
+* 0.3 — `HttpError` сохраняет код и не ретраится; повторяются только
+  `agent_timeout`, `agent_unavailable`, `db_error`.
+
+Тесты: `server/test/routing-plan.test.ts` (чистая установка, несколько секций,
+`managed → sections`), `server/test/job-failure.test.ts` (коды и ретраи).
+
 **0.1. Создавать секцию на чистой установке.**
 
 * `mapTemplateSections()`: если секция есть в `creatableSections(payload)`,
