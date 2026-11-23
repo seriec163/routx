@@ -44,6 +44,7 @@ import { registerMetricsRoute } from './metrics.js';
 import { getMaintenance } from './deploy/state.js';
 import { initPushService } from './push.js';
 import { registerPushRoutes } from './push/routes.js';
+import { collectRoute } from './route-manifest.js';
 
 export interface AppRuntimeConfig {
   masterKey: string;
@@ -102,6 +103,15 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
     trustProxy: deps.trustProxy ?? false,
     bodyLimit: 1024 * 1024,
     logController: new LogController({ disableRequestLogging: true }),
+  });
+
+  app.addHook('onRoute', (route) => {
+    const methods = Array.isArray(route.method) ? route.method : [route.method];
+    const isPublic = Boolean((route.config as { public?: boolean } | undefined)?.public);
+    for (const method of methods) {
+      if (method === 'HEAD' || method === 'OPTIONS') continue;
+      collectRoute(app, { method, url: route.url, public: isPublic });
+    }
   });
 
   app.addContentTypeParser(

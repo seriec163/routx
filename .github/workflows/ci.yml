@@ -64,6 +64,9 @@ jobs:
       - name: Agent contract is up to date
         run: npm run contract:agent && git diff --exit-code -- docs/architecture/agent-openapi.json
 
+      - name: API contract is up to date
+        run: npm run contract:api && git diff --exit-code -- docs/architecture/api-openapi.json
+
       - name: Unit tests
         run: npm test
 

@@ -1,6 +1,6 @@
 {
   "name": "routx",
-  "version": "0.1.0",
+  "version": "2.1.0",
   "private": true,
   "license": "Apache-2.0",
   "description": "Централизованное управление VPN и прокси на роутерах OpenWrt: Tachyon, Forkop, Prokop, Podkop",
@@ -27,7 +27,8 @@
     "rotate-master-key": "npm run rotate-master-key -w @routx/server --",
     "agent:build": "node agent/build.mjs",
     "verify:agent-flow": "node scripts/fake-agent-check.mjs",
-    "contract:agent": "tsx scripts/generate-agent-contract.ts"
+    "contract:agent": "tsx scripts/generate-agent-contract.ts",
+    "contract:api": "tsx scripts/generate-api-contract.ts"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

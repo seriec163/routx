@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { buildApp } from '../src/app.js';
+import { collectedRoutes } from '../src/route-manifest.js';
 
 describe('маршруты приложения', () => {
   it('регистрируются без дублей', async () => {
@@ -39,6 +40,12 @@ describe('маршруты приложения', () => {
     expect(app.hasRoute({ method: 'POST', url: '/api/v1/updates/apply' })).toBe(true);
     expect(app.hasRoute({ method: 'GET', url: '/api/v1/deploy/verify' })).toBe(true);
     expect(app.hasRoute({ method: 'GET', url: '/metrics' })).toBe(true);
+
+    const routes = collectedRoutes(app);
+    expect(routes.some((route) => route.method === 'POST' && route.url === '/api/v1/routers')).toBe(
+      true,
+    );
+    expect(routes.some((route) => route.method === 'GET' && route.url === '/metrics')).toBe(true);
     await app.close();
   });
 });
