@@ -22,6 +22,7 @@ import {
   type UciValue,
 } from '../domain/uci.js';
 import { featureForOp, supportsFeature } from '../agent/features.js';
+import { bundledAgentVersion } from '../agent/version.js';
 import type { PlatformSettings } from '../settings.js';
 import { normalizeTemplateLists } from '../domain/community-lists.js';
 import { resolveRouterSection, syncManagedSection } from '../domain/managed-section.js';
@@ -1329,6 +1330,7 @@ export async function siteCheck(ctx: HandlerContext, job: JobRow): Promise<Json>
 
 export async function agentUpdate(ctx: HandlerContext, job: JobRow): Promise<Json> {
   const routerId = requireRouter(job);
+  const before = await agentVersionOf(ctx, routerId);
   const base = ctx.publicUrl.replace(/\/+$/, '');
   const raw = await runCommand(ctx, job, 'self_update', { base_url: base }, 120_000);
   if (raw.ok === false) {
@@ -1337,11 +1339,25 @@ export async function agentUpdate(ctx: HandlerContext, job: JobRow): Promise<Jso
       asString(raw.message) || 'Агент не принял обновление',
     );
   }
+
+  await setJobPhase(ctx, job.id, 'Ждём перезапуск агента', 60);
+  const after = await waitForAgentVersion(ctx, routerId, before, 120_000);
+  if (!after) {
+    throw new JobFailure(
+      'agent_update_not_applied',
+      `Агент не сообщил новую версию за 2 минуты (было ${before ?? '—'}). ` +
+        'Проверьте /var/log/routx-agent-update.log на роутере.',
+    );
+  }
+
   return {
     router_id: routerId,
     scheduled: true,
     kind: asString(raw.kind),
-    version: asString(raw.version) || null,
+    version: after,
+    previous_version: before,
+    applied: after !== before,
+    sha256: asString(raw.sha256) || null,
   };
 }
 
@@ -1748,8 +1764,41 @@ function componentLabel(component: string): string {
   return component === 'tachyon-core' ? 'ядро Tachyon Core' : 'модуль Tachyon';
 }
 
+async function agentVersionOf(ctx: HandlerContext, routerId: string): Promise<string | null> {
+  const row = await ctx.pool.query<{ agent_version: string | null }>(
+    'select agent_version from routers where id = $1',
+    [routerId],
+  );
+  return row.rows[0]?.agent_version ?? null;
+}
+
+/**
+ * Ждёт, пока роутер пришлёт новую версию агента после self_update. Успехом
+ * считаем и смену версии, и совпадение с версией из образа панели: агент мог
+ * уже быть последним, тогда переустановка ничего не меняет.
+ */
+async function waitForAgentVersion(
+  ctx: HandlerContext,
+  routerId: string,
+  previous: string | null,
+  timeoutMs: number,
+): Promise<string | null> {
+  const expected = bundledAgentVersion();
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (ctx.signal?.aborted) return null;
+    const current = await agentVersionOf(ctx, routerId);
+    if (current && (current !== previous || (expected !== null && current === expected))) {
+      return current;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 3000));
+  }
+  return null;
+}
+
 async function selfUpdateForWifi(ctx: HandlerContext, job: JobRow): Promise<void> {
   await setJobPhase(ctx, job.id, 'Агент не поддерживает Wi-Fi — обновляем RoutX', 3);
+  const before = await agentVersionOf(ctx, requireRouter(job));
   const base = ctx.publicUrl.replace(/\/+$/, '');
   const update = await runCommand(ctx, job, 'self_update', { base_url: base }, 180_000);
   if (update.ok === false) {
@@ -1758,7 +1807,14 @@ async function selfUpdateForWifi(ctx: HandlerContext, job: JobRow): Promise<void
       asString(update.message) || 'Агент не принял обновление',
     );
   }
-  await new Promise((resolve) => setTimeout(resolve, 25_000));
+  await setJobPhase(ctx, job.id, 'Ждём перезапуск агента', 5);
+  const after = await waitForAgentVersion(ctx, requireRouter(job), before, 90_000);
+  if (!after) {
+    throw new JobFailure(
+      'agent_update_failed',
+      'Агент не сообщил новую версию за 90 секунд. Проверьте /var/log/routx-agent-update.log на роутере.',
+    );
+  }
 }
 
 async function runWifiCommand(

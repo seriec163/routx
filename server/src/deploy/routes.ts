@@ -430,7 +430,7 @@ export async function registerDeployRoutes(
           type: 'agent_update',
           routerId: router.id,
           requestedBy: auth.userId,
-          timeoutSeconds: 180,
+          timeoutSeconds: 300,
           maxAttempts: 1,
           payload: {},
         });
