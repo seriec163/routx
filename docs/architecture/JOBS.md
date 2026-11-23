@@ -65,22 +65,31 @@ queued ──▶ running ──┬──▶ success
 
 ## 3. Захват и lease
 
+Работает `RC_WORKER_CONCURRENCY` параллельных циклов (по умолчанию 2, максимум 8).
+Мониторинг больше не ждёт, пока закончится длинное обновление другого роутера.
+
 ```text
 worker loop (каждые 2 с):
   BEGIN;
-  SELECT id FROM jobs
+  SELECT id, router_id, type FROM jobs
    WHERE status='queued'
      AND scheduled_at <= now()
      AND (next_retry_at IS NULL OR next_retry_at <= now())
    ORDER BY priority, scheduled_at
    FOR UPDATE SKIP LOCKED
    LIMIT 1;
+  -- для не-monitor задачи:
+  SELECT id FROM routers WHERE id=$router FOR UPDATE;  -- сериализует захват
+  -- если у роутера уже есть running (кроме monitor) — COMMIT и выход
   UPDATE jobs SET status='running', attempt=attempt+1,
                   started_at=now(), lease_owner=$me,
                   lease_expires_at=now()+interval '30 seconds'
    WHERE id=$id;
   COMMIT;
 ```
+
+Блокировка строки роутера закрывает гонку между воркерами: два цикла не
+заберут две mutate-задачи одного роутера одновременно.
 
 * Lease продлевается каждые 10 с, пока воркер жив (`heartbeat` воркера).
 * Reaper каждые 15 с:
@@ -97,6 +106,23 @@ UPDATE jobs
 Для mutate-заданий `attempt >= max_attempts` (max_attempts=1) → `timeout`, не `queued`.
 
 * `idempotency_key` (например, `apply:{apply_run_id}`) защищает от дублей при повторном нажатии кнопки.
+
+### Таймаут и отмена
+
+* По истечении `timeout_seconds` воркер вызывает `AbortController.abort()`;
+  `runCommand` передаёт сигнал в `waitForCommand`, и обработчик прекращает
+  опрашивать агент, а не продолжает менять состояние «в фоне».
+* `cancel_requested` проверяется в том же цикле ожидания (раз в 300 мс).
+* Прерывать mutate-задачу на середине по-прежнему нельзя — только ждать
+  завершения или таймаута.
+
+### Рестарт панели
+
+`recoverOrphanedJobs` возвращает в очередь только безопасные задачи
+(`monitor`, `refresh_state`, `diff*`, `wifi_read`, проверки), а изменяющие
+переводит в `timeout` + `needs_attention`, чтобы оператор проверил состояние.
+Раньше все `running`-задачи становились `timeout`, и мониторинг простаивал
+после каждого деплоя.
 
 ---
 
