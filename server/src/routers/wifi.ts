@@ -4,11 +4,13 @@ import { z } from 'zod';
 import { audit } from '../audit.js';
 import { requireUser } from '../auth/service.js';
 import { badRequest } from '../lib/errors.js';
+import { encryptSecret } from '../lib/crypto.js';
 import { enqueueJob, jobJson } from '../jobs/queue.js';
 import { getRouter, getRouterForMutation } from './service.js';
 
 interface RouteContext {
   pool: Pool;
+  masterKey: string;
 }
 
 const IFACE_RE = /^[A-Za-z0-9_]{1,64}$/;
@@ -73,13 +75,21 @@ export async function registerRouterWifiRoutes(
       }
       const router = await getRouterForMutation(pool, auth, params.id);
 
+      // Пароль не должен лежать в jobs.payload открытым текстом: шифруем его
+      // мастер-ключом, расшифровываем только при отправке команды агенту.
+      const payload: Record<string, unknown> = { ...body };
+      if (body.key) {
+        payload.key_enc = encryptSecret(body.key, ctx.masterKey);
+        delete payload.key;
+      }
+
       const job = await enqueueJob(pool, {
         type: 'wifi_create',
         routerId: router.id,
         requestedBy: auth.userId,
         timeoutSeconds: 600,
         maxAttempts: 1,
-        payload: body,
+        payload,
       });
 
       await audit(pool, {
@@ -190,13 +200,19 @@ export async function registerRouterWifiRoutes(
       const changes = changesSchema.parse(request.body);
       const router = await getRouterForMutation(pool, auth, params.id);
 
+      const sealedChanges: Record<string, unknown> = { ...changes };
+      if (changes.key) {
+        sealedChanges.key_enc = encryptSecret(changes.key, ctx.masterKey);
+        delete sealedChanges.key;
+      }
+
       const job = await enqueueJob(pool, {
         type: 'wifi_update',
         routerId: router.id,
         requestedBy: auth.userId,
         timeoutSeconds: 600,
         maxAttempts: 1,
-        payload: { iface: params.iface, changes },
+        payload: { iface: params.iface, changes: sealedChanges },
       });
 
       await audit(pool, {

@@ -127,6 +127,7 @@ async function runCommand(
     args,
     settings: ctx.settings,
     ttlSeconds: Math.ceil(effectiveTimeout / 1000) + 120,
+    masterKey: ctx.masterKey,
   });
 
   const outcome = await waitForCommand(ctx.pool, command.id, {
@@ -1830,7 +1831,16 @@ export async function wifiUpdate(ctx: HandlerContext, job: JobRow): Promise<Json
   if (!/^[A-Za-z0-9_]{1,64}$/.test(iface)) {
     throw new JobFailure('invalid_payload', 'Некорректное имя Wi-Fi сети');
   }
-  const changes = asRecord(job.payload.changes ?? {});
+  const changes = { ...asRecord(job.payload.changes ?? {}) };
+  const sealedKey = asString(changes.key_enc);
+  if (sealedKey) {
+    try {
+      changes.key = decryptSecret(sealedKey, ctx.masterKey);
+    } catch {
+      throw new JobFailure('wifi_key_unreadable', 'Не удалось расшифровать пароль Wi-Fi');
+    }
+    delete changes.key_enc;
+  }
   if (Object.keys(changes).length === 0) {
     throw new JobFailure('invalid_payload', 'Нет изменений Wi-Fi');
   }
@@ -1847,6 +1857,15 @@ export async function wifiCreate(ctx: HandlerContext, job: JobRow): Promise<Json
   const radios = Array.isArray(job.payload.radios)
     ? job.payload.radios.filter((item): item is string => typeof item === 'string')
     : [];
+  const sealedKey = asString(job.payload.key_enc) ?? asString(job.payload.key);
+  let key = '';
+  if (sealedKey) {
+    try {
+      key = job.payload.key_enc ? decryptSecret(sealedKey, ctx.masterKey) : sealedKey;
+    } catch {
+      throw new JobFailure('wifi_key_unreadable', 'Не удалось расшифровать пароль Wi-Fi');
+    }
+  }
   const raw = await runWifiCommand(
     ctx,
     job,
@@ -1854,7 +1873,7 @@ export async function wifiCreate(ctx: HandlerContext, job: JobRow): Promise<Json
     {
       ssid,
       encryption: asString(job.payload.encryption) ?? 'none',
-      key: asString(job.payload.key) ?? '',
+      key,
       hidden: job.payload.hidden === true,
       disabled: job.payload.disabled === true,
       isolate: job.payload.isolate === true,

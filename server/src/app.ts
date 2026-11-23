@@ -303,7 +303,7 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
     await registerRouterConnectionRoutes(app, { pool, masterKey: config.masterKey });
     await registerRouterRuleRoutes(app, { pool, masterKey: config.masterKey });
     await registerRouterComponentRoutes(app, { pool });
-    await registerRouterWifiRoutes(app, { pool });
+    await registerRouterWifiRoutes(app, { pool, masterKey: config.masterKey });
     await registerMobileRoutes(app, {
       pool,
       secureCookie: config.secureCookie,
@@ -349,6 +349,7 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
       publicUrl: config.publicUrl,
       requireSignature: config.agentRequireSignature,
       pollHoldSeconds: config.agentPollHoldSeconds,
+      masterKey: config.masterKey,
     });
   }
 

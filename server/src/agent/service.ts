@@ -2,6 +2,7 @@ import { EventEmitter } from 'node:events';
 import { setTimeout as delay } from 'node:timers/promises';
 import type { Pool, PoolClient } from 'pg';
 import { hmacSha256Hex, sha256Hex } from '../lib/crypto.js';
+import { openCommandArgs, SECRET_COMMAND_OPS, sealCommandArgs } from './command-secrets.js';
 import { uuidv7 } from '../lib/ids.js';
 import { HttpError, badRequest, conflict, unauthorized } from '../lib/errors.js';
 import type { PlatformSettings } from '../settings.js';
@@ -99,6 +100,7 @@ export async function createCommand(
     settings: PlatformSettings;
     mutate?: boolean;
     ttlSeconds?: number;
+    masterKey?: string;
   },
 ): Promise<AgentCommand> {
   const mutate = input.mutate ?? MUTATING_OPS.has(input.op);
@@ -106,11 +108,16 @@ export async function createCommand(
     ? input.settings.agent.commandTtlMutateSeconds
     : input.settings.agent.commandTtlReadSeconds);
 
+  const args =
+    input.masterKey && SECRET_COMMAND_OPS.has(input.op)
+      ? sealCommandArgs(input.args, input.masterKey)
+      : (input.args ?? {});
+
   const result = await pool.query<AgentCommand>(
     `insert into agent_commands (id, router_id, job_id, op, args, expires_at)
      values ($1,$2,$3,$4,$5::jsonb, now() + ($6 || ' seconds')::interval)
      returning id, router_id, job_id, op, args, attempt, expires_at`,
-    [uuidv7(), input.routerId, input.jobId, input.op, JSON.stringify(input.args ?? {}), ttl],
+    [uuidv7(), input.routerId, input.jobId, input.op, JSON.stringify(args), ttl],
   );
 
   notifyAgent(input.routerId);
@@ -120,6 +127,7 @@ export async function createCommand(
 export async function claimCommand(
   pool: Pool,
   routerId: string,
+  masterKey?: string,
 ): Promise<AgentCommand | null> {
   const result = await pool.query<AgentCommand>(
     `with candidate as (
@@ -141,7 +149,9 @@ export async function claimCommand(
       returning c.id, c.router_id, c.job_id, c.op, c.args, c.attempt, c.expires_at`,
     [routerId],
   );
-  return result.rows[0] ?? null;
+  const command = result.rows[0] ?? null;
+  if (!command) return null;
+  return { ...command, args: openCommandArgs(command.args, masterKey) };
 }
 
 export async function expireCommands(pool: Pool): Promise<number> {

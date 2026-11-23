@@ -27,6 +27,7 @@ export interface AgentRouteContext {
   requireSignature: boolean;
   pollHoldSeconds: number;
   publicUrl: string;
+  masterKey: string;
 }
 
 const probeSchema = z
@@ -1200,7 +1201,7 @@ export async function registerAgentRoutes(
       const deadline = Date.now() + holdSeconds * 1000;
 
       for (;;) {
-        const command = await claimCommand(pool, agent.routerId);
+        const command = await claimCommand(pool, agent.routerId, ctx.masterKey);
         if (command) {
           return {
             command: {

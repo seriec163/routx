@@ -126,6 +126,8 @@
 | Ключ шифрования | env `RC_MASTER_KEY` или файл 0400 вне БД | не в БД, не в логах |
 | Секреты шаблонов (VLESS, URL подписки, inbound) | **не покидают роутер** | не читаются агентом |
 | Подписки/VLESS, добавленные во вкладке «Подключения» | `router_connections.secret_enc` | AES-256-GCM, в UI только маска |
+| Wi-Fi-пароль в очереди | `jobs.payload.key_enc` | AES-256-GCM, расшифровывается только при отправке команды |
+| Аргументы секретных команд | `agent_commands.args` (`__rc_sealed`) | AES-256-GCM для `wifi_*`, `apply_connections`, `manage_connection` |
 | Компактные секреты `rc1.…` | `router_connections.compact_secret` | AES-256-GCM, ключ HKDF-SHA256 от `RC_MASTER_KEY`; в API только по явному запросу с аудитом |
 | Снапшоты Forkop | роутер, `/etc/routx/snapshots` | 0600/0700 |
 
@@ -144,6 +146,9 @@
 
 * TOTP-секреты — AES-256-GCM, nonce на запись, AAD = `user_id`.
 * Подписки/VLESS — AES-256-GCM (`secret_enc`), в списках API только `masked`.
+* Секреты в очередях: Wi-Fi-пароль шифруется в `jobs.payload`, аргументы
+  `wifi_*`, `apply_connections` и `manage_connection` — в `agent_commands.args`;
+  при выдаче агенту расшифровываются на сервере, в дампе БД остаются sealed.
 * Бэкапы БД — шифруются на стороне сервера (age/GPG) перед выгрузкой.
 * Диск — LUKS/облачный аналог (рекомендация для продакшена).
 
