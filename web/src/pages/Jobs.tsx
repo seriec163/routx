@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import {
   Button,
   Empty,
@@ -16,6 +16,7 @@ import { api, errorMessage } from '../lib/api';
 import { formatDate, formatRelative, JOB_STATUS, JOB_TYPE } from '../lib/format';
 import type { Job, RouterRecord } from '../lib/types';
 import { useApi } from '../lib/useApi';
+import { usePolling } from '../lib/usePolling';
 
 export function JobsPage() {
   const toast = useToast();
@@ -39,11 +40,7 @@ export function JobsPage() {
     (job) => job.status === 'queued' || job.status === 'running',
   );
 
-  useEffect(() => {
-    if (!hasActive) return;
-    const timer = window.setInterval(() => void jobs.reload(), 2000);
-    return () => window.clearInterval(timer);
-  }, [hasActive, jobs.reload]);
+  usePolling(() => void jobs.reload(), 2000, hasActive);
 
   async function cancel(job: Job): Promise<void> {
     setBusyId(job.id);

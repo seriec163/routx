@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { lazy, useEffect, useMemo, useState } from 'react';
 import { Link } from './components/link';
 import { Button, Empty, ErrorBanner, Spinner, StatusBadge, ToastProvider, useToast } from './components/ui';
 import { api, errorMessage, subscribeActivity } from './lib/api';
@@ -6,28 +6,67 @@ import { formatRelative, roleLabel, SEVERITY } from './lib/format';
 import { useRoute, navigate } from './lib/router';
 import type { NotificationRow } from './lib/types';
 import { useApi } from './lib/useApi';
-import { AccountPage, EnrollmentPanel } from './pages/Account';
-import { ApplyRunDetailPage, ApplyRunsPage } from './pages/ApplyRuns';
-import { AuditPage } from './pages/Audit';
-import { DashboardPage } from './pages/Dashboard';
-import { DiagnosticDetailPage, DiagnosticsPage } from './pages/Diagnostics';
-import { LogsPage } from './pages/Logs';
-import { JobsPage } from './pages/Jobs';
-import { LoginPage, InvitePage, ResetPasswordPage, BrandMark } from './pages/Auth';
-import { InstallPage } from './pages/Install';
-import { MobileApp } from './mobile/MobileApp';
-import { MobileAuthScreen } from './mobile/MobileAuthScreen';
 import { isMobileBound, isMobileClient } from './mobile/deviceId';
-import { RouterDetailPage } from './pages/RouterDetail';
-import { RouterOnboardingPage } from './pages/RouterOnboarding';
-import { RoutersPage } from './pages/Routers';
-import { SubscriptionsPage } from './pages/Subscriptions';
-import { RolloutDetailPage, RolloutsPage } from './pages/Rollouts';
-import { SettingsPage } from './pages/Settings';
-import { DeployPage } from './pages/Deploy';
-import { TemplateEditorPage } from './pages/TemplateEditor';
-import { TemplatesPage } from './pages/Templates';
-import { UsersPage } from './pages/Users';
+const AccountPage = lazy(() => import('./pages/Account').then((m) => ({ default: m.AccountPage })));
+const EnrollmentPanel = lazy(() =>
+  import('./pages/Account').then((m) => ({ default: m.EnrollmentPanel })),
+);
+const ApplyRunDetailPage = lazy(() =>
+  import('./pages/ApplyRuns').then((m) => ({ default: m.ApplyRunDetailPage })),
+);
+const ApplyRunsPage = lazy(() =>
+  import('./pages/ApplyRuns').then((m) => ({ default: m.ApplyRunsPage })),
+);
+const AuditPage = lazy(() => import('./pages/Audit').then((m) => ({ default: m.AuditPage })));
+const DashboardPage = lazy(() =>
+  import('./pages/Dashboard').then((m) => ({ default: m.DashboardPage })),
+);
+const DiagnosticDetailPage = lazy(() =>
+  import('./pages/Diagnostics').then((m) => ({ default: m.DiagnosticDetailPage })),
+);
+const DiagnosticsPage = lazy(() =>
+  import('./pages/Diagnostics').then((m) => ({ default: m.DiagnosticsPage })),
+);
+const LogsPage = lazy(() => import('./pages/Logs').then((m) => ({ default: m.LogsPage })));
+const JobsPage = lazy(() => import('./pages/Jobs').then((m) => ({ default: m.JobsPage })));
+const LoginPage = lazy(() => import('./pages/Auth').then((m) => ({ default: m.LoginPage })));
+const InvitePage = lazy(() => import('./pages/Auth').then((m) => ({ default: m.InvitePage })));
+const ResetPasswordPage = lazy(() =>
+  import('./pages/Auth').then((m) => ({ default: m.ResetPasswordPage })),
+);
+const BrandMark = lazy(() => import('./pages/Auth').then((m) => ({ default: m.BrandMark })));
+const InstallPage = lazy(() => import('./pages/Install').then((m) => ({ default: m.InstallPage })));
+const MobileApp = lazy(() => import('./mobile/MobileApp').then((m) => ({ default: m.MobileApp })));
+const MobileAuthScreen = lazy(() =>
+  import('./mobile/MobileAuthScreen').then((m) => ({ default: m.MobileAuthScreen })),
+);
+const RouterDetailPage = lazy(() =>
+  import('./pages/RouterDetail').then((m) => ({ default: m.RouterDetailPage })),
+);
+const RouterOnboardingPage = lazy(() =>
+  import('./pages/RouterOnboarding').then((m) => ({ default: m.RouterOnboardingPage })),
+);
+const RoutersPage = lazy(() => import('./pages/Routers').then((m) => ({ default: m.RoutersPage })));
+const SubscriptionsPage = lazy(() =>
+  import('./pages/Subscriptions').then((m) => ({ default: m.SubscriptionsPage })),
+);
+const RolloutDetailPage = lazy(() =>
+  import('./pages/Rollouts').then((m) => ({ default: m.RolloutDetailPage })),
+);
+const RolloutsPage = lazy(() =>
+  import('./pages/Rollouts').then((m) => ({ default: m.RolloutsPage })),
+);
+const SettingsPage = lazy(() =>
+  import('./pages/Settings').then((m) => ({ default: m.SettingsPage })),
+);
+const DeployPage = lazy(() => import('./pages/Deploy').then((m) => ({ default: m.DeployPage })));
+const TemplateEditorPage = lazy(() =>
+  import('./pages/TemplateEditor').then((m) => ({ default: m.TemplateEditorPage })),
+);
+const TemplatesPage = lazy(() =>
+  import('./pages/Templates').then((m) => ({ default: m.TemplatesPage })),
+);
+const UsersPage = lazy(() => import('./pages/Users').then((m) => ({ default: m.UsersPage })));
 import { SessionProvider, displayName, useSession } from './session';
 import { useNotificationToasts } from './lib/notifications';
 
