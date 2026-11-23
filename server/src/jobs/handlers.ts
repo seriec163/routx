@@ -1,4 +1,3 @@
-import type { FastifyBaseLogger } from 'fastify';
 import type { Pool } from 'pg';
 import { maskSecrets, sha256Hex, decryptSecret } from '../lib/crypto.js';
 import { uuidv7 } from '../lib/ids.js';
@@ -21,12 +20,10 @@ import {
   type TemplatePayload,
   type UciValue,
 } from '../domain/uci.js';
-import { featureForOp, supportsFeature } from '../agent/features.js';
 import { bundledAgentVersion } from '../agent/version.js';
 import type { PlatformSettings } from '../settings.js';
 import { normalizeTemplateLists } from '../domain/community-lists.js';
 import { resolveRouterSection, syncManagedSection } from '../domain/managed-section.js';
-import { createCommand, waitForCommand } from '../agent/service.js';
 import { enqueueJob, isCancelRequested } from './queue.js';
 import type { JobRow } from './queue.js';
 import { notifyRouterOwner } from '../notifications.js';
@@ -36,49 +33,23 @@ import {
   type StoredConnection,
 } from '../domain/rules.js';
 import { computePodkopPlan, podkopSectionInputSchema, podkopTemplateInput } from '../domain/podkop.js';
+import { JobFailure } from './errors.js';
+import {
+  agentVersionOf,
+  asNumber,
+  asRecord,
+  asString,
+  requireRouter,
+  runCommand,
+  setJobPhase,
+  waitForAgentVersion,
+  type HandlerContext,
+  type Json,
+} from './helpers.js';
+import { wifiCreate, wifiDelete, wifiRead, wifiUpdate } from './handlers/wifi.js';
+export { JobFailure } from './errors.js';
+export type { HandlerContext } from './helpers.js';
 
-export class JobFailure extends Error {
-  readonly code: string;
-  readonly terminal: 'failed' | 'timeout' | 'cancelled';
-
-  constructor(code: string, message: string, terminal: 'failed' | 'timeout' | 'cancelled' = 'failed') {
-    super(message);
-    this.name = 'JobFailure';
-    this.code = code;
-    this.terminal = terminal;
-  }
-}
-
-export interface HandlerContext {
-  pool: Pool;
-  settings: PlatformSettings;
-  log: FastifyBaseLogger;
-  workerId: string;
-  masterKey: string;
-  publicUrl: string;
-  /** Отменяется по таймауту задачи; обработчики должны прекращать ожидание. */
-  signal?: AbortSignal;
-}
-
-type Json = Record<string, unknown>;
-
-function asRecord(value: unknown): Json {
-  return value && typeof value === 'object' && !Array.isArray(value) ? (value as Json) : {};
-}
-
-function asString(value: unknown): string | null {
-  return typeof value === 'string' && value.length > 0 ? value : null;
-}
-
-function asNumber(value: unknown): number | null {
-  const parsed = typeof value === 'number' ? value : Number(value);
-  return Number.isFinite(parsed) ? parsed : null;
-}
-
-/**
- * Prokop возвращает в лог понятную причину, но CLI-ответ при reload может быть
- * просто JSON. Добавляем подсказку для самых частых случаев.
- */
 function prokopReloadHint(message: string): string {
   if (/no enabled sections/i.test(message)) {
     return `${message}. В Prokop не осталось ни одного включённого правила: включите другое правило или добавьте источник подключения.`;
@@ -90,82 +61,6 @@ function prokopReloadHint(message: string): string {
     return `${message}. Prokop не перезагрузил конфигурацию: проверьте, что осталось включённое правило с источником подключения.`;
   }
   return message;
-}
-
-function requireRouter(job: JobRow): string {
-  if (!job.router_id) throw new JobFailure('no_router', 'Задача не привязана к роутеру');
-  return job.router_id;
-}
-
-async function runCommand(
-  ctx: HandlerContext,
-  job: JobRow,
-  op: string,
-  args: Json,
-  timeoutMs?: number,
-): Promise<Json> {
-  const routerId = requireRouter(job);
-  const feature = featureForOp(op);
-  if (feature) {
-    const versionRow = await ctx.pool.query<{ agent_version: string | null }>(
-      'select agent_version from routers where id = $1',
-      [routerId],
-    );
-    const version = versionRow.rows[0]?.agent_version ?? null;
-    if (!supportsFeature(version, feature)) {
-      throw new JobFailure(
-        'agent_outdated',
-        `Агент RoutX${version ? ` ${version}` : ''} не поддерживает ${feature.label}. ` +
-          `Нужна версия ${feature.minVersion} или новее — обновите агент.`,
-      );
-    }
-  }
-  const effectiveTimeout = timeoutMs ?? Math.max(15_000, job.timeout_seconds * 1000 - 5_000);
-  const command = await createCommand(ctx.pool, {
-    routerId,
-    jobId: job.id,
-    op,
-    args,
-    settings: ctx.settings,
-    ttlSeconds: Math.ceil(effectiveTimeout / 1000) + 120,
-    masterKey: ctx.masterKey,
-  });
-
-  const outcome = await waitForCommand(ctx.pool, command.id, {
-    timeoutMs: effectiveTimeout,
-    isCancelled: () => isCancelRequested(ctx.pool, job.id),
-    signal: ctx.signal,
-  });
-
-  if (outcome.status === 'cancelled') {
-    throw new JobFailure('cancelled', 'Задача отменена', 'cancelled');
-  }
-  if (outcome.status === 'timeout') {
-    throw new JobFailure('agent_timeout', 'Агент не ответил вовремя', 'timeout');
-  }
-  if (outcome.status !== 'success') {
-    throw new JobFailure(
-      outcome.error?.code ?? 'agent_failed',
-      outcome.error?.message ?? 'Агент сообщил об ошибке',
-    );
-  }
-  return asRecord(outcome.result);
-}
-
-/** Обновляет фазу задачи для прогресс-бара в интерфейсе. */
-async function setJobPhase(
-  ctx: HandlerContext,
-  jobId: string,
-  phase: string,
-  progress?: number,
-): Promise<void> {
-  const value = progress == null ? { phase } : { phase, progress };
-  await ctx.pool
-    .query(
-      `update jobs set result = coalesce(result, '{}'::jsonb) || $2::jsonb where id = $1`,
-      [jobId, JSON.stringify(value)],
-    )
-    .catch(() => undefined);
 }
 
 async function saveState(
@@ -1286,7 +1181,6 @@ export async function monitorProbe(ctx: HandlerContext, job: JobRow): Promise<Js
 }
 
 export async function accessCheck(ctx: HandlerContext, job: JobRow): Promise<Json> {
-  const routerId = requireRouter(job);
   const target =
     asString(job.payload.target) || 'https://www.youtube.com/generate_204';
   const raw = await runCommand(ctx, job, 'access_check', { target }, 45_000);
@@ -1768,198 +1662,6 @@ const TACHYON_COMPONENTS = ['tachyon', 'tachyon-core'] as const;
 
 function componentLabel(component: string): string {
   return component === 'tachyon-core' ? 'ядро Tachyon Core' : 'модуль Tachyon';
-}
-
-async function agentVersionOf(ctx: HandlerContext, routerId: string): Promise<string | null> {
-  const row = await ctx.pool.query<{ agent_version: string | null }>(
-    'select agent_version from routers where id = $1',
-    [routerId],
-  );
-  return row.rows[0]?.agent_version ?? null;
-}
-
-/**
- * Ждёт, пока роутер пришлёт новую версию агента после self_update. Успехом
- * считаем и смену версии, и совпадение с версией из образа панели: агент мог
- * уже быть последним, тогда переустановка ничего не меняет.
- */
-async function waitForAgentVersion(
-  ctx: HandlerContext,
-  routerId: string,
-  previous: string | null,
-  timeoutMs: number,
-): Promise<string | null> {
-  const expected = bundledAgentVersion();
-  const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
-    if (ctx.signal?.aborted) return null;
-    const current = await agentVersionOf(ctx, routerId);
-    if (current && (current !== previous || (expected !== null && current === expected))) {
-      return current;
-    }
-    await new Promise((resolve) => setTimeout(resolve, 3000));
-  }
-  return null;
-}
-
-async function selfUpdateForWifi(ctx: HandlerContext, job: JobRow): Promise<void> {
-  await setJobPhase(ctx, job.id, 'Агент не поддерживает Wi-Fi — обновляем RoutX', 3);
-  const before = await agentVersionOf(ctx, requireRouter(job));
-  const base = ctx.publicUrl.replace(/\/+$/, '');
-  const update = await runCommand(
-    ctx,
-    job,
-    'self_update',
-    { base_url: base, version: bundledAgentVersion() ?? '' },
-    180_000,
-  );
-  if (update.ok === false) {
-    throw new JobFailure(
-      'agent_update_failed',
-      asString(update.message) || 'Агент не принял обновление',
-    );
-  }
-  await setJobPhase(ctx, job.id, 'Ждём перезапуск агента', 5);
-  const after = await waitForAgentVersion(ctx, requireRouter(job), before, 90_000);
-  if (!after) {
-    throw new JobFailure(
-      'agent_update_failed',
-      'Агент не сообщил новую версию за 90 секунд. Проверьте /var/log/routx-agent-update.log на роутере.',
-    );
-  }
-}
-
-async function runWifiCommand(
-  ctx: HandlerContext,
-  job: JobRow,
-  op: string,
-  args: Json,
-  timeoutMs: number,
-): Promise<Json> {
-  try {
-    return await runCommand(ctx, job, op, args, timeoutMs);
-  } catch (error) {
-    if (
-      !(error instanceof JobFailure) ||
-      (error.code !== 'unknown_op' && error.code !== 'agent_outdated')
-    ) {
-      throw error;
-    }
-  }
-
-  // Агент старее 1.5.51 не знает Wi-Fi операций. Обновляем его тем же
-  // механизмом self_update, затем повторяем операцию — пользователю не нужно
-  // вручную искать версию агента.
-  try {
-    await selfUpdateForWifi(ctx, job);
-  } catch (error) {
-    const message = error instanceof Error ? error.message : 'неизвестная ошибка';
-    throw new JobFailure(
-      'wifi_agent_outdated',
-      `Агент RoutX не поддерживает Wi-Fi, автоматически обновить его не удалось: ${message.slice(0, 300)}`,
-    );
-  }
-
-  await setJobPhase(ctx, job.id, 'Повторяем операцию Wi-Fi', 10);
-  try {
-    return await runCommand(ctx, job, op, args, timeoutMs);
-  } catch (error) {
-    if (
-      error instanceof JobFailure &&
-      (error.code === 'unknown_op' || error.code === 'agent_outdated')
-    ) {
-      throw new JobFailure(
-        'wifi_agent_outdated',
-        'Агент RoutX не поддерживает Wi-Fi. Обновите агент до версии 1.5.52.',
-      );
-    }
-    throw error;
-  }
-}
-
-export async function wifiRead(ctx: HandlerContext, job: JobRow): Promise<Json> {
-  requireRouter(job);
-  let raw = await runWifiCommand(ctx, job, 'wifi_read', {}, 60_000);
-  // 1.5.51 умеет читать Wi-Fi, но ещё не умеет определять наличие модуля.
-  // Обновляем такой агент и повторяем чтение, чтобы панель получила hardware.
-  if (raw.hardware == null || typeof raw.hardware !== 'object') {
-    try {
-      await selfUpdateForWifi(ctx, job);
-      raw = await runCommand(ctx, job, 'wifi_read', {}, 60_000);
-    } catch (error) {
-      ctx.log.warn({ err: error, jobId: job.id }, 'не удалось обновить агент для определения Wi-Fi');
-    }
-  }
-  return raw;
-}
-
-export async function wifiUpdate(ctx: HandlerContext, job: JobRow): Promise<Json> {
-  requireRouter(job);
-  const iface = asString(job.payload.iface) ?? '';
-  if (!/^[A-Za-z0-9_]{1,64}$/.test(iface)) {
-    throw new JobFailure('invalid_payload', 'Некорректное имя Wi-Fi сети');
-  }
-  const changes = { ...asRecord(job.payload.changes ?? {}) };
-  const sealedKey = asString(changes.key_enc);
-  if (sealedKey) {
-    try {
-      changes.key = decryptSecret(sealedKey, ctx.masterKey);
-    } catch {
-      throw new JobFailure('wifi_key_unreadable', 'Не удалось расшифровать пароль Wi-Fi');
-    }
-    delete changes.key_enc;
-  }
-  if (Object.keys(changes).length === 0) {
-    throw new JobFailure('invalid_payload', 'Нет изменений Wi-Fi');
-  }
-  const raw = await runWifiCommand(ctx, job, 'wifi_update', { iface, changes }, 180_000);
-  return { name: iface, ...raw };
-}
-
-export async function wifiCreate(ctx: HandlerContext, job: JobRow): Promise<Json> {
-  requireRouter(job);
-  const ssid = asString(job.payload.ssid) ?? '';
-  if (!ssid) {
-    throw new JobFailure('invalid_payload', 'Не указан SSID новой Wi-Fi сети');
-  }
-  const radios = Array.isArray(job.payload.radios)
-    ? job.payload.radios.filter((item): item is string => typeof item === 'string')
-    : [];
-  const sealedKey = asString(job.payload.key_enc) ?? asString(job.payload.key);
-  let key = '';
-  if (sealedKey) {
-    try {
-      key = job.payload.key_enc ? decryptSecret(sealedKey, ctx.masterKey) : sealedKey;
-    } catch {
-      throw new JobFailure('wifi_key_unreadable', 'Не удалось расшифровать пароль Wi-Fi');
-    }
-  }
-  const raw = await runWifiCommand(
-    ctx,
-    job,
-    'wifi_create',
-    {
-      ssid,
-      encryption: asString(job.payload.encryption) ?? 'none',
-      key,
-      hidden: job.payload.hidden === true,
-      disabled: job.payload.disabled === true,
-      isolate: job.payload.isolate === true,
-      radios,
-    },
-    240_000,
-  );
-  return raw;
-}
-
-export async function wifiDelete(ctx: HandlerContext, job: JobRow): Promise<Json> {
-  requireRouter(job);
-  const iface = asString(job.payload.iface) ?? '';
-  if (!/^[A-Za-z0-9_]{1,64}$/.test(iface)) {
-    throw new JobFailure('invalid_payload', 'Некорректное имя Wi-Fi сети');
-  }
-  const raw = await runWifiCommand(ctx, job, 'wifi_delete', { iface }, 180_000);
-  return { name: iface, ...raw };
 }
 
 export async function componentCheck(ctx: HandlerContext, job: JobRow): Promise<Json> {  const routerId = requireRouter(job);
