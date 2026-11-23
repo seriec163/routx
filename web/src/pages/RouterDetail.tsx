@@ -42,6 +42,7 @@ import { OverviewTab } from './router-detail/OverviewTab';
 import { TACHYON_COMPONENTS, versionAtLeast, type TachyonComponentInfo } from './router-detail/tachyon';
 import { UpdatesTab } from './router-detail/UpdatesTab';
 import { SnapshotsTab } from './router-detail/SnapshotsTab';
+import { SingBoxTab } from './router-detail/SingBoxTab';
 import type {
   BindingToken,
   CatalogSubscription,
@@ -2121,220 +2122,25 @@ export function RouterDetailPage({ id }: { id: string }) {
       ) : null}
 
       {tab === 'singbox' ? (
-        <div className="stack">
-          {router.product === 'tachyon' ? (
-            <InfoBanner>
-              Tachyon 1.8 и новее используют собственное ядро <strong>tachyon-core</strong>.
-              Варианты sing-box здесь не применяются — обновляйте модуль и ядро на вкладке
-              «Обновления».
-            </InfoBanner>
-          ) : null}
-          <Panel
-            title="Вариант sing-box"
-            subtitle="Prokop удаляет текущий пакет перед установкой нового варианта, затем ставит новый. При неудаче RoutX попробует вернуть предыдущий."
-          >
-            <div className="kv">
-              <span>Сейчас</span>
-              <strong>
-                {router.sing_box_variant ? `${router.sing_box_variant} · ` : ''}
-                {router.sing_box_version ?? 'не установлен'}
-              </strong>
-              <span>Предыдущая</span>
-              <strong>
-                {router.sing_box_previous_variant || router.sing_box_previous_version
-                  ? `${router.sing_box_previous_variant ?? ''} ${router.sing_box_previous_version ?? ''}`.trim()
-                  : 'нет'}
-              </strong>
-            </div>
-            <div className="variant-grid">
-              {(variants.data?.items ?? []).map((variant) => {
-                const active = currentVariantId === variant.id;
-                const selected = selectedVariantId === variant.id;
-                return (
-                  <button
-                    key={variant.id}
-                    type="button"
-                    aria-pressed={selected}
-                    className={`variant-card ${active ? 'variant-card-active' : ''} ${
-                      selected ? 'variant-card-selected' : ''
-                    }`}
-                    disabled={busy}
-                    onClick={() => setSelectedVariantId(variant.id)}
-                  >
-                    <strong>{variant.label}</strong>
-                    <span>{variant.description}</span>
-                    {active ? <em>установлен</em> : selected ? <em>выбран</em> : null}
-                  </button>
-                );
-              })}
-            </div>
-            <p className="muted-text small" style={{ marginTop: 0 }}>
-              Выберите вариант — ниже появятся доступные версии или способ установки.
-            </p>
-            {variants.error ? <ErrorBanner message={variants.error} /> : null}
-            <div className="row">
-              <Button
-                size="sm"
-                variant="ghost"
-                onClick={() => void checkSingBox()}
-                busy={busy}
-                disabled={!canMutate}
-              >
-                Проверить обновления
-              </Button>
-              <Button
-                size="sm"
-                variant="subtle"
-                onClick={() => setRollbackOpen(true)}
-                disabled={
-                  !canMutate ||
-                  (!router.sing_box_previous_variant && !router.sing_box_previous_version)
-                }
-              >
-                Вернуть предыдущую
-              </Button>
-            </div>
-          </Panel>
-
-          <Panel
-            title="Текущая версия"
-            subtitle="Вариант и версия sing-box на роутере."
-            actions={
-              <Link className="btn btn-ghost btn-sm" to="/rollouts">
-                Поэтапное обновление
-              </Link>
-            }
-          >
-            <div className="kv">
-              <span>Версия</span>
-              <strong>{router.sing_box_version ?? 'не установлен'}</strong>
-              <span>Вариант</span>
-              <strong>{router.sing_box_variant ?? '—'}</strong>
-              <span>Проверка обновлений</span>
-              <strong>{isAdmin ? 'доступна' : 'только администратор'}</strong>
-            </div>
-          </Panel>
-
-          <Panel
-            title={`Версии для ${selectedVariant?.label ?? 'выбранного варианта'}`}
-            subtitle={
-              selectedVariantId === 'extended'
-                ? 'Доступные версии Extended из официального каталога. При установке текущий пакет удаляется, затем ставится выбранная версия.'
-                : selectedVariantId === 'extended_compressed'
-                  ? 'Compressed ставится последней сборкой из каталога Extended. Выбор конкретной версии для compressed не поддерживается: Prokop при выборе версии переключает на Extended.'
-                  : 'Этот вариант ставится последней версией из пакетного репозитория Prokop/Forkop. Список конкретных версий для него недоступен.'
-            }
-            actions={
-              isSuperadmin && selectedVariantId === 'extended' ? (
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  onClick={() => void refreshSingBoxCatalog()}
-                  busy={busy}
-                >
-                  Обновить каталог
-                </Button>
-              ) : null
-            }
-          >
-            {variants.loading && !variants.data ? (
-              <Spinner />
-            ) : selectedVariantId === 'extended' ? (
-              versions.loading && !versions.data ? (
-                <Spinner />
-              ) : (versions.data?.items.length ?? 0) === 0 ? (
-                <div className="stack">
-                  <Empty>
-                    Каталог пуст. Нажмите «Обновить каталог» или обновите его на странице
-                    sing-box.
-                  </Empty>
-                  <div className="row">
-                    <Button
-                      size="sm"
-                      variant="subtle"
-                      disabled={!canMutate || busy}
-                      onClick={() => selectedVariant && setInstallVariant(selectedVariant)}
-                    >
-                      Установить последнюю Extended
-                    </Button>
-                  </div>
-                </div>
-              ) : (
-                <table className="table">
-                  <thead>
-                    <tr>
-                      <th>Версия</th>
-                      <th>Опубликована</th>
-                      <th>SHA-256</th>
-                      <th />
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {versions.data!.items.slice(0, 20).map((version) => (
-                      <tr key={version.tag}>
-                        <td>
-                          {version.tag}
-                          {version.tag === router.sing_box_version ? (
-                            <span className="muted-text small"> · установлена</span>
-                          ) : null}
-                        </td>
-                        <td className="muted-text small">{formatDate(version.published_at)}</td>
-                        <td className="mono small">{version.asset_sha256?.slice(0, 16) ?? '—'}…</td>
-                        <td>
-                          <Button
-                            size="sm"
-                            variant={version.tag === router.sing_box_version ? 'ghost' : 'primary'}
-                            disabled={!canMutate || version.tag === router.sing_box_version}
-                            onClick={() => setInstallVersion(version)}
-                          >
-                            Установить
-                          </Button>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              )
-            ) : selectedVariantId === 'extended_compressed' ? (
-              <div className="stack">
-                {versions.data?.items[0] ? (
-                  <p className="muted-text small">
-                    Последний релиз Extended в каталоге:{' '}
-                    <strong>{versions.data.items[0].tag}</strong>. Compressed-сборка ставится из
-                    этого релиза.
-                  </p>
-                ) : null}
-                <div className="row">
-                  <Button
-                    size="sm"
-                    variant="subtle"
-                    disabled={!canMutate || busy || selectedVariantActive}
-                    onClick={() => selectedVariant && setInstallVariant(selectedVariant)}
-                  >
-                    {selectedVariantActive
-                      ? 'Установлен'
-                      : `Установить последнюю ${selectedVariant?.label ?? 'compressed'}`}
-                  </Button>
-                </div>
-              </div>
-            ) : selectedVariantId ? (
-              <div className="row">
-                <Button
-                  size="sm"
-                  variant="subtle"
-                  disabled={!canMutate || busy || selectedVariantActive}
-                  onClick={() => selectedVariant && setInstallVariant(selectedVariant)}
-                >
-                  {selectedVariantActive
-                    ? 'Установлен'
-                    : `Установить последнюю ${selectedVariant?.label ?? ''}`}
-                </Button>
-              </div>
-            ) : (
-              <Spinner />
-            )}
-          </Panel>
-        </div>
+        <SingBoxTab
+          router={router}
+          variants={variants}
+          versions={versions}
+          currentVariantId={currentVariantId}
+          selectedVariantId={selectedVariantId}
+          onSelectVariant={setSelectedVariantId}
+          selectedVariant={selectedVariant}
+          selectedVariantActive={selectedVariantActive}
+          busy={busy}
+          canMutate={canMutate}
+          isAdmin={isAdmin}
+          isSuperadmin={isSuperadmin}
+          onCheck={() => void checkSingBox()}
+          onRollback={() => setRollbackOpen(true)}
+          onRefreshCatalog={() => void refreshSingBoxCatalog()}
+          onInstallVariant={setInstallVariant}
+          onInstallVersion={setInstallVersion}
+        />
       ) : null}
 
       {tab === 'jobs' ? <JobsTab jobs={jobs} /> : null}
