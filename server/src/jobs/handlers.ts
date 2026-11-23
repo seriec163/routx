@@ -21,6 +21,7 @@ import {
   type TemplatePayload,
   type UciValue,
 } from '../domain/uci.js';
+import { featureForOp, supportsFeature } from '../agent/features.js';
 import type { PlatformSettings } from '../settings.js';
 import { normalizeTemplateLists } from '../domain/community-lists.js';
 import { resolveRouterSection, syncManagedSection } from '../domain/managed-section.js';
@@ -54,6 +55,8 @@ export interface HandlerContext {
   workerId: string;
   masterKey: string;
   publicUrl: string;
+  /** Отменяется по таймауту задачи; обработчики должны прекращать ожидание. */
+  signal?: AbortSignal;
 }
 
 type Json = Record<string, unknown>;
@@ -101,6 +104,21 @@ async function runCommand(
   timeoutMs?: number,
 ): Promise<Json> {
   const routerId = requireRouter(job);
+  const feature = featureForOp(op);
+  if (feature) {
+    const versionRow = await ctx.pool.query<{ agent_version: string | null }>(
+      'select agent_version from routers where id = $1',
+      [routerId],
+    );
+    const version = versionRow.rows[0]?.agent_version ?? null;
+    if (!supportsFeature(version, feature)) {
+      throw new JobFailure(
+        'agent_outdated',
+        `Агент RoutX${version ? ` ${version}` : ''} не поддерживает ${feature.label}. ` +
+          `Нужна версия ${feature.minVersion} или новее — обновите агент.`,
+      );
+    }
+  }
   const effectiveTimeout = timeoutMs ?? Math.max(15_000, job.timeout_seconds * 1000 - 5_000);
   const command = await createCommand(ctx.pool, {
     routerId,
@@ -114,6 +132,7 @@ async function runCommand(
   const outcome = await waitForCommand(ctx.pool, command.id, {
     timeoutMs: effectiveTimeout,
     isCancelled: () => isCancelRequested(ctx.pool, job.id),
+    signal: ctx.signal,
   });
 
   if (outcome.status === 'cancelled') {
@@ -1751,7 +1770,12 @@ async function runWifiCommand(
   try {
     return await runCommand(ctx, job, op, args, timeoutMs);
   } catch (error) {
-    if (!(error instanceof JobFailure) || error.code !== 'unknown_op') throw error;
+    if (
+      !(error instanceof JobFailure) ||
+      (error.code !== 'unknown_op' && error.code !== 'agent_outdated')
+    ) {
+      throw error;
+    }
   }
 
   // Агент старее 1.5.51 не знает Wi-Fi операций. Обновляем его тем же
@@ -1771,7 +1795,10 @@ async function runWifiCommand(
   try {
     return await runCommand(ctx, job, op, args, timeoutMs);
   } catch (error) {
-    if (error instanceof JobFailure && error.code === 'unknown_op') {
+    if (
+      error instanceof JobFailure &&
+      (error.code === 'unknown_op' || error.code === 'agent_outdated')
+    ) {
       throw new JobFailure(
         'wifi_agent_outdated',
         'Агент RoutX не поддерживает Wi-Fi. Обновите агент до версии 1.5.52.',
