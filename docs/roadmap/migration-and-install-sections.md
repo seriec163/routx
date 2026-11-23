@@ -379,8 +379,10 @@ stderr и итог в `/var/log/routx-agent-update.log`, проверяет ус
 * 2 — добавлен каркас Playwright (`playwright.config.ts`, `e2e/login.spec.ts`,
   `npm run test:e2e`, runbook `docs/runbooks/e2e.md`). В CI не подключён:
   нужен тестовый инстанс и пользователь без 2FA.
-* 3 — общий контракт API (OpenAPI) отложен: требует генератора из Zod-схем,
-  это отдельная задача, а не правка на ходу.
+* 3 — контракт агентского API: схемы вынесены в
+  `server/src/agent/schemas.ts`, `npm run contract:agent` генерирует
+  `docs/architecture/agent-openapi.json`; CI проверяет, что файл не устарел.
+  Общий контракт для пользовательского API (все `/api/v1`) — следующий этап.
 * 4 — добавлен ESLint (`npm run lint`) и шаг в CI; разбиение
   `jobs/handlers.ts` и `routers/routes.ts` на домены — отдельная задача.
 * 5 — архитектура зеркала вынесена в `RC_MIRROR_ARCH`; кэшированные ассеты

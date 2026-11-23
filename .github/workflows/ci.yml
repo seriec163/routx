@@ -61,6 +61,9 @@ jobs:
       - name: Lint
         run: npm run lint
 
+      - name: Agent contract is up to date
+        run: npm run contract:agent && git diff --exit-code -- docs/architecture/agent-openapi.json
+
       - name: Unit tests
         run: npm test
 

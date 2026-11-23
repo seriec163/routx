@@ -26,7 +26,8 @@
     "password-reset": "npm run password-reset -w @routx/server --",
     "rotate-master-key": "npm run rotate-master-key -w @routx/server --",
     "agent:build": "node agent/build.mjs",
-    "verify:agent-flow": "node scripts/fake-agent-check.mjs"
+    "verify:agent-flow": "node scripts/fake-agent-check.mjs",
+    "contract:agent": "tsx scripts/generate-agent-contract.ts"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
