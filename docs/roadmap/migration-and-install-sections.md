@@ -8,6 +8,15 @@
 (`ok: true`), `verify:agent-flow` (bind → probe → refresh → секция `rc_main`),
 Wi-Fi на Офисном (2 радио, 4 сети), агент 1.5.53.
 
+Версии и переключение:
+
+* git-теги `v2.0.0` (4c5b478) и `v2.1.0` (3c057a8), ветки `release/2.0`,
+  `release/2.1`;
+* образы `routx:2.0.0`, `routx:2.1.0`;
+* на сервере — `deploy/switch-version.sh` с проверкой health, версии и схемы БД,
+  автоматическим откатом и историей в `version-history.log`;
+* сборка — `deploy/build-version.sh <version> <source> <sha>`.
+
 Стенд:
 
 * панель A — `root@192.168.2.1`, `/opt/routx`, образ `ghcr.io/seriec163/routx:sha-376a933`,
