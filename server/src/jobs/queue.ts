@@ -31,6 +31,8 @@ export type JobType =
   | 'component_check'
   | 'component_update'
   | 'bulk_update'
+  | 'wifi_read'
+  | 'wifi_update'
   | 'connections_apply'
   | 'list_connections'
   | 'manage_connection'

@@ -1739,8 +1739,26 @@ function componentLabel(component: string): string {
   return component === 'tachyon-core' ? 'ядро Tachyon Core' : 'модуль Tachyon';
 }
 
-export async function componentCheck(ctx: HandlerContext, job: JobRow): Promise<Json> {
-  const routerId = requireRouter(job);
+export async function wifiRead(ctx: HandlerContext, job: JobRow): Promise<Json> {
+  requireRouter(job);
+  return runCommand(ctx, job, 'wifi_read', {}, 60_000);
+}
+
+export async function wifiUpdate(ctx: HandlerContext, job: JobRow): Promise<Json> {
+  requireRouter(job);
+  const iface = asString(job.payload.iface) ?? '';
+  if (!/^[A-Za-z0-9_]{1,64}$/.test(iface)) {
+    throw new JobFailure('invalid_payload', 'Некорректное имя Wi-Fi сети');
+  }
+  const changes = asRecord(job.payload.changes ?? {});
+  if (Object.keys(changes).length === 0) {
+    throw new JobFailure('invalid_payload', 'Нет изменений Wi-Fi');
+  }
+  const raw = await runCommand(ctx, job, 'wifi_update', { iface, changes }, 180_000);
+  return { name: iface, ...raw };
+}
+
+export async function componentCheck(ctx: HandlerContext, job: JobRow): Promise<Json> {  const routerId = requireRouter(job);
   const router = await ctx.pool.query<{ product: string }>(
     'select product from routers where id = $1',
     [routerId],
@@ -2742,6 +2760,8 @@ export const HANDLERS: Record<string, JobHandler> = {
   component_check: componentCheck,
   component_update: componentUpdate,
   bulk_update: bulkUpdate,
+  wifi_read: wifiRead,
+  wifi_update: wifiUpdate,
   dns_benchmark: dnsBenchmark,
   connections_apply: applyRouterConnections,
   list_connections: listConnections,

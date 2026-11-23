@@ -195,6 +195,57 @@ function componentStatusLabel(info: TachyonComponentInfo | undefined): {
   return { status: 'warning', label: info.status || 'неизвестно' };
 }
 
+interface WifiRadio {
+  name: string;
+  type?: string;
+  path?: string;
+  band?: string;
+  channel?: string;
+  htmode?: string;
+  country?: string;
+  txpower?: string;
+  disabled: boolean;
+}
+
+interface WifiInterface {
+  name: string;
+  device: string;
+  mode: string;
+  network: string;
+  ssid: string;
+  encryption: string;
+  key_set: boolean;
+  hidden: boolean;
+  disabled: boolean;
+  isolate: boolean;
+  ifname?: string;
+  wds?: boolean;
+}
+
+interface WifiState {
+  radios: WifiRadio[];
+  interfaces: WifiInterface[];
+}
+
+function wifiEncryptionLabel(value: string): string {
+  switch (value) {
+    case 'none':
+      return 'без пароля';
+    case 'psk':
+      return 'WPA-PSK';
+    case 'psk2':
+      return 'WPA2-PSK';
+    case 'psk-mixed':
+      return 'WPA/WPA2 mixed';
+    case 'sae':
+      return 'WPA3-SAE';
+    case 'sae-mixed':
+      return 'WPA2/WPA3 mixed';
+    default:
+      return value || 'не задано';
+  }
+}
+
 function versionAtLeast(value: string | null | undefined, minimum: string): boolean {
   const parse = (input: string): number[] =>
     input
@@ -676,6 +727,20 @@ export function RouterDetailPage({ id }: { id: string }) {
   const [componentJob, setComponentJob] = useState<Job | null>(null);
   const [componentLog, setComponentLog] = useState('');
   const componentCheckStarted = useRef(false);
+  const [wifi, setWifi] = useState<WifiState | null>(null);
+  const [wifiError, setWifiError] = useState<string | null>(null);
+  const [wifiBusy, setWifiBusy] = useState(false);
+  const [wifiEdit, setWifiEdit] = useState<WifiInterface | null>(null);
+  const [wifiForm, setWifiForm] = useState({
+    ssid: '',
+    encryption: 'none',
+    key: '',
+    hidden: false,
+    disabled: false,
+    isolate: false,
+  });
+  const [wifiSaveBusy, setWifiSaveBusy] = useState(false);
+  const wifiAutoLoaded = useRef(false);
 
   const connections = useApi<{ managed_section: string; items: RouterConnection[] }>(
     tab === 'connections' ? `/api/v1/routers/${id}/connections` : null,
@@ -746,6 +811,13 @@ export function RouterDetailPage({ id }: { id: string }) {
     componentCheckStarted.current = true;
     void runComponentCheck();
   }, [tab, online, router?.product, router?.agent_version]);
+
+  // При открытии настроек сразу читаем Wi-Fi, чтобы показать существующие сети.
+  useEffect(() => {
+    if (tab !== 'settings' || wifiAutoLoaded.current || !online) return;
+    wifiAutoLoaded.current = true;
+    void readWifi();
+  }, [tab, online]);
 
   const routerSectionNames = useMemo(() => {
     const names = new Set<string>();
@@ -1007,6 +1079,99 @@ export function RouterDetailPage({ id }: { id: string }) {
       toast.error(errorMessage(caught));
     } finally {
       setComponentUpdating(null);
+    }
+  }
+
+  async function readWifi(): Promise<void> {
+    if (!router) return;
+    setWifiBusy(true);
+    setWifiError(null);
+    try {
+      const started = await api<{ job: Job }>(`/api/v1/routers/${id}/wifi/read`, {
+        method: 'POST',
+      });
+      const done = await waitJob(started.job, 120_000);
+      if (done.status !== 'success') {
+        throw new Error(done.error?.message ?? `Чтение Wi-Fi завершилось: ${done.status}`);
+      }
+      const result = (done.result ?? {}) as Partial<WifiState>;
+      setWifi({
+        radios: Array.isArray(result.radios) ? result.radios : [],
+        interfaces: Array.isArray(result.interfaces) ? result.interfaces : [],
+      });
+    } catch (caught) {
+      setWifiError(errorMessage(caught));
+    } finally {
+      setWifiBusy(false);
+    }
+  }
+
+  function openWifiEdit(iface: WifiInterface): void {
+    setWifiEdit(iface);
+    setWifiForm({
+      ssid: iface.ssid,
+      encryption: iface.encryption || 'none',
+      key: '',
+      hidden: iface.hidden,
+      disabled: iface.disabled,
+      isolate: iface.isolate,
+    });
+  }
+
+  async function saveWifi(): Promise<void> {
+    if (!wifiEdit) return;
+    const target = wifiEdit;
+    const ssid = wifiForm.ssid.trim();
+    if (!ssid) {
+      toast.error('Укажите SSID');
+      return;
+    }
+    if (ssid.length > 32) {
+      toast.error('SSID не может быть длиннее 32 символов');
+      return;
+    }
+    const newKey = wifiForm.key.trim();
+    if (wifiForm.encryption !== 'none' && newKey && newKey.length < 8) {
+      toast.error('Пароль Wi-Fi должен быть не короче 8 символов');
+      return;
+    }
+    if (wifiForm.encryption !== 'none' && !target.key_set && !newKey) {
+      toast.error('Для защищённой сети задайте пароль');
+      return;
+    }
+
+    const changes: Record<string, unknown> = {};
+    if (ssid !== target.ssid) changes.ssid = ssid;
+    if (wifiForm.encryption !== target.encryption) changes.encryption = wifiForm.encryption;
+    if (wifiForm.encryption !== 'none' && newKey) changes.key = newKey;
+    if (wifiForm.hidden !== target.hidden) changes.hidden = wifiForm.hidden;
+    if (wifiForm.disabled !== target.disabled) changes.disabled = wifiForm.disabled;
+    if (wifiForm.isolate !== target.isolate) changes.isolate = wifiForm.isolate;
+    if (Object.keys(changes).length === 0) {
+      setWifiEdit(null);
+      return;
+    }
+
+    setWifiSaveBusy(true);
+    try {
+      const started = await api<{ job: Job }>(`/api/v1/routers/${id}/wifi/${target.name}`, {
+        method: 'PUT',
+        body: changes,
+      });
+      const done = await waitJob(started.job, 300_000);
+      if (done.status !== 'success') {
+        throw new Error(done.error?.message ?? `Сохранение Wi-Fi завершилось: ${done.status}`);
+      }
+      toast.success('Настройки Wi-Fi сохранены');
+      setWifiEdit(null);
+      setWifi(null);
+      await new Promise((resolve) => window.setTimeout(resolve, 3000));
+      await readWifi();
+      void detail.reload();
+    } catch (caught) {
+      toast.error(errorMessage(caught));
+    } finally {
+      setWifiSaveBusy(false);
     }
   }
 
@@ -2974,8 +3139,107 @@ export function RouterDetailPage({ id }: { id: string }) {
       ) : null}
 
       {tab === 'settings' ? (
-        <div className="grid-2">
-          <div className="stack">
+        <div className="stack">
+          <Panel
+            title="Wi-Fi сети"
+            subtitle="Сети читаются через агент из /etc/config/wireless. Текущие пароли не показываются: можно задать новый пароль или оставить поле пустым."
+            actions={
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={() => void readWifi()}
+                busy={wifiBusy}
+                disabled={!online}
+              >
+                Прочитать Wi-Fi
+              </Button>
+            }
+          >
+            {wifiError ? <ErrorBanner message={wifiError} /> : null}
+            {wifiBusy && !wifi ? <Spinner label="Читаем Wi-Fi…" /> : null}
+            {!wifi && !wifiBusy ? (
+              <Empty>
+                {online
+                  ? 'Нажмите «Прочитать Wi-Fi», чтобы загрузить существующие сети.'
+                  : 'Роутер не в сети — Wi-Fi можно прочитать после подключения.'}
+              </Empty>
+            ) : null}
+            {wifi ? (
+              <div className="stack">
+                {wifi.interfaces.length === 0 ? (
+                  <Empty>Wi-Fi сети не найдены.</Empty>
+                ) : (
+                  wifi.interfaces.map((iface) => {
+                    const radio = wifi.radios.find((item) => item.name === iface.device);
+                    return (
+                      <div
+                        key={iface.name}
+                        style={{
+                          border: '1px solid var(--line, rgba(120,90,120,.16))',
+                          borderRadius: 12,
+                          padding: 12,
+                        }}
+                      >
+                        <div
+                          style={{
+                            display: 'flex',
+                            justifyContent: 'space-between',
+                            gap: 12,
+                            alignItems: 'flex-start',
+                            flexWrap: 'wrap',
+                          }}
+                        >
+                          <div>
+                            <strong>{iface.ssid || '(без SSID)'}</strong>
+                            <div className="muted-text small">
+                              {iface.name} · {iface.device}
+                              {radio?.band ? ` · ${radio.band}` : ''} · {iface.mode} ·{' '}
+                              {iface.network || '—'} · {wifiEncryptionLabel(iface.encryption)}
+                              {iface.key_set ? ' · пароль задан' : ''}
+                            </div>
+                          </div>
+                          <div className="row">
+                            {iface.hidden ? (
+                              <StatusBadge status="warning" label="скрытая" />
+                            ) : null}
+                            {iface.disabled ? (
+                              <StatusBadge status="offline" label="отключена" />
+                            ) : null}
+                            {radio?.disabled ? (
+                              <StatusBadge status="offline" label="радио off" />
+                            ) : null}
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              onClick={() => openWifiEdit(iface)}
+                            >
+                              Изменить
+                            </Button>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })
+                )}
+                {wifi.radios.length > 0 ? (
+                  <p className="muted-text small">
+                    Радиомодули:{' '}
+                    {wifi.radios
+                      .map(
+                        (radio) =>
+                          `${radio.name}${radio.band ? ` (${radio.band})` : ''}${
+                            radio.disabled ? ' — off' : ''
+                          }`,
+                      )
+                      .join(' · ')}
+                  </p>
+                ) : null}
+              </div>
+            ) : null}
+          </Panel>
+
+          <div className="grid-2">
+            <div className="stack">
             <Panel title="Имя и мониторинг">
               <div className="kv">
                 <span>Текущее имя</span>
@@ -3059,6 +3323,118 @@ export function RouterDetailPage({ id }: { id: string }) {
             </Panel>
           </div>
         </div>
+        </div>
+      ) : null}
+
+      {wifiEdit ? (
+        <Modal
+          title={`Wi-Fi: ${wifiEdit.ssid || wifiEdit.name}`}
+          onClose={() => setWifiEdit(null)}
+          footer={
+            <>
+              <Button
+                variant="ghost"
+                onClick={() => setWifiEdit(null)}
+                disabled={wifiSaveBusy}
+              >
+                Отмена
+              </Button>
+              <Button onClick={() => void saveWifi()} busy={wifiSaveBusy} disabled={wifiSaveBusy}>
+                Сохранить
+              </Button>
+            </>
+          }
+        >
+          <InfoBanner tone="warn">
+            Сохранение SSID или пароля перезапустит Wi-Fi: подключённые клиенты отключатся. Если
+            панель открыта по Wi-Fi, связь с ней может прерваться — лучше управлять настройками по
+            кабелю.
+          </InfoBanner>
+          <div className="kv">
+            <span>Сеть</span>
+            <strong>{wifiEdit.name}</strong>
+            <span>Устройство</span>
+            <strong>{wifiEdit.device || '—'}</strong>
+            <span>Режим</span>
+            <strong>{wifiEdit.mode}</strong>
+            <span>Интерфейс</span>
+            <strong>{wifiEdit.network || '—'}</strong>
+            <span>Текущий пароль</span>
+            <strong>{wifiEdit.key_set ? 'задан' : 'не задан'}</strong>
+          </div>
+          <Field label="SSID" hint="Имя Wi-Fi сети, до 32 символов.">
+            <TextInput
+              value={wifiForm.ssid}
+              onChange={(value) => setWifiForm((current) => ({ ...current, ssid: value }))}
+              placeholder="Home Wi-Fi"
+              required
+            />
+          </Field>
+          <Field label="Шифрование">
+            <Select
+              value={wifiForm.encryption}
+              onChange={(value) =>
+                setWifiForm((current) => ({ ...current, encryption: value }))
+              }
+            >
+              <option value="none">Без пароля</option>
+              <option value="psk2">WPA2-PSK</option>
+              <option value="psk-mixed">WPA/WPA2 mixed</option>
+              <option value="sae">WPA3-SAE</option>
+              <option value="sae-mixed">WPA2/WPA3 mixed</option>
+            </Select>
+          </Field>
+          {wifiForm.encryption !== 'none' ? (
+            <Field
+              label="Новый пароль"
+              hint={
+                wifiEdit.key_set
+                  ? 'Пароль уже задан. Оставьте поле пустым, чтобы не менять.'
+                  : 'Для защищённой сети пароль обязателен, не короче 8 символов.'
+              }
+            >
+              <TextInput
+                type="password"
+                value={wifiForm.key}
+                onChange={(value) => setWifiForm((current) => ({ ...current, key: value }))}
+                placeholder="Оставьте пустым, чтобы не менять"
+                autoComplete="new-password"
+              />
+            </Field>
+          ) : null}
+          <div className="stack">
+            <label className="check-row">
+              <input
+                type="checkbox"
+                checked={wifiForm.hidden}
+                onChange={(event) =>
+                  setWifiForm((current) => ({ ...current, hidden: event.target.checked }))
+                }
+              />
+              <span>Скрытая сеть (не показывать SSID)</span>
+            </label>
+            <label className="check-row">
+              <input
+                type="checkbox"
+                checked={wifiForm.disabled}
+                onChange={(event) =>
+                  setWifiForm((current) => ({ ...current, disabled: event.target.checked }))
+                }
+              />
+              <span>Отключить эту Wi-Fi сеть</span>
+            </label>
+            <label className="check-row">
+              <input
+                type="checkbox"
+                checked={wifiForm.isolate}
+                onChange={(event) =>
+                  setWifiForm((current) => ({ ...current, isolate: event.target.checked }))
+                }
+              />
+              <span>Изолировать клиентов друг от друга</span>
+            </label>
+          </div>
+        </Modal>
       ) : null}
 
       {connectionOpen ? (

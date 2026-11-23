@@ -13,6 +13,7 @@ const monitor = require("jn_monitor");
 const self_update = require("jn_self_update");
 const dns_benchmark = require("jn_dns_benchmark");
 const components = require("jn_components");
+const wifi = require("jn_wifi");
 const runner = require("jn_run");
 
 function handle_command(cmd) {
@@ -68,6 +69,15 @@ function handle_command(cmd) {
 			let res = components.handle(args);
 			if (!res.ok)
 				return { status: "failed", error: { code: "component_action_failed", message: util.as_string(res.error) } };
+			return { status: "success", result: res };
+		}
+		if (op == "wifi_read") {
+			return { status: "success", result: wifi.read() };
+		}
+		if (op == "wifi_update") {
+			let res = wifi.update(args.iface, args.changes);
+			if (!res.ok)
+				return { status: "failed", error: { code: "wifi_update_failed", message: util.as_string(res.error) } };
 			return { status: "success", result: res };
 		}
 		if (op == "reload") {

@@ -18,6 +18,7 @@ export const MUTATING_OPS = new Set([
   'sb_install',
   'product_switch',
   'component_action',
+  'wifi_update',
 ]);
 
 export const READ_OPS = new Set([
