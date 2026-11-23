@@ -73,6 +73,7 @@ const app = await buildApp({
     vapidPublicKey: config.RC_VAPID_PUBLIC_KEY,
     vapidPrivateKey: config.RC_VAPID_PRIVATE_KEY,
     vapidSubject: config.RC_VAPID_SUBJECT,
+    metricsToken: config.RC_METRICS_TOKEN,
   },
 });
 

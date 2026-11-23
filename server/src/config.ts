@@ -53,6 +53,7 @@ const schema = z.object({
   RC_VAPID_PUBLIC_KEY: z.string().optional(),
   RC_VAPID_PRIVATE_KEY: z.string().optional(),
   RC_VAPID_SUBJECT: z.string().optional(),
+  RC_METRICS_TOKEN: z.string().min(16).optional(),
 });
 
 export type Config = z.infer<typeof schema> & {

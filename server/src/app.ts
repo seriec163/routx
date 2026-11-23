@@ -40,6 +40,7 @@ import { registerUpdateRoutes } from './updates/routes.js';
 import { registerAuditRoutes } from './audit/routes.js';
 import { registerAgentRoutes } from './agent/routes.js';
 import { registerDeployRoutes } from './deploy/routes.js';
+import { registerMetricsRoute } from './metrics.js';
 import { getMaintenance } from './deploy/state.js';
 import { initPushService } from './push.js';
 import { registerPushRoutes } from './push/routes.js';
@@ -56,6 +57,7 @@ export interface AppRuntimeConfig {
   migrationsDir?: string;
   databaseUrl?: string;
   cookieSecureRaw?: string;
+  metricsToken?: string;
   vapidPublicKey?: string;
   vapidPrivateKey?: string;
   vapidSubject?: string;
@@ -342,6 +344,12 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
       appVersion: APP_VERSION,
       migrationsDir: config.migrationsDir ?? path.resolve(process.cwd(), 'server', 'migrations'),
       log: app.log,
+    });
+
+    registerMetricsRoute(app, {
+      pool,
+      dataDir: config.dataDir ?? '/app/data',
+      token: config.metricsToken,
     });
     (global as any).__RC_AGENT_DIST = (deps as any).agentDist || process.env.RC_AGENT_DIST || null;
     await registerAgentRoutes(app, {

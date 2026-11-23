@@ -5,6 +5,16 @@ services:
   db:
     image: postgres:16-alpine
     restart: unless-stopped
+    command:
+      - postgres
+      - -c
+      - shared_buffers=${RC_DB_SHARED_BUFFERS:-64MB}
+      - -c
+      - work_mem=${RC_DB_WORK_MEM:-4MB}
+      - -c
+      - max_connections=${RC_DB_MAX_CONNECTIONS:-50}
+    mem_limit: ${RC_DB_MEM_LIMIT:-512m}
+    cpus: ${RC_DB_CPUS:-1.0}
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-router_control}
       POSTGRES_USER: ${POSTGRES_USER:-router_control}
@@ -25,6 +35,8 @@ services:
 
   app:
     image: ${ROUTX_IMAGE:-ghcr.io/seriec163/routx:latest}
+    mem_limit: ${RC_APP_MEM_LIMIT:-768m}
+    cpus: ${RC_APP_CPUS:-2.0}
     build:
       context: .
       dockerfile: Dockerfile
@@ -52,6 +64,7 @@ services:
       RC_JOBS_PAUSED: ${RC_JOBS_PAUSED:-false}
       RC_WORKER_CONCURRENCY: ${RC_WORKER_CONCURRENCY:-2}
       RC_QUEUED_JOB_TTL_DAYS: ${RC_QUEUED_JOB_TTL_DAYS:-7}
+      RC_METRICS_TOKEN: ${RC_METRICS_TOKEN:-}
     ports:
       - "${RC_BIND_ADDR:-127.0.0.1}:${RC_PORT:-3000}:3000"
     volumes:
@@ -80,6 +93,8 @@ services:
     image: caddy:2-alpine
     profiles: ["proxy"]
     restart: unless-stopped
+    mem_limit: ${RC_CADDY_MEM_LIMIT:-128m}
+    cpus: ${RC_CADDY_CPUS:-0.5}
     depends_on:
       app:
         condition: service_healthy
