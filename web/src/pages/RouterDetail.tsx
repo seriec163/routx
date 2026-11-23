@@ -227,6 +227,14 @@ interface WifiState {
   interfaces: WifiInterface[];
 }
 
+const WIFI_KEY_ENCRYPTIONS = new Set([
+  'psk',
+  'psk2',
+  'psk-mixed',
+  'sae',
+  'sae-mixed',
+]);
+
 function wifiEncryptionLabel(value: string): string {
   switch (value) {
     case 'none':
@@ -1131,11 +1139,12 @@ export function RouterDetailPage({ id }: { id: string }) {
       return;
     }
     const newKey = wifiForm.key.trim();
-    if (wifiForm.encryption !== 'none' && newKey && newKey.length < 8) {
+    const needsKey = WIFI_KEY_ENCRYPTIONS.has(wifiForm.encryption);
+    if (needsKey && newKey && newKey.length < 8) {
       toast.error('Пароль Wi-Fi должен быть не короче 8 символов');
       return;
     }
-    if (wifiForm.encryption !== 'none' && !target.key_set && !newKey) {
+    if (needsKey && !target.key_set && !newKey) {
       toast.error('Для защищённой сети задайте пароль');
       return;
     }
@@ -1143,7 +1152,9 @@ export function RouterDetailPage({ id }: { id: string }) {
     const changes: Record<string, unknown> = {};
     if (ssid !== target.ssid) changes.ssid = ssid;
     if (wifiForm.encryption !== target.encryption) changes.encryption = wifiForm.encryption;
-    if (wifiForm.encryption !== 'none' && newKey) changes.key = newKey;
+    if (wifiForm.encryption !== 'none' && wifiForm.encryption !== 'owe' && newKey) {
+      changes.key = newKey;
+    }
     if (wifiForm.hidden !== target.hidden) changes.hidden = wifiForm.hidden;
     if (wifiForm.disabled !== target.disabled) changes.disabled = wifiForm.disabled;
     if (wifiForm.isolate !== target.isolate) changes.isolate = wifiForm.isolate;
@@ -3378,13 +3389,26 @@ export function RouterDetailPage({ id }: { id: string }) {
               }
             >
               <option value="none">Без пароля</option>
+              <option value="owe">OWE — шифрование без пароля</option>
+              <option value="psk">WPA-PSK</option>
               <option value="psk2">WPA2-PSK</option>
               <option value="psk-mixed">WPA/WPA2 mixed</option>
               <option value="sae">WPA3-SAE</option>
               <option value="sae-mixed">WPA2/WPA3 mixed</option>
+              {![
+                'none',
+                'owe',
+                'psk',
+                'psk2',
+                'psk-mixed',
+                'sae',
+                'sae-mixed',
+              ].includes(wifiForm.encryption) ? (
+                <option value={wifiForm.encryption}>{wifiForm.encryption}</option>
+              ) : null}
             </Select>
           </Field>
-          {wifiForm.encryption !== 'none' ? (
+          {wifiForm.encryption !== 'none' && wifiForm.encryption !== 'owe' ? (
             <Field
               label="Новый пароль"
               hint={

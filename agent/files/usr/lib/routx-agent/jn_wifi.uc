@@ -9,8 +9,13 @@ const run = require("jn_run");
 const CONFIG = "wireless";
 const BACKUP_DIR = "/etc/routx-agent/wireless-backups";
 const ENCRYPTIONS = [
-	"none", "psk", "psk2", "psk-mixed", "sae", "sae-mixed"
+	"none", "owe", "psk", "psk2", "psk-mixed", "sae", "sae-mixed"
 ];
+const KEY_ENCRYPTIONS = [ "psk", "psk2", "psk-mixed", "sae", "sae-mixed" ];
+
+function needs_key(encryption) {
+	return index(KEY_ENCRYPTIONS, encryption) >= 0;
+}
 
 function as_string(value) {
 	return util.as_string(value);
@@ -141,14 +146,14 @@ function update(iface, changes) {
 	}
 
 	if (type(changes.key) == "string" && as_string(changes.key) != "") {
-		if (encryption == "none")
+		if (!needs_key(encryption))
 			return { ok: false, error: "Для открытой сети пароль не нужен" };
 		if (!valid_key(changes.key))
 			return { ok: false, error: "Пароль Wi-Fi должен быть от 8 до 63 символов или 64 hex" };
 	}
 
 	let new_key = type(changes.key) == "string" ? as_string(changes.key) : "";
-	if (encryption != "none" && new_key == "" && !current.key_set)
+	if (needs_key(encryption) && new_key == "" && !current.key_set)
 		return { ok: false, error: "Для защищённой сети нужен пароль" };
 
 	let backup_error = "";
@@ -166,7 +171,7 @@ function update(iface, changes) {
 		cursor.set(CONFIG, name, "encryption", encryption);
 		push(changed, "encryption");
 	}
-	if (encryption == "none") {
+	if (encryption == "none" || encryption == "owe") {
 		cursor.delete(CONFIG, name, "key");
 		push(changed, "key");
 	} else if (type(changes.key) == "string" && as_string(changes.key) != "") {

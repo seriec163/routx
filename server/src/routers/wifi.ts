@@ -16,7 +16,7 @@ const changesSchema = z
   .object({
     ssid: z.string().trim().min(1).max(32).optional(),
     encryption: z
-      .enum(['none', 'psk', 'psk2', 'psk-mixed', 'sae', 'sae-mixed'])
+      .enum(['none', 'owe', 'psk', 'psk2', 'psk-mixed', 'sae', 'sae-mixed'])
       .optional(),
     key: z.string().min(1).max(64).optional(),
     hidden: z.boolean().optional(),
