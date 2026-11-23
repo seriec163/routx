@@ -38,6 +38,23 @@ export function requireRouter(job: JobRow): string {
   return job.router_id;
 }
 
+/**
+ * Prokop возвращает в лог понятную причину, но CLI-ответ при reload может быть
+ * просто JSON. Добавляем подсказку для самых частых случаев.
+ */
+export function prokopReloadHint(message: string): string {
+  if (/no enabled sections/i.test(message)) {
+    return `${message}. В Prokop не осталось ни одного включённого правила: включите другое правило или добавьте источник подключения.`;
+  }
+  if (/has no connection/i.test(message)) {
+    return `${message}. У правила «через VPN» нет источника подключения: добавьте подписку или VLESS-ссылку.`;
+  }
+  if (/reload_failed|config/i.test(message) && message.trim().startsWith('{')) {
+    return `${message}. Prokop не перезагрузил конфигурацию: проверьте, что осталось включённое правило с источником подключения.`;
+  }
+  return message;
+}
+
 export async function runCommand(
   ctx: HandlerContext,
   job: JobRow,
