@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [main, routx-2.0, 'release/**']
   pull_request:
 
 permissions:
@@ -17,7 +17,6 @@ jobs:
     name: typecheck / test / build / migrate / image
     runs-on: ubuntu-latest
     timeout-minutes: 20
-
     services:
       postgres:
         image: postgres:16-alpine
@@ -119,3 +118,89 @@ jobs:
             if (!html.includes("<div id=\"root\">")) throw new Error("SPA");
             console.log("runtime smoke test: ok");
           '
+
+  e2e:
+    name: Playwright + agent flow
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: router_control
+          POSTGRES_USER: router_control
+          POSTGRES_PASSWORD: router_control_ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U router_control -d router_control"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      NODE_ENV: test
+      DATABASE_URL: postgres://router_control:router_control_ci@127.0.0.1:5432/router_control
+      RC_MASTER_KEY: ci-master-key-0123456789abcdef0123456789abcdef
+      RC_DATA_DIR: ${{ github.workspace }}/.ci-data
+      RC_PUBLIC_URL: http://127.0.0.1:3000
+      RC_COOKIE_SECURE: 'false'
+      RC_PACKAGE_SYNC: 'false'
+      POSTGRES_PASSWORD: router_control_ci
+      LOG_LEVEL: warn
+      CI_ADMIN_EMAIL: ci@example.com
+      CI_ADMIN_PASSWORD: 'Ci-Password-2026!'
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Node.js 24
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install
+        run: npm ci
+
+      - name: Build
+        run: npm run build
+
+      - name: Apply migrations
+        run: npm run db:migrate
+
+      - name: Bootstrap admin
+        run: npm run bootstrap -- "$CI_ADMIN_EMAIL" "$CI_ADMIN_PASSWORD"
+
+      - name: Install Playwright browser
+        run: npx playwright install --with-deps chromium
+
+      - name: Start server
+        run: |
+          mkdir -p .ci-data
+          node server/dist/index.js > /tmp/routx-ci.log 2>&1 &
+          for _ in $(seq 1 40); do
+            if curl -fsS http://127.0.0.1:3000/readyz >/dev/null; then
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "Сервер не стал ready" >&2
+          cat /tmp/routx-ci.log >&2
+          exit 1
+
+      - name: Playwright smoke
+        run: npm run test:e2e
+
+      - name: Agent install flow
+        run: npm run verify:agent-flow
+        env:
+          ROUTX_URL: http://127.0.0.1:3000
+          ROUTX_EMAIL: ${{ env.CI_ADMIN_EMAIL }}
+          ROUTX_PASSWORD: ${{ env.CI_ADMIN_PASSWORD }}
+
+      - name: Server log on failure
+        if: failure()
+        run: tail -200 /tmp/routx-ci.log
