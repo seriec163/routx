@@ -84,6 +84,7 @@ const worker = new JobWorker({
   masterKey,
   publicUrl: config.RC_PUBLIC_URL,
   paused: config.RC_JOBS_PAUSED,
+  concurrency: config.RC_WORKER_CONCURRENCY,
 });
 worker.start();
 

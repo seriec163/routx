@@ -12,6 +12,7 @@ describe('конфигурация', () => {
       MIGRATE_ON_START: false,
       TRUST_PROXY: false,
       RC_JOBS_PAUSED: false,
+      RC_WORKER_CONCURRENCY: 2,
       LOG_LEVEL: 'info',
       isProduction: false,
     });

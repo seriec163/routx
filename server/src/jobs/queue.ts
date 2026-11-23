@@ -166,8 +166,8 @@ export async function claimJob(
   const client = await pool.connect();
   try {
     await client.query('begin');
-    const candidate = await client.query<{ id: string }>(
-      `select j.id
+    const candidate = await client.query<{ id: string; router_id: string | null; type: JobType }>(
+      `select j.id, j.router_id, j.type
          from jobs j
         where j.status = 'queued'
           and j.scheduled_at <= now()
@@ -198,10 +198,29 @@ export async function claimJob(
         for update skip locked`,
     );
 
-    const id = candidate.rows[0]?.id;
+    const picked = candidate.rows[0];
+    const id = picked?.id;
     if (!id) {
       await client.query('commit');
       return null;
+    }
+
+    // Несколько воркеров могут одновременно увидеть одну и ту же свободную
+    // задачу роутера до того, как первый пометит её running. Блокировка строки
+    // роутера сериализует такие захваты: второй воркер дождётся коммита
+    // первого и увидит running-задачу.
+    if (picked.router_id && picked.type !== 'monitor') {
+      await client.query('select id from routers where id = $1 for update', [picked.router_id]);
+      const running = await client.query<{ id: string }>(
+        `select id from jobs
+          where router_id = $1 and status = 'running' and type <> 'monitor' and id <> $2
+          limit 1`,
+        [picked.router_id, id],
+      );
+      if (running.rows[0]) {
+        await client.query('commit');
+        return null;
+      }
     }
 
     const claimed = await client.query<JobRow>(
@@ -346,33 +365,86 @@ export async function timeoutStaleJobs(pool: Pool): Promise<number> {
  * проверил состояние и при необходимости восстановил снимок.
  */
 export async function recoverOrphanedJobs(pool: Pool, currentWorkerId: string): Promise<number> {
-  const result = await pool.query<{ id: string }>(
-    `update jobs
-        set status = 'timeout', finished_at = now(),
-            error_code = 'orphaned_after_restart',
-            error_detail = 'Сервер перезапущен во время выполнения задачи; проверьте состояние роутера и при необходимости восстановите снимок',
-            lease_owner = null, lease_expires_at = null
+  const running = await pool.query<{ id: string; type: JobType }>(
+    `select id, type
+       from jobs
       where status = 'running'
-        and (lease_owner is null or lease_owner <> $1)
-      returning id`,
+        and (lease_owner is null or lease_owner <> $1)`,
     [currentWorkerId],
   );
-  const ids = (result.rows as { id: string }[]).map((row) => row.id);
-  for (const id of ids) {
-    await addJobEvent(
+  const ids = running.rows.map((row) => row.id);
+  if (ids.length === 0) return 0;
+
+  // Безопасные (только чтение) задачи после рестарта просто возвращаем в
+  // очередь: их повтор ничего не ломает, а иначе мониторинг простаивает до
+  // следующего тика. Изменяющие задачи не перезапускаем автоматически.
+  const readOnly = new Set<JobType>([
+    'precheck',
+    'refresh_state',
+    'diff',
+    'diff_custom',
+    'diff_podkop',
+    'read_rules',
+    'monitor',
+    'access_check',
+    'site_check',
+    'sb_check',
+    'sb_versions',
+    'component_check',
+    'wifi_read',
+    'list_connections',
+  ]);
+  const requeueIds = running.rows.filter((row) => readOnly.has(row.type)).map((row) => row.id);
+  const timeoutIds = running.rows.filter((row) => !readOnly.has(row.type)).map((row) => row.id);
+
+  if (requeueIds.length > 0) {
+    await pool.query(
+      `update jobs
+          set status = 'queued', started_at = null, finished_at = null,
+              lease_owner = null, lease_expires_at = null,
+              attempt = greatest(attempt - 1, 0),
+              scheduled_at = now(), next_retry_at = null,
+              error_code = null, error_detail = null
+        where id = any($1::uuid[])`,
+      [requeueIds],
+    );
+    for (const id of requeueIds) {
+      await addJobEvent(
+        pool,
+        id,
+        'queued',
+        'requeued_after_restart',
+        'Панель перезапустилась: задача возвращена в очередь',
+      );
+    }
+  }
+
+  if (timeoutIds.length > 0) {
+    await pool.query(
+      `update jobs
+          set status = 'timeout', finished_at = now(),
+              error_code = 'orphaned_after_restart',
+              error_detail = 'Сервер перезапущен во время выполнения задачи; проверьте состояние роутера и при необходимости восстановите снимок',
+              lease_owner = null, lease_expires_at = null
+        where id = any($1::uuid[])`,
+      [timeoutIds],
+    );
+    for (const id of timeoutIds) {
+      await addJobEvent(
+        pool,
+        id,
+        'timeout',
+        'orphaned_after_restart',
+        'Сервер перезапущен во время выполнения задачи',
+      );
+    }
+    await markDependentState(
       pool,
-      id,
-      'timeout',
+      timeoutIds,
       'orphaned_after_restart',
-      'Сервер перезапущен во время выполнения задачи',
+      'Сервер перезапущен во время выполнения задачи; проверьте состояние роутера и при необходимости восстановите снимок',
     );
   }
-  await markDependentState(
-    pool,
-    ids,
-    'orphaned_after_restart',
-    'Сервер перезапущен во время выполнения задачи; проверьте состояние роутера и при необходимости восстановите снимок',
-  );
   return ids.length;
 }
 

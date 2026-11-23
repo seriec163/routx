@@ -52,6 +52,7 @@ services:
       TRUST_PROXY: ${TRUST_PROXY:-false}
       RC_PACKAGE_SYNC: ${RC_PACKAGE_SYNC:-true}
       RC_JOBS_PAUSED: ${RC_JOBS_PAUSED:-false}
+      RC_WORKER_CONCURRENCY: ${RC_WORKER_CONCURRENCY:-2}
     ports:
       # Только loopback: снаружи панель доступна через Caddy по HTTPS.
       - "127.0.0.1:3000:3000"

@@ -34,6 +34,7 @@ const schema = z.object({
   RC_DATA_DIR: z.string().optional(),
   RC_PACKAGE_SYNC: booleanFromEnv.default(true),
   RC_JOBS_PAUSED: booleanFromEnv.default(false),
+  RC_WORKER_CONCURRENCY: z.coerce.number().int().min(1).max(8).default(2),
   WEB_DIST: z.string().optional(),
   MIGRATIONS_DIR: z.string().optional(),
   MIGRATE_ON_START: booleanFromEnv.default(false),

@@ -27,6 +27,8 @@ export interface WorkerOptions {
   publicUrl: string;
   /** Не забирать задачи и не планировать мониторинг (переезд, обслуживание). */
   paused?: boolean;
+  /** Сколько задач обрабатывать параллельно (1–8). */
+  concurrency?: number;
 }
 
 /** Фоновый исполнитель задач: один цикл забирает одну задачу. */
@@ -40,8 +42,10 @@ export class JobWorker {
   private readonly masterKey: string;
   private readonly publicUrl: string;
   private readonly paused: boolean;
+  private readonly concurrency: number;
   private stopped = false;
-  private loopPromise: Promise<void> | null = null;
+  private loopPromises: Promise<void>[] = [];
+  private recovery: Promise<void> | null = null;
   private schedulerTimer: NodeJS.Timeout | null = null;
   private maintenanceTimer: NodeJS.Timeout | null = null;
 
@@ -55,6 +59,7 @@ export class JobWorker {
     this.masterKey = options.masterKey;
     this.publicUrl = options.publicUrl;
     this.paused = options.paused ?? false;
+    this.concurrency = Math.min(8, Math.max(1, options.concurrency ?? 1));
   }
 
   updateSettings(settings: PlatformSettings): void {
@@ -62,7 +67,7 @@ export class JobWorker {
   }
 
   start(): void {
-    if (this.loopPromise) return;
+    if (this.loopPromises.length > 0) return;
     if (this.paused) {
       // Источник миграции: агенты уже смотрят на новый инстанс, и старый не
       // должен ни забирать задачи, ни помечать роутеры offline.
@@ -73,7 +78,7 @@ export class JobWorker {
       return;
     }
     this.stopped = false;
-    this.loopPromise = this.startLoop();
+    this.loopPromises = Array.from({ length: this.concurrency }, () => this.startLoop());
     this.schedulerTimer = setInterval(() => {
       void this.scheduleMonitoring().catch((error) =>
         this.log.warn({ err: error }, 'не удалось запланировать мониторинг'),
@@ -87,10 +92,21 @@ export class JobWorker {
 
     void this.scheduleMonitoring().catch(() => undefined);
     void this.maintenance().catch(() => undefined);
-    this.log.info({ worker: this.workerId }, 'исполнитель задач запущен');
+    this.log.info(
+      { worker: this.workerId, concurrency: this.concurrency },
+      'исполнитель задач запущен',
+    );
   }
 
   private async startLoop(): Promise<void> {
+    // Восстановление выполняется один раз, до того как любой цикл начнёт
+    // забирать задачи.
+    this.recovery ??= this.recoverAfterRestart();
+    await this.recovery;
+    await this.loop();
+  }
+
+  private async recoverAfterRestart(): Promise<void> {
     // Сначала освобождаем очередь от задач предыдущего процесса: иначе после
     // рестарта роутер ждёт истечения lease до 10 минут.
     try {
@@ -98,13 +114,12 @@ export class JobWorker {
       if (recovered > 0) {
         this.log.warn(
           { count: recovered, worker: this.workerId },
-          'завершены задачи, оставшиеся от предыдущего процесса сервера',
+          'завершены или возвращены в очередь задачи предыдущего процесса',
         );
       }
     } catch (error) {
       this.log.error({ err: error }, 'не удалось восстановить задачи после рестарта');
     }
-    await this.loop();
   }
 
   async stop(): Promise<void> {
@@ -113,8 +128,9 @@ export class JobWorker {
     if (this.maintenanceTimer) clearInterval(this.maintenanceTimer);
     this.schedulerTimer = null;
     this.maintenanceTimer = null;
-    await this.loopPromise;
-    this.loopPromise = null;
+    await Promise.all(this.loopPromises);
+    this.loopPromises = [];
+    this.recovery = null;
   }
 
   private async loop(): Promise<void> {
@@ -145,6 +161,7 @@ export class JobWorker {
       return;
     }
 
+    const controller = new AbortController();
     const context: HandlerContext = {
       pool: this.pool,
       settings: this.settings,
@@ -152,6 +169,7 @@ export class JobWorker {
       workerId: this.workerId,
       masterKey: this.masterKey,
       publicUrl: this.publicUrl,
+      signal: controller.signal,
     };
 
     const renew = setInterval(() => {
@@ -164,6 +182,7 @@ export class JobWorker {
       const result = await withTimeout(
         handler(context, job),
         Math.max(10_000, job.timeout_seconds * 1000),
+        controller,
       );
       await finishJob(this.pool, job.id, 'success', result);
       this.log.info({ job: job.id, type: job.type }, 'задача завершена');
@@ -334,9 +353,16 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
+function withTimeout<T>(
+  promise: Promise<T>,
+  ms: number,
+  controller?: AbortController,
+): Promise<T> {
   return new Promise<T>((resolve, reject) => {
     const timer = setTimeout(() => {
+      // Обработчик должен увидеть отмену и перестать опрашивать агента,
+      // иначе после таймаута он продолжит менять состояние «в фоне».
+      controller?.abort();
       reject(new JobFailure('job_timeout', 'Задача превысила допустимое время выполнения', 'timeout'));
     }, ms);
     promise.then(

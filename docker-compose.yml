@@ -50,6 +50,7 @@ services:
       RC_PACKAGE_SYNC: ${RC_PACKAGE_SYNC:-true}
       # true — не забирать задачи и не планировать мониторинг (переезд/обслуживание).
       RC_JOBS_PAUSED: ${RC_JOBS_PAUSED:-false}
+      RC_WORKER_CONCURRENCY: ${RC_WORKER_CONCURRENCY:-2}
     ports:
       - "${RC_BIND_ADDR:-127.0.0.1}:${RC_PORT:-3000}:3000"
     volumes:

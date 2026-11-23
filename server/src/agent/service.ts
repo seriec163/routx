@@ -213,11 +213,18 @@ export interface CommandOutcome {
 export async function waitForCommand(
   pool: Pool,
   commandId: string,
-  options: { timeoutMs: number; isCancelled?: () => Promise<boolean> },
+  options: { timeoutMs: number; isCancelled?: () => Promise<boolean>; signal?: AbortSignal },
 ): Promise<CommandOutcome> {
   const deadline = Date.now() + options.timeoutMs;
 
   while (Date.now() < deadline) {
+    if (options.signal?.aborted) {
+      return {
+        status: 'timeout',
+        result: null,
+        error: { code: 'job_aborted', message: 'Задача прервана после таймаута' },
+      };
+    }
     const row = await pool.query<{
       status: string;
       result: {
