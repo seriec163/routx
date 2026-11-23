@@ -9,11 +9,12 @@ import {
   Panel,
   Select,
   Spinner,
+  StatusBadge,
   TextInput,
   useToast,
 } from '../components/ui';
 import { api, errorMessage } from '../lib/api';
-import { formatDate } from '../lib/format';
+import { formatDate, JOB_STATUS, JOB_TYPE } from '../lib/format';
 import { useApi } from '../lib/useApi';
 
 interface RouterItem {
@@ -30,6 +31,10 @@ interface LogItem {
   message: string;
   context: unknown;
   created_at: string;
+  job_id: string | null;
+  job_type: string | null;
+  job_status: string | null;
+  job_error_code: string | null;
 }
 
 interface LogList {
@@ -129,8 +134,10 @@ export function LogsPage() {
                 <tr>
                   <th>Время</th>
                   <th>Роутер</th>
+                  <th>Действие</th>
                   <th>Источник</th>
                   <th>Уровень</th>
+                  <th>Итог</th>
                   <th>Сообщение</th>
                   <th />
                 </tr>
@@ -140,6 +147,12 @@ export function LogsPage() {
                   <tr key={item.id}>
                     <td className="small">{formatDate(item.created_at)}</td>
                     <td>{item.router_name}</td>
+                    <td className="small">
+                      {item.job_type ? JOB_TYPE[item.job_type] ?? item.job_type : '—'}
+                      {item.job_id ? (
+                        <div className="muted-text mono small">{item.job_id.slice(0, 8)}</div>
+                      ) : null}
+                    </td>
                     <td className="small">{item.source}</td>
                     <td>
                       <span
@@ -149,6 +162,19 @@ export function LogsPage() {
                       >
                         {item.level}
                       </span>
+                    </td>
+                    <td className="small">
+                      {item.job_status ? (
+                        <StatusBadge
+                          status={item.job_status}
+                          label={JOB_STATUS[item.job_status] ?? item.job_status}
+                        />
+                      ) : (
+                        <span className="muted-text">—</span>
+                      )}
+                      {item.job_error_code ? (
+                        <div className="muted-text small mono">{item.job_error_code}</div>
+                      ) : null}
                     </td>
                     <td className="small">{item.message.slice(0, 180)}</td>
                     <td className="row-actions">
@@ -178,9 +204,34 @@ export function LogsPage() {
           <p className="muted-text small">
             {formatDate(selected.created_at)} · уровень {selected.level}
           </p>
+          <div className="kv">
+            <span>Действие</span>
+            <strong>
+              {selected.job_type ? JOB_TYPE[selected.job_type] ?? selected.job_type : selected.source}
+            </strong>
+            <span>Итог задачи</span>
+            <strong>
+              {selected.job_status
+                ? JOB_STATUS[selected.job_status] ?? selected.job_status
+                : 'нет связанной задачи'}
+            </strong>
+            <span>Код ошибки</span>
+            <strong className="mono">{selected.job_error_code ?? '—'}</strong>
+            {selected.job_id ? (
+              <>
+                <span>Задача</span>
+                <strong className="mono">{selected.job_id}</strong>
+              </>
+            ) : null}
+          </div>
           <pre className="code-block" style={{ maxHeight: 480, overflow: 'auto' }}>
             {selected.message}
           </pre>
+          {selected.context ? (
+            <pre className="code-block small" style={{ maxHeight: 320, overflow: 'auto' }}>
+              {JSON.stringify(selected.context, null, 2)}
+            </pre>
+          ) : null}
         </Modal>
       ) : null}
     </div>

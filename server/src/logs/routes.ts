@@ -41,11 +41,18 @@ export async function registerLogRoutes(app: FastifyInstance, ctx: RouteContext)
       message: string;
       context: unknown;
       created_at: Date;
+      job_id: string | null;
+      job_type: string | null;
+      job_status: string | null;
+      job_error_code: string | null;
     }>(
       `select l.id, l.router_id, r.name as router_name, l.source, l.level,
-              l.message, l.context, l.created_at
+              l.message, l.context, l.created_at, l.job_id,
+              j.type as job_type, j.status as job_status,
+              coalesce(j.error_code, l.context->>'code') as job_error_code
          from router_logs l
          join routers r on r.id = l.router_id
+         left join jobs j on j.id = l.job_id
         where ($1::uuid is null or l.router_id = $1)
           and ($2::text is null or l.level = $2)
           and ($3::text is null or l.source = $3)

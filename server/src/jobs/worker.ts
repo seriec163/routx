@@ -14,6 +14,7 @@ import {
 } from './queue.js';
 import { HANDLERS, JobFailure, type HandlerContext } from './handlers.js';
 import { isRetryableJobFailure, toJobFailure } from './failure.js';
+import { jobActionLabel } from './labels.js';
 import { expireCommands } from '../agent/service.js';
 import { runRetention } from '../retention/service.js';
 
@@ -239,6 +240,8 @@ export class JobWorker {
   ): Promise<void> {
     if (!job.router_id) return;
     try {
+      const action = jobActionLabel(job.type);
+      const payloadKeys = Object.keys(job.payload ?? {}).slice(0, 20);
       await this.pool.query(
         `insert into router_logs (id, router_id, source, level, message, context, job_id)
          values ($1,$2,'job',$3,$4,$5::jsonb,$6)`,
@@ -246,8 +249,15 @@ export class JobWorker {
           randomUUID(),
           job.router_id,
           level,
-          message.slice(0, 20_000),
-          JSON.stringify({ job_id: job.id, type: job.type, code }),
+          `${action} (${job.type}): ${message}`.slice(0, 20_000),
+          JSON.stringify({
+            job_id: job.id,
+            type: job.type,
+            action,
+            code,
+            attempt: job.attempt,
+            payload_keys: payloadKeys,
+          }),
           job.id,
         ],
       );
