@@ -549,6 +549,23 @@ export async function readPackageContent(dataDir: string, row: PackageRow): Prom
   return readFile(path.join(dataDir, row.storage_path));
 }
 
+/**
+ * Читает файл зеркала, но не падает, если его нет на диске (например, после
+ * переноса панели: метаданные импортированы, а `rc_data` — нет). Отсутствие
+ * файла означает «в зеркале нет», и вызывающий код может сходить в GitHub.
+ */
+export async function readPackageContentOrNull(
+  dataDir: string,
+  row: PackageRow,
+): Promise<Buffer | null> {
+  try {
+    return await readFile(path.join(dataDir, row.storage_path));
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null;
+    throw error;
+  }
+}
+
 export async function getReleaseJson(
   pool: Pool,
   dataDir: string,
@@ -559,18 +576,48 @@ export async function getReleaseJson(
 ): Promise<{ body: string; tag: string } | null> {
   if (!isAllowedRepo(owner, repo)) return null;
   const row = await loadPackageRow(pool, 'release_json', { repo: repoKey(owner, repo) });
-  if (!row) return null;
-  const raw = await readPackageContent(dataDir, row);
-  if (!rewrite) return { body: raw.toString('utf8'), tag: row.tag };
+  const raw = row ? await readPackageContentOrNull(dataDir, row) : null;
 
-  const parsed = JSON.parse(raw.toString('utf8')) as GitHubRelease & {
-    assets?: Array<GitHubAsset & { url: string; browser_download_url: string }>;
-  };
-  for (const asset of parsed.assets ?? []) {
-    asset.url = `${publicUrl}/downloads/github-api/repos/${owner}/${repo}/releases/assets/${asset.id}`;
-    asset.browser_download_url = `${publicUrl}/downloads/github/${owner}/${repo}/releases/download/${row.tag}/${asset.name}`;
+  let release: GitHubRelease;
+  let tag: string;
+  if (raw) {
+    release = JSON.parse(raw.toString('utf8')) as GitHubRelease;
+    tag = row!.tag;
+  } else {
+    // Метаданные есть, а файла на диске нет (перенос без тома `rc_data`).
+    // Отдаём релиз с GitHub, чтобы установка/обновление не упали в 500.
+    const live = await fetchLatestRelease(owner, repo);
+    if (!live) return null;
+    release = live;
+    tag = live.tag_name || 'latest';
   }
-  return { body: JSON.stringify(parsed), tag: row.tag };
+
+  return { body: rewriteReleaseBody(release, owner, repo, tag, publicUrl, rewrite), tag };
+}
+
+async function fetchLatestRelease(owner: string, repo: string): Promise<GitHubRelease | null> {
+  try {
+    return await fetchJson<GitHubRelease>(`${GITHUB_API}/repos/${owner}/${repo}/releases/latest`);
+  } catch {
+    return null;
+  }
+}
+
+function rewriteReleaseBody(
+  release: GitHubRelease,
+  owner: string,
+  repo: string,
+  tag: string,
+  publicUrl: string,
+  rewrite: boolean,
+): string {
+  if (!rewrite) return JSON.stringify(release);
+  const copy = JSON.parse(JSON.stringify(release)) as GitHubRelease;
+  for (const asset of copy.assets ?? []) {
+    asset.url = `${publicUrl}/downloads/github-api/repos/${owner}/${repo}/releases/assets/${asset.id}`;
+    asset.browser_download_url = `${publicUrl}/downloads/github/${owner}/${repo}/releases/download/${tag}/${asset.name}`;
+  }
+  return JSON.stringify(copy);
 }
 
 export async function getAssetByPath(
@@ -586,8 +633,13 @@ export async function getAssetByPath(
   let resolvedTag = tag;
   if (tag === 'latest') {
     const latest = await loadPackageRow(pool, 'release_json', { repo: key });
-    if (!latest) return null;
-    resolvedTag = latest.tag;
+    if (latest) {
+      resolvedTag = latest.tag;
+    } else {
+      const live = await fetchLatestRelease(owner, repo);
+      if (!live?.tag_name) return null;
+      resolvedTag = live.tag_name;
+    }
   }
   const row = await loadPackageRow(pool, 'asset', {
     repo: key,
@@ -595,7 +647,8 @@ export async function getAssetByPath(
     tag: resolvedTag,
   });
   if (row) {
-    return { row, content: await readPackageContent(dataDir, row) };
+    const content = await readPackageContentOrNull(dataDir, row);
+    if (content) return { row, content };
   }
 
   // Нет в кэше — пробуем GitHub и сохраняем на будущее.
@@ -640,7 +693,10 @@ export async function getAssetById(
     [key, id],
   );
   const row = cached.rows[0];
-  if (row) return { row, content: await readPackageContent(dataDir, row) };
+  if (row) {
+    const content = await readPackageContentOrNull(dataDir, row);
+    if (content) return { row, content };
+  }
 
   try {
     const content = await fetchBuffer(
@@ -649,13 +705,15 @@ export async function getAssetById(
     );
     const release = await loadPackageRow(pool, 'release_json', { repo: key });
     const product = productForRepo(owner, repo);
-    if (!release || !product) return null;
-    const parsed = JSON.parse(
-      (await readPackageContent(dataDir, release)).toString('utf8'),
-    ) as GitHubRelease;
+    const rawRelease = release ? await readPackageContentOrNull(dataDir, release) : null;
+    const parsed = rawRelease
+      ? (JSON.parse(rawRelease.toString('utf8')) as GitHubRelease)
+      : await fetchLatestRelease(owner, repo);
+    const tag = release?.tag ?? parsed?.tag_name;
+    if (!parsed || !tag || !product) return null;
     const asset = (parsed.assets ?? []).find((item) => String(item.id) === id);
     const name = asset?.name ?? `asset-${id}`;
-    const storagePath = `packages/${product}/${owner}-${repo}/${release.tag}/${name}`;
+    const storagePath = `packages/${product}/${owner}-${repo}/${tag}/${name}`;
     await storeFile(dataDir, storagePath, content);
     await upsertPackage(pool, {
       product,
@@ -663,7 +721,7 @@ export async function getAssetById(
       repo,
       kind: 'asset',
       name,
-      tag: release.tag,
+      tag,
       sourceUrl: `${GITHUB_API}/repos/${owner}/${repo}/releases/assets/${id}`,
       storagePath,
       content,
@@ -672,7 +730,7 @@ export async function getAssetById(
     const saved = await loadPackageRow(pool, 'asset', {
       repo: key,
       name,
-      tag: release.tag,
+      tag,
     });
     return saved ? { row: saved, content } : null;
   } catch {
@@ -695,7 +753,10 @@ export async function getRawFile(
   if (!known) return null;
   const sourceUrl = `${GITHUB_RAW}/${owner}/${repo}/${ref}/${filePath}`;
   const row = await loadPackageRow(pool, 'raw', { repo: repoKey(owner, repo), name: known.name });
-  if (row) return { row, content: await readPackageContent(dataDir, row) };
+  if (row) {
+    const content = await readPackageContentOrNull(dataDir, row);
+    if (content) return { row, content };
+  }
 
   try {
     const content = await fetchBuffer(sourceUrl);

@@ -37,6 +37,7 @@ describe('маршруты приложения', () => {
     ).toBe(true);
     expect(app.hasRoute({ method: 'GET', url: '/api/v1/updates' })).toBe(true);
     expect(app.hasRoute({ method: 'POST', url: '/api/v1/updates/apply' })).toBe(true);
+    expect(app.hasRoute({ method: 'GET', url: '/api/v1/deploy/verify' })).toBe(true);
     await app.close();
   });
 });

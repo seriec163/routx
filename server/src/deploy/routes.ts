@@ -10,6 +10,7 @@ import { requireManager, requireSuperadmin } from '../auth/service.js';
 import { badRequest } from '../lib/errors.js';
 import { enqueueJob } from '../jobs/queue.js';
 import { createBundle, fingerprint, readBundle, type DeployManifest } from './bundle.js';
+import { decodePassphraseHeader } from './passphrase.js';
 import { databaseInfo, dumpDatabase, restoreDatabase, tableCounts } from './pg.js';
 import { setMaintenance } from './state.js';
 
@@ -36,19 +37,7 @@ function headerValue(request: FastifyRequest, name: string): string | undefined 
 }
 
 function passphraseFrom(request: FastifyRequest): string {
-  const raw = headerValue(request, 'x-rc-passphrase');
-  if (!raw) throw badRequest('passphrase_required', 'Укажите парольную фразу для файла переноса');
-  let decoded = '';
-  try {
-    decoded = Buffer.from(raw, 'base64').toString('utf8');
-  } catch {
-    throw badRequest('passphrase_required', 'Парольная фраза передана в неверном формате');
-  }
-  const value = decoded.trim();
-  if (value.length < 12 || value.length > 200) {
-    throw badRequest('passphrase_weak', 'Парольная фраза должна быть от 12 до 200 символов');
-  }
-  return value;
+  return decodePassphraseHeader(headerValue(request, 'x-rc-passphrase'));
 }
 
 function bundleBody(request: FastifyRequest): Buffer {
@@ -77,6 +66,35 @@ async function latestMigration(dir: string): Promise<string | null> {
   } catch {
     return null;
   }
+}
+
+type Queryable = Pool | Client;
+
+/**
+ * После импорта метаданные зеркала приходят из дампа, а файлы в `rc_data`
+ * могут отсутствовать (том не переносился). Возвращает число записей, для
+ * которых нет файла. `prune` удаляет такие записи, чтобы UI не обещал
+ * скачивание, которого не будет.
+ */
+async function checkMirrorFiles(
+  db: Queryable,
+  dataDir: string,
+  prune: boolean,
+): Promise<number> {
+  const rows = await db.query<{ id: string; storage_path: string }>(
+    'select id, storage_path from package_mirror',
+  );
+  let missing = 0;
+  for (const row of rows.rows) {
+    try {
+      await stat(path.join(dataDir, row.storage_path));
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') continue;
+      missing += 1;
+      if (prune) await db.query('delete from package_mirror where id = $1', [row.id]);
+    }
+  }
+  return missing;
 }
 
 async function safetyBackups(dir: string): Promise<Array<{ name: string; size_bytes: number; at: string }>> {
@@ -322,6 +340,62 @@ export async function registerDeployRoutes(
     return domainInfo(ctx.publicUrl);
   });
 
+  // Проверка после импорта: схема, счётчики, мастер-ключ, файлы зеркала.
+  app.get('/api/v1/deploy/verify', async (request) => {
+    requireSuperadmin(request);
+    const [counts, migrations, backups, domain] = await Promise.all([
+      tableCounts(pool),
+      latestMigration(ctx.migrationsDir),
+      safetyBackups(dataDir),
+      domainInfo(ctx.publicUrl),
+    ]);
+    const versionRow = await pool.query<{ value: { version?: number } }>(
+      "select value from settings where key = 'schema_version'",
+    );
+    const schemaVersion = versionRow.rows[0]?.value?.version ?? null;
+
+    let mirrorRows = 0;
+    let missingMirrorFiles = 0;
+    try {
+      const mirror = await pool.query<{ total: number }>(
+        'select count(*)::int as total from package_mirror',
+      );
+      mirrorRows = mirror.rows[0]?.total ?? 0;
+      missingMirrorFiles = await checkMirrorFiles(pool, dataDir, false);
+    } catch {
+      // Схема без зеркала — не считаем это ошибкой переноса.
+    }
+
+    const problems: string[] = [];
+    if (String(schemaVersion ?? '') !== String(migrations ?? '')) {
+      problems.push(`версия схемы ${schemaVersion ?? '—'} не совпадает с миграциями ${migrations ?? '—'}`);
+    }
+    if (missingMirrorFiles > 0) {
+      problems.push(
+        `в зеркале ${missingMirrorFiles} записей без файлов: перенесите том rc_data или запустите синхронизацию пакетов`,
+      );
+    }
+    if (domain.error) problems.push(`домен не разрешается: ${domain.error}`);
+
+    return {
+      ok: problems.length === 0,
+      problems,
+      schema_version: schemaVersion == null ? null : String(schemaVersion),
+      migrations_version: migrations,
+      public_url: ctx.publicUrl,
+      master_key: {
+        fingerprint: fingerprint(masterKey),
+        source: ctx.masterKeySource,
+      },
+      counts,
+      mirror: { rows: mirrorRows, missing_files: missingMirrorFiles },
+      database: await databaseInfo(pool),
+      domain,
+      safety_backups: backups,
+      uptime_seconds: Math.round(process.uptime()),
+    };
+  });
+
   // Обновление агента на клиентских роутерах из панели.
   app.post(
     '/api/v1/deploy/agent-update',
@@ -415,6 +489,18 @@ async function runImport(args: {
 
     const client = new Client({ connectionString: args.databaseUrl });
     await client.connect();
+    let removedMirrorRows = 0;
+    try {
+      removedMirrorRows = await checkMirrorFiles(client, args.dataDir, true);
+      if (removedMirrorRows > 0) {
+        args.log.warn(
+          { removed: removedMirrorRows },
+          'зеркало пакетов: удалены записи без файлов на диске',
+        );
+      }
+    } catch (error) {
+      args.log.warn({ err: error }, 'не удалось проверить файлы зеркала после импорта');
+    }
     try {
       await client.query(
         `insert into audit_log (actor_role, action, result, metadata)
@@ -424,6 +510,7 @@ async function runImport(args: {
             source_public_url: args.manifest.public_url,
             source_created_at: args.manifest.created_at,
             source_counts: args.manifest.counts,
+            mirror_rows_removed: removedMirrorRows,
           }),
         ],
       );
