@@ -23,11 +23,8 @@ import {
 import { api, errorMessage } from '../lib/api';
 import { copyText } from '../lib/clipboard';
 import {
-  formatBytes,
   formatDate,
   formatRelative,
-  JOB_STATUS,
-  JOB_TYPE,
   PRODUCT_LABEL,
   proxyHealth,
   ROUTER_STATUS,
@@ -39,6 +36,9 @@ import { CompactSecretForm } from './router-detail/CompactSecretForm';
 import { CredentialPanel } from './router-detail/CredentialPanel';
 import { DiffFlowModal } from './router-detail/DiffFlowModal';
 import { DnsApplyModal } from './router-detail/DnsApplyModal';
+import { DiagnosticsTab } from './router-detail/DiagnosticsTab';
+import { JobsTab } from './router-detail/JobsTab';
+import { SnapshotsTab } from './router-detail/SnapshotsTab';
 import type {
   BindingToken,
   CatalogSubscription,
@@ -2268,59 +2268,13 @@ export function RouterDetailPage({ id }: { id: string }) {
       ) : null}
 
       {tab === 'snapshots' ? (
-        <Panel
-          title="Снимки конфигурации"
-          subtitle="Локальные снимки RoutX и нативные снимки Prokop. Секреты не выгружаются на сервер."
-          actions={
-            <Button size="sm" onClick={() => void createSnapshot()} busy={snapshotBusy} disabled={!canMutate}>
-              Создать снимок
-            </Button>
-          }
-        >
-          {snapshots.loading && !snapshots.data ? (
-            <Spinner />
-          ) : (snapshots.data?.items.length ?? 0) === 0 ? (
-            <Empty>Снимков пока нет.</Empty>
-          ) : (
-            <div className="table-wrap">
-              <table className="table">
-                <thead>
-                  <tr>
-                    <th>Создан</th>
-                    <th>Тип</th>
-                    <th>Причина</th>
-                    <th>Размер</th>
-                    <th>SHA-256</th>
-                    <th>Истекает</th>
-                    <th />
-                  </tr>
-                </thead>
-                <tbody>
-                  {snapshots.data!.items.map((snapshot) => (
-                    <tr key={snapshot.id}>
-                      <td>{formatDate(snapshot.created_at)}</td>
-                      <td>{snapshot.kind === 'native' ? 'Prokop (нативный)' : 'RoutX (локальный)'}</td>
-                      <td>{snapshot.reason}</td>
-                      <td>{formatBytes(snapshot.size_bytes)}</td>
-                      <td className="mono small">{snapshot.sha256?.slice(0, 16) ?? '—'}…</td>
-                      <td className="muted-text small">{formatDate(snapshot.expires_at)}</td>
-                      <td>
-                        <Button
-                          size="sm"
-                          variant="subtle"
-                          disabled={!canMutate}
-                          onClick={() => setRestoring(snapshot)}
-                        >
-                          Восстановить
-                        </Button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </Panel>
+        <SnapshotsTab
+          snapshots={snapshots}
+          busy={snapshotBusy}
+          canMutate={canMutate}
+          onCreate={() => void createSnapshot()}
+          onRestore={setRestoring}
+        />
       ) : null}
 
       {tab === 'metrics' ? (
@@ -2427,86 +2381,7 @@ export function RouterDetailPage({ id }: { id: string }) {
       ) : null}
 
       {tab === 'diagnostics' ? (
-        <Panel
-          title="Диагностические отчёты"
-          subtitle="Только маскированные отчёты. Полный отчёт включает больше проверок, но не секреты."
-          actions={
-            <div className="toolbar">
-              <Button
-                size="sm"
-                variant="ghost"
-                disabled={!canMutate}
-                onClick={async () => {
-                  try {
-                    await api('/api/v1/diagnostics', {
-                      method: 'POST',
-                      body: { router_ids: [id], kind: 'quick' },
-                    });
-                    toast.info('Быстрая диагностика запущена');
-                    await diagnostics.reload();
-                  } catch (caught) {
-                    toast.error(errorMessage(caught));
-                  }
-                }}
-              >
-                Быстрая
-              </Button>
-              <Button
-                size="sm"
-                disabled={!canMutate}
-                onClick={async () => {
-                  try {
-                    await api('/api/v1/diagnostics', {
-                      method: 'POST',
-                      body: { router_ids: [id], kind: 'full' },
-                    });
-                    toast.info('Полная диагностика запущена');
-                    await diagnostics.reload();
-                  } catch (caught) {
-                    toast.error(errorMessage(caught));
-                  }
-                }}
-              >
-                Полная
-              </Button>
-            </div>
-          }
-        >
-          {diagnostics.loading && !diagnostics.data ? (
-            <Spinner />
-          ) : (diagnostics.data?.items.length ?? 0) === 0 ? (
-            <Empty>Отчётов пока нет.</Empty>
-          ) : (
-            <table className="table">
-              <thead>
-                <tr>
-                  <th>Создан</th>
-                  <th>Тип</th>
-                  <th>Продукт</th>
-                  <th>Размер</th>
-                  <th>Истекает</th>
-                  <th />
-                </tr>
-              </thead>
-              <tbody>
-                {diagnostics.data!.items.map((report) => (
-                  <tr key={report.id}>
-                    <td>{formatDate(report.created_at)}</td>
-                    <td>{report.kind === 'full' ? 'Полная' : 'Быстрая'}</td>
-                    <td>{PRODUCT_LABEL[report.product] ?? report.product}</td>
-                    <td>{formatBytes(report.size_bytes)}</td>
-                    <td className="muted-text small">{formatDate(report.expires_at)}</td>
-                    <td>
-                      <Link className="btn btn-ghost btn-sm" to={`/diagnostics/${report.id}`}>
-                        Открыть
-                      </Link>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          )}
-        </Panel>
+        <DiagnosticsTab routerId={id} canMutate={canMutate} diagnostics={diagnostics} />
       ) : null}
 
       {tab === 'updates' ? (
@@ -2878,56 +2753,7 @@ export function RouterDetailPage({ id }: { id: string }) {
         </div>
       ) : null}
 
-      {tab === 'jobs' ? (
-        <Panel
-          title="История задач"
-          actions={
-            <Button size="sm" variant="ghost" onClick={() => void jobs.reload()} busy={jobs.loading}>
-              Обновить
-            </Button>
-          }
-        >
-          {jobs.loading && !jobs.data ? (
-            <Spinner />
-          ) : (jobs.data?.items.length ?? 0) === 0 ? (
-            <Empty>Задач пока нет.</Empty>
-          ) : (
-            <table className="table">
-              <thead>
-                <tr>
-                  <th>Создана</th>
-                  <th>Тип</th>
-                  <th>Статус</th>
-                  <th>Длительность</th>
-                  <th>Ошибка</th>
-                </tr>
-              </thead>
-              <tbody>
-                {jobs.data!.items.map((job) => (
-                  <tr key={job.id}>
-                    <td className="small">{formatDate(job.created_at)}</td>
-                    <td>{JOB_TYPE[job.type] ?? job.type}</td>
-                    <td>
-                      <StatusBadge status={job.status} label={JOB_STATUS[job.status] ?? job.status} />
-                    </td>
-                    <td className="muted-text small">
-                      {job.started_at && job.finished_at
-                        ? `${Math.max(
-                            0,
-                            Math.round(
-                              (Date.parse(job.finished_at) - Date.parse(job.started_at)) / 1000,
-                            ),
-                          )} с`
-                        : '—'}
-                    </td>
-                    <td className="small">{job.error?.message ?? '—'}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          )}
-        </Panel>
-      ) : null}
+      {tab === 'jobs' ? <JobsTab jobs={jobs} /> : null}
 
       {tab === 'settings' ? (
         <div className="stack">
