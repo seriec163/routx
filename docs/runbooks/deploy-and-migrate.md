@@ -122,6 +122,11 @@ Docker, домен и доступ к панели. Файл переноса с
   те же задачи, и новый инстанс начнёт их исполнять параллельно со старым.
   Для `monitor` это шум, для `apply`/`wifi_*`/`agent_update` — риск двойного
   изменения.
+* **Не пересоздавайте `app` без `ROUTX_IMAGE`.** В compose образ задан как
+  `${ROUTX_IMAGE:-...:latest}`; `docker compose up -d app` без переменной (и без
+  `--env-file`) подтянет `:latest` и может откатить панель на старый образ —
+  в нём не будет новых разделов (логи, Wi-Fi). Запускайте из `/opt/routx` с
+  `--env-file /opt/routx/.env` и явным `ROUTX_IMAGE=<текущий sha>`.
 
 Подробный разбор и план работ: `docs/roadmap/migration-and-install-sections.md`.
 
