@@ -77,7 +77,7 @@ export async function registerRouterWifiRoutes(
         type: 'wifi_create',
         routerId: router.id,
         requestedBy: auth.userId,
-        timeoutSeconds: 240,
+        timeoutSeconds: 600,
         maxAttempts: 1,
         payload: body,
       });
@@ -121,7 +121,7 @@ export async function registerRouterWifiRoutes(
         type: 'wifi_delete',
         routerId: router.id,
         requestedBy: auth.userId,
-        timeoutSeconds: 180,
+        timeoutSeconds: 600,
         maxAttempts: 1,
         payload: { iface: params.iface },
       });
@@ -156,7 +156,7 @@ export async function registerRouterWifiRoutes(
         type: 'wifi_read',
         routerId: router.id,
         requestedBy: auth.userId,
-        timeoutSeconds: 90,
+        timeoutSeconds: 600,
         maxAttempts: 1,
         payload: {},
       });
@@ -194,7 +194,7 @@ export async function registerRouterWifiRoutes(
         type: 'wifi_update',
         routerId: router.id,
         requestedBy: auth.userId,
-        timeoutSeconds: 240,
+        timeoutSeconds: 600,
         maxAttempts: 1,
         payload: { iface: params.iface, changes },
       });

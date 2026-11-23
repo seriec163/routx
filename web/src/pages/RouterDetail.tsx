@@ -1111,7 +1111,7 @@ export function RouterDetailPage({ id }: { id: string }) {
       const started = await api<{ job: Job }>(`/api/v1/routers/${id}/wifi/read`, {
         method: 'POST',
       });
-      const done = await waitJob(started.job, 120_000);
+      const done = await waitJob(started.job, 600_000);
       if (done.status !== 'success') {
         throw new Error(done.error?.message ?? `Чтение Wi-Fi завершилось: ${done.status}`);
       }
@@ -1182,7 +1182,7 @@ export function RouterDetailPage({ id }: { id: string }) {
         method: 'PUT',
         body: changes,
       });
-      const done = await waitJob(started.job, 300_000);
+      const done = await waitJob(started.job, 600_000);
       if (done.status !== 'success') {
         throw new Error(done.error?.message ?? `Сохранение Wi-Fi завершилось: ${done.status}`);
       }
@@ -1258,7 +1258,7 @@ export function RouterDetailPage({ id }: { id: string }) {
         setWifiCreateOpen(false);
         return;
       }
-      const done = await waitJob(started.job, 300_000);
+      const done = await waitJob(started.job, 600_000);
       if (done.status !== 'success') {
         throw new Error(done.error?.message ?? `Создание Wi-Fi завершилось: ${done.status}`);
       }
@@ -1287,7 +1287,7 @@ export function RouterDetailPage({ id }: { id: string }) {
         setWifiEdit(null);
         return;
       }
-      const done = await waitJob(started.job, 240_000);
+      const done = await waitJob(started.job, 600_000);
       if (done.status !== 'success') {
         throw new Error(done.error?.message ?? `Удаление Wi-Fi завершилось: ${done.status}`);
       }
@@ -3293,6 +3293,13 @@ export function RouterDetailPage({ id }: { id: string }) {
               </>
             }
           >
+            {!versionAtLeast(router?.agent_version, '1.5.51') ? (
+              <InfoBanner tone="warn">
+                Агент {router?.agent_version ?? 'неизвестной версии'} ещё не умеет управлять Wi-Fi.
+                При первой операции панель автоматически обновит его до 1.5.51 — это может занять
+                около минуты.
+              </InfoBanner>
+            ) : null}
             {wifiError ? <ErrorBanner message={wifiError} /> : null}
             {wifiBusy && !wifi ? <Spinner label="Читаем Wi-Fi…" /> : null}
             {!wifi && !wifiBusy ? (
