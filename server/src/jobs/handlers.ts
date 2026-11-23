@@ -11,7 +11,6 @@ import {
   materializePresetForSection,
   presetFromPayload,
   resolveManagedSection,
-  sanitizeAgentState,
   stateHash,
   templatePayloadSchema,
   validateExclusions,
@@ -20,10 +19,9 @@ import {
   type TemplatePayload,
   type UciValue,
 } from '../domain/uci.js';
-import { bundledAgentVersion } from '../agent/version.js';
 import type { PlatformSettings } from '../settings.js';
 import { normalizeTemplateLists } from '../domain/community-lists.js';
-import { resolveRouterSection, syncManagedSection } from '../domain/managed-section.js';
+import { resolveRouterSection } from '../domain/managed-section.js';
 import { enqueueJob, isCancelRequested } from './queue.js';
 import type { JobRow } from './queue.js';
 import { notifyRouterOwner } from '../notifications.js';
@@ -35,18 +33,23 @@ import {
 import { computePodkopPlan, podkopSectionInputSchema, podkopTemplateInput } from '../domain/podkop.js';
 import { JobFailure } from './errors.js';
 import {
-  agentVersionOf,
   asNumber,
   asRecord,
   asString,
   requireRouter,
   runCommand,
   setJobPhase,
-  waitForAgentVersion,
   type HandlerContext,
   type Json,
 } from './helpers.js';
 import { wifiCreate, wifiDelete, wifiRead, wifiUpdate } from './handlers/wifi.js';
+import { loadListExtras, readState, recomputeDrift, saveState } from './state.js';
+import {
+  agentUpdate,
+  componentCheck,
+  componentUpdate,
+  runComponentUpdate,
+} from './handlers/agent.js';
 export { JobFailure } from './errors.js';
 export type { HandlerContext } from './helpers.js';
 
@@ -61,63 +64,6 @@ function prokopReloadHint(message: string): string {
     return `${message}. Prokop не перезагрузил конфигурацию: проверьте, что осталось включённое правило с источником подключения.`;
   }
   return message;
-}
-
-async function saveState(
-  pool: Pool,
-  routerId: string,
-  raw: Json,
-  source: string,
-): Promise<Record<string, UciValue>> {  const managed = sanitizeAgentState(raw.managed ?? raw);
-  const hash = stateHash(managed);
-  const sections = Array.isArray(raw.sections) ? raw.sections : null;
-
-  await pool.query(
-    `insert into router_state (router_id, managed, state_hash, health, service, capabilities, sections, collected_at, source)
-     values ($1,$2::jsonb,$3,$4::jsonb,$5::jsonb,$6::jsonb,$7::jsonb, now(), $8)
-     on conflict (router_id) do update
-       set managed = excluded.managed, state_hash = excluded.state_hash,
-           health = coalesce(excluded.health, router_state.health),
-           service = coalesce(excluded.service, router_state.service),
-           capabilities = coalesce(excluded.capabilities, router_state.capabilities),
-           sections = coalesce(excluded.sections, router_state.sections),
-           collected_at = now(), source = excluded.source`,
-    [
-      routerId,
-      JSON.stringify(managed),
-      hash,
-      JSON.stringify(raw.health ?? null),
-      JSON.stringify(raw.service ?? null),
-      JSON.stringify(raw.capabilities ?? null),
-      sections == null ? null : JSON.stringify(sections),
-      source,
-    ],
-  );
-
-  // Секции на роутере не обязаны называться router_control/main. Как только
-  // агент присылает состояние, выбираем реальную активную секцию и запоминаем
-  // её, чтобы дальше не создавать пустой дубль.
-  await syncManagedSection(pool, routerId, managed);
-
-  return managed;
-}
-
-async function readState(
-  ctx: HandlerContext,
-  job: JobRow,
-  timeoutMs?: number,
-): Promise<Record<string, UciValue>> {
-  const raw = await runCommand(ctx, job, 'read_state', {}, timeoutMs);
-  return saveState(ctx.pool, requireRouter(job), raw, 'command');
-}
-
-export async function loadListExtras(pool: Pool, routerId: string): Promise<RouterListExtras> {
-  const result = await pool.query<{ list_extras: unknown }>(
-    'select list_extras from routers where id = $1',
-    [routerId],
-  );
-  const raw = result.rows[0]?.list_extras;
-  return raw && typeof raw === 'object' && !Array.isArray(raw) ? (raw as RouterListExtras) : {};
 }
 
 async function loadRevision(
@@ -142,64 +88,6 @@ export async function refreshState(ctx: HandlerContext, job: JobRow): Promise<Js
   const managed = await readState(ctx, job);
   const drift = await recomputeDrift(ctx.pool, routerId, managed);
   return { paths: Object.keys(managed).length, state_hash: stateHash(managed), drift };
-}
-
-export async function recomputeDrift(
-  pool: Pool,
-  routerId: string,
-  current: Record<string, UciValue>,
-): Promise<Record<string, string>> {
-  const assignments = await pool.query<{
-    template_id: string;
-    revision: number;
-    payload: unknown;
-    exclusions: unknown;
-  }>(
-    `select a.template_id, a.revision, r.payload, r.exclusions
-       from template_assignments a
-       join template_revisions r on r.template_id = a.template_id and r.revision = a.revision
-       join templates t on t.id = a.template_id and t.archived_at is null
-      where a.router_id = $1`,
-    [routerId],
-  );
-
-  const result: Record<string, string> = {};
-  const extras = await loadListExtras(pool, routerId);
-  const productRow = await pool.query<{ product: string; product_version: string | null }>(
-    'select product, product_version from routers where id = $1',
-    [routerId],
-  );
-  const product = productRow.rows[0]?.product ?? 'unknown';
-  const productVersion = productRow.rows[0]?.product_version ?? null;
-  for (const assignment of assignments.rows) {
-    try {
-      const payload = templatePayloadSchema.parse(assignment.payload);
-      const exclusions = Array.isArray(assignment.exclusions)
-        ? assignment.exclusions.map(String)
-        : [];
-      const mapped = mapTemplateSections(payload, current);
-      const normalized = await normalizeTemplateLists(mapped.payload, product, productVersion);
-      const plan = computePlan(normalized, current, exclusions, extras);
-      const drift = plan.items.length === 0 ? 'in_sync' : 'drift';
-      result[assignment.template_id] = drift;
-      await pool.query(
-        `update template_assignments
-            set drift = $3, last_checked_at = now(), desired_hash = $4,
-                applied_hash = case when $3 = 'in_sync' then $4 else applied_hash end,
-                applied_at = case when $3 = 'in_sync' then now() else applied_at end
-          where router_id = $1 and template_id = $2`,
-        [routerId, assignment.template_id, drift, plan.desiredHash],
-      );
-    } catch {
-      result[assignment.template_id] = 'incompatible';
-      await pool.query(
-        `update template_assignments set drift = 'incompatible', last_checked_at = now()
-          where router_id = $1 and template_id = $2`,
-        [routerId, assignment.template_id],
-      );
-    }
-  }
-  return result;
 }
 
 export async function diffTemplate(ctx: HandlerContext, job: JobRow): Promise<Json> {
@@ -1222,45 +1110,6 @@ export async function siteCheck(ctx: HandlerContext, job: JobRow): Promise<Json>
   return { router_id: routerId, results };
 }
 
-export async function agentUpdate(ctx: HandlerContext, job: JobRow): Promise<Json> {
-  const routerId = requireRouter(job);
-  const before = await agentVersionOf(ctx, routerId);
-  const base = ctx.publicUrl.replace(/\/+$/, '');
-  const raw = await runCommand(
-    ctx,
-    job,
-    'self_update',
-    { base_url: base, version: bundledAgentVersion() ?? '' },
-    120_000,
-  );
-  if (raw.ok === false) {
-    throw new JobFailure(
-      asString(raw.error) || 'agent_update_failed',
-      asString(raw.message) || 'Агент не принял обновление',
-    );
-  }
-
-  await setJobPhase(ctx, job.id, 'Ждём перезапуск агента', 60);
-  const after = await waitForAgentVersion(ctx, routerId, before, 120_000);
-  if (!after) {
-    throw new JobFailure(
-      'agent_update_not_applied',
-      `Агент не сообщил новую версию за 2 минуты (было ${before ?? '—'}). ` +
-        'Проверьте /var/log/routx-agent-update.log на роутере.',
-    );
-  }
-
-  return {
-    router_id: routerId,
-    scheduled: true,
-    kind: asString(raw.kind),
-    version: after,
-    previous_version: before,
-    applied: after !== before,
-    sha256: asString(raw.sha256) || null,
-  };
-}
-
 export async function diagnostics(ctx: HandlerContext, job: JobRow): Promise<Json> {
   const routerId = requireRouter(job);
   const kind = job.payload.kind === 'full' ? 'full' : 'quick';
@@ -1658,146 +1507,6 @@ export async function rebootRouter(ctx: HandlerContext, job: JobRow): Promise<Js
   return { scheduled: true, result: raw };
 }
 
-const TACHYON_COMPONENTS = ['tachyon', 'tachyon-core'] as const;
-
-function componentLabel(component: string): string {
-  return component === 'tachyon-core' ? 'ядро Tachyon Core' : 'модуль Tachyon';
-}
-
-export async function componentCheck(ctx: HandlerContext, job: JobRow): Promise<Json> {  const routerId = requireRouter(job);
-  const router = await ctx.pool.query<{ product: string }>(
-    'select product from routers where id = $1',
-    [routerId],
-  );
-  if (router.rows[0]?.product !== 'tachyon') {
-    throw new JobFailure(
-      'component_unsupported',
-      'Обновления компонентов доступны только для Tachyon',
-    );
-  }
-  const raw = await runCommand(ctx, job, 'component_action', { mode: 'check' }, 240_000);
-  return {
-    results: Array.isArray(raw.results) ? raw.results : [],
-    errors: Array.isArray(raw.errors) ? raw.errors : [],
-  };
-}
-
-export async function componentUpdate(ctx: HandlerContext, job: JobRow): Promise<Json> {
-  const component = asString(job.payload.component) ?? '';
-  if (!(TACHYON_COMPONENTS as readonly string[]).includes(component)) {
-    throw new JobFailure('invalid_payload', 'Неизвестный компонент Tachyon');
-  }
-  return runComponentUpdate(ctx, job, component);
-}
-
-async function runComponentUpdate(
-  ctx: HandlerContext,
-  job: JobRow,
-  component: string,
-): Promise<Json> {
-  const routerId = requireRouter(job);
-  const routerRow = await ctx.pool.query<{ product: string }>(
-    'select product from routers where id = $1',
-    [routerId],
-  );
-  if (routerRow.rows[0]?.product !== 'tachyon') {
-    throw new JobFailure(
-      'component_unsupported',
-      'Обновления компонентов доступны только для Tachyon',
-    );
-  }
-
-  const started = await runCommand(
-    ctx,
-    job,
-    'component_action',
-    { mode: 'start', component, action: 'update' },
-    90_000,
-  );
-  const nativeJobId = asString(started.job_id) ?? '';
-  if (!nativeJobId) {
-    throw new JobFailure('component_start_failed', 'Tachyon не вернул идентификатор обновления');
-  }
-
-  await setJobPhase(ctx, job.id, `Обновляем ${componentLabel(component)}`, 10);
-
-  const deadline = Date.now() + 840_000;
-  let data: Json = {};
-  while (Date.now() < deadline) {
-    await new Promise((resolve) => setTimeout(resolve, 2000));
-    const status = await runCommand(
-      ctx,
-      job,
-      'component_action',
-      { mode: 'status', job_id: nativeJobId },
-      60_000,
-    );
-    data = asRecord(status.data ?? {});
-    const running = data.running === true || data.running === 1;
-    const message = asString(data.message) ?? '';
-    if (message) {
-      await setJobPhase(ctx, job.id, `Обновляем ${componentLabel(component)}: ${message}`, running ? 50 : 90);
-    }
-    if (!running) break;
-    if (await isCancelRequested(ctx.pool, job.id)) {
-      throw new JobFailure('cancelled', 'Задача отменена', 'cancelled');
-    }
-  }
-
-  if (data.running === true || data.running === 1) {
-    throw new JobFailure(
-      'component_timeout',
-      'Обновление не завершилось за отведённое время. Проверьте журнал Tachyon на роутере.',
-    );
-  }
-
-  const logResult = await runCommand(
-    ctx,
-    job,
-    'component_action',
-    { mode: 'log', job_id: nativeJobId, offset: 0 },
-    60_000,
-  );
-  const fullLog = asString(logResult.log) ?? '';
-  const log = fullLog.length > 12000 ? fullLog.slice(-12000) : fullLog;
-
-  if (data.success === false) {
-    throw new JobFailure(
-      'component_update_failed',
-      asString(data.message) || `Не удалось обновить ${componentLabel(component)}`,
-    );
-  }
-
-  // Полные release notes не нужны в результате задачи: они раздувают jobs и
-  // дублируют страницу релиза. Оставляем версии, статус и журнал операции.
-  const status: Json = { ...data };
-  delete status.release_notes;
-
-  // После обновления обновляем прочитанное состояние, чтобы панель сразу
-  // показала новую версию продукта, не дожидаясь следующего опроса.
-  try {
-    const managed = await readState(ctx, job, 30_000);
-    await recomputeDrift(ctx.pool, routerId, managed);
-  } catch (error) {
-    ctx.log.warn({ err: error, routerId, component }, 'не удалось обновить состояние после компонента');
-  }
-
-  return {
-    component,
-    native_job_id: nativeJobId,
-    status,
-    previous_version: asString(data.previous_version) ?? null,
-    current_version: asString(data.current_version) ?? null,
-    latest_version: asString(data.latest_version) ?? null,
-    log,
-  };
-}
-
-/**
- * Комплексное обновление одного роутера: агент RoutX, модуль Tachyon и ядро
- * Tachyon Core. Шаги идут последовательно, потому что агент и продукт не
- * переносят параллельную установку пакетов.
- */
 export async function bulkUpdate(ctx: HandlerContext, job: JobRow): Promise<Json> {
   const routerId = requireRouter(job);
   const targets = asRecord(job.payload.targets ?? {});
