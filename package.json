@@ -18,14 +18,19 @@
     "build": "npm run build -w @routx/server && npm run build -w @routx/web",
     "start": "npm run start -w @routx/server",
     "typecheck": "npm run typecheck -w @routx/server && npm run typecheck -w @routx/web",
+    "lint": "eslint .",
     "test": "npm run test -w @routx/server",
     "db:migrate": "npm run db:migrate -w @routx/server",
     "bootstrap": "npm run bootstrap -w @routx/server --",
     "password-reset": "npm run password-reset -w @routx/server --",
     "rotate-master-key": "npm run rotate-master-key -w @routx/server --",
-    "agent:build": "node agent/build.mjs"
+    "agent:build": "node agent/build.mjs",
+    "verify:agent-flow": "node scripts/fake-agent-check.mjs"
   },
   "devDependencies": {
-    "concurrently": "^10.0.6"
+    "@eslint/js": "^10.0.1",
+    "concurrently": "^10.0.6",
+    "eslint": "^10.15.0",
+    "typescript-eslint": "^8.74.0"
   }
 }
