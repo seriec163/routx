@@ -194,7 +194,7 @@ jobs:
               `insert into settings (key, value, updated_at)
                values ($1, $2::jsonb, now())
                on conflict (key) do update set value = excluded.value, updated_at = now()`,
-              ["security.mfa_policy", "\"admins\""],
+              ["security.mfa_policy", JSON.stringify({ value: "admins" })],
             );
             await pool.end();
           '
