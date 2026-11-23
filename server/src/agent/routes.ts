@@ -1066,6 +1066,7 @@ export async function registerAgentRoutes(
                    capabilities = excluded.capabilities,
                    sections = case
                      when router_state.sections is null
+                       or jsonb_typeof(router_state.sections) <> 'array'
                        or jsonb_array_length(router_state.sections) = 0
                      then excluded.sections
                      else router_state.sections end,
