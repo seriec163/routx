@@ -373,15 +373,16 @@ stderr и итог в `/var/log/routx-agent-update.log`, проверяет ус
   bind → probe → refresh → state → cleanup через API; описан в
   `docs/runbooks/agent-flow-check.md`. Автоматический запуск в CI — следующий
   шаг (нужно перенести миграции до тестов и поднимать приложение).
-* 2 — E2E Playwright отложен: нужен браузерный CI-джоб и стабильный тестовый
-  пользователь; сценарии описаны в этом же файле.
+* 2 — добавлен каркас Playwright (`playwright.config.ts`, `e2e/login.spec.ts`,
+  `npm run test:e2e`, runbook `docs/runbooks/e2e.md`). В CI не подключён:
+  нужен тестовый инстанс и пользователь без 2FA.
 * 3 — общий контракт API (OpenAPI) отложен: требует генератора из Zod-схем,
   это отдельная задача, а не правка на ходу.
 * 4 — добавлен ESLint (`npm run lint`) и шаг в CI; разбиение
   `jobs/handlers.ts` и `routers/routes.ts` на домены — отдельная задача.
-* 5 — архитектура зеркала вынесена в `RC_MIRROR_ARCH` (по умолчанию
-  `aarch64_cortex-a53`); потоковая отдача и ленивая загрузка по запросу
-  остаются.
+* 5 — архитектура зеркала вынесена в `RC_MIRROR_ARCH`; кэшированные ассеты
+  отдаются потоком (`findCachedAsset` + `createReadStream`), а не буфером.
+  Ленивая загрузка «только нужных файлов» остаётся.
 
 1. Превратить эмулятор агента из этого теста в интеграционный тест:
    `bind → probe → refresh → diff → apply` на Postgres.
