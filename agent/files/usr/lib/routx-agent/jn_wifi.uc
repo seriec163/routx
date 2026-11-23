@@ -53,6 +53,48 @@ function iface_from_section(section) {
 	};
 }
 
+function hardware_info() {
+	let phys = fs.lsdir("/sys/class/ieee80211") || [];
+	let interfaces = [];
+	let iw_bin = "";
+	for (let candidate in [ "/usr/sbin/iw", "/sbin/iw", "/usr/bin/iw" ])
+		if (iw_bin == "" && util.file_exists(candidate))
+			iw_bin = candidate;
+	if (iw_bin != "") {
+		let res = run.run([ iw_bin, "dev" ], 10);
+		if (res.ok) {
+			for (let line in split(util.as_string(res.stdout), "\n")) {
+				let text = trim(line);
+				if (substr(text, 0, 10) == "Interface ")
+					push(interfaces, trim(substr(text, 10)));
+			}
+		}
+	}
+	// Некоторые драйверы не создают /sys/class/ieee80211, но у сетевого
+	// интерфейса есть ссылка phy80211.
+	let net = fs.lsdir("/sys/class/net") || [];
+	for (let name in net)
+		if (fs.stat("/sys/class/net/" + name + "/phy80211") != null)
+			push(interfaces, as_string(name));
+
+	let configured_radios = [];
+	let ubus = run.run([ "ubus", "call", "network.wireless", "status" ], 10);
+	if (ubus.ok) {
+		let data = util.json_parse(ubus.stdout);
+		if (type(data) == "object")
+			for (let name, value in data)
+				push(configured_radios, as_string(name));
+	}
+
+	let present = length(phys) > 0 || length(interfaces) > 0;
+	return {
+		present: present,
+		phys: phys,
+		interfaces: interfaces,
+		configured_radios: configured_radios
+	};
+}
+
 function read_iface(cursor, name) {
 	let all = cursor.get_all(CONFIG);
 	let section = all != null ? all[name] : null;
@@ -87,7 +129,7 @@ function read() {
 			push(interfaces, iface_from_section(section));
 		}
 	}
-	return { radios: radios, interfaces: interfaces };
+	return { radios: radios, interfaces: interfaces, hardware: hardware_info() };
 }
 
 function backup() {
@@ -126,9 +168,16 @@ function uci_revert() {
 	uci_run([ "revert", CONFIG ]);
 }
 
+function wifi_bin() {
+	for (let candidate in [ "/sbin/wifi", "/usr/sbin/wifi", "/usr/bin/wifi" ])
+		if (util.file_exists(candidate))
+			return candidate;
+	return "";
+}
+
 function reload_wifi() {
-	let bin = util.file_exists("/sbin/wifi") ? "/sbin/wifi" : "/usr/bin/wifi";
-	if (!util.file_exists(bin))
+	let bin = wifi_bin();
+	if (bin == "")
 		return { applied: false, error: "Не найден /sbin/wifi" };
 	let res = run.run([ bin, "reload" ], 90);
 	return { applied: res.ok, error: res.ok ? "" : run.error_text(res) };
@@ -164,6 +213,8 @@ function update(iface, changes) {
 	let current = read_iface(cursor, name);
 	if (current == null)
 		return { ok: false, error: "Wi-Fi сеть не найдена" };
+	if (!hardware_info().present)
+		return { ok: false, error: "На роутере не обнаружен Wi-Fi модуль" };
 
 	let changed = [];
 	let encryption = current.encryption;
@@ -260,6 +311,9 @@ function create(options) {
 	let disabled = type(options.disabled) == "bool" ? options.disabled : false;
 	let isolate = type(options.isolate) == "bool" ? options.isolate : false;
 
+	if (!hardware_info().present)
+		return { ok: false, error: "На роутере не обнаружен Wi-Fi модуль" };
+
 	let cursor = uci.cursor();
 	let all = cursor.get_all(CONFIG);
 	if (type(all) != "object")
@@ -268,8 +322,28 @@ function create(options) {
 	for (let name, section in all)
 		if (type(section) == "object" && section[".type"] == "wifi-device")
 			push(devices, name);
+	if (length(devices) == 0) {
+		// Модуль есть, но /etc/config/wireless пуст: пробуем сгенерировать
+		// радиомодули штатной командой OpenWrt.
+		let bin = wifi_bin();
+		if (bin != "") {
+			try {
+				backup();
+			} catch (e) {
+			}
+			run.run([ bin, "config" ], 60);
+			cursor = uci.cursor();
+			all = cursor.get_all(CONFIG);
+			if (type(all) != "object")
+				all = {};
+			devices = [];
+			for (let name, section in all)
+				if (type(section) == "object" && section[".type"] == "wifi-device")
+					push(devices, name);
+		}
+	}
 	if (length(devices) == 0)
-		return { ok: false, error: "На роутере не найдены Wi-Fi радиомодули" };
+		return { ok: false, error: "Wi-Fi модуль есть, но радиомодули не настроены" };
 
 	let requested = options.radios;
 	let selected = [];

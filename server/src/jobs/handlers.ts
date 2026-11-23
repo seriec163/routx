@@ -1739,6 +1739,19 @@ function componentLabel(component: string): string {
   return component === 'tachyon-core' ? 'ядро Tachyon Core' : 'модуль Tachyon';
 }
 
+async function selfUpdateForWifi(ctx: HandlerContext, job: JobRow): Promise<void> {
+  await setJobPhase(ctx, job.id, 'Агент не поддерживает Wi-Fi — обновляем RoutX', 3);
+  const base = ctx.publicUrl.replace(/\/+$/, '');
+  const update = await runCommand(ctx, job, 'self_update', { base_url: base }, 180_000);
+  if (update.ok === false) {
+    throw new JobFailure(
+      'agent_update_failed',
+      asString(update.message) || 'Агент не принял обновление',
+    );
+  }
+  await new Promise((resolve) => setTimeout(resolve, 25_000));
+}
+
 async function runWifiCommand(
   ctx: HandlerContext,
   job: JobRow,
@@ -1755,16 +1768,8 @@ async function runWifiCommand(
   // Агент старее 1.5.51 не знает Wi-Fi операций. Обновляем его тем же
   // механизмом self_update, затем повторяем операцию — пользователю не нужно
   // вручную искать версию агента.
-  await setJobPhase(ctx, job.id, 'Агент не поддерживает Wi-Fi — обновляем RoutX', 3);
   try {
-    const base = ctx.publicUrl.replace(/\/+$/, '');
-    const update = await runCommand(ctx, job, 'self_update', { base_url: base }, 180_000);
-    if (update.ok === false) {
-      throw new JobFailure(
-        'agent_update_failed',
-        asString(update.message) || 'Агент не принял обновление',
-      );
-    }
+    await selfUpdateForWifi(ctx, job);
   } catch (error) {
     const message = error instanceof Error ? error.message : 'неизвестная ошибка';
     throw new JobFailure(
@@ -1773,7 +1778,6 @@ async function runWifiCommand(
     );
   }
 
-  await new Promise((resolve) => setTimeout(resolve, 25_000));
   await setJobPhase(ctx, job.id, 'Повторяем операцию Wi-Fi', 10);
   try {
     return await runCommand(ctx, job, op, args, timeoutMs);
@@ -1781,7 +1785,7 @@ async function runWifiCommand(
     if (error instanceof JobFailure && error.code === 'unknown_op') {
       throw new JobFailure(
         'wifi_agent_outdated',
-        'Агент RoutX не поддерживает Wi-Fi. Обновите агент до версии 1.5.51.',
+        'Агент RoutX не поддерживает Wi-Fi. Обновите агент до версии 1.5.52.',
       );
     }
     throw error;
@@ -1790,7 +1794,18 @@ async function runWifiCommand(
 
 export async function wifiRead(ctx: HandlerContext, job: JobRow): Promise<Json> {
   requireRouter(job);
-  return runWifiCommand(ctx, job, 'wifi_read', {}, 60_000);
+  let raw = await runWifiCommand(ctx, job, 'wifi_read', {}, 60_000);
+  // 1.5.51 умеет читать Wi-Fi, но ещё не умеет определять наличие модуля.
+  // Обновляем такой агент и повторяем чтение, чтобы панель получила hardware.
+  if (raw.hardware == null || typeof raw.hardware !== 'object') {
+    try {
+      await selfUpdateForWifi(ctx, job);
+      raw = await runCommand(ctx, job, 'wifi_read', {}, 60_000);
+    } catch (error) {
+      ctx.log.warn({ err: error, jobId: job.id }, 'не удалось обновить агент для определения Wi-Fi');
+    }
+  }
+  return raw;
 }
 
 export async function wifiUpdate(ctx: HandlerContext, job: JobRow): Promise<Json> {

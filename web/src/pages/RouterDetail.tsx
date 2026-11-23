@@ -225,6 +225,12 @@ interface WifiInterface {
 interface WifiState {
   radios: WifiRadio[];
   interfaces: WifiInterface[];
+  hardware?: {
+    present: boolean;
+    phys?: string[];
+    interfaces?: string[];
+    configured_radios?: string[];
+  };
 }
 
 const WIFI_KEY_ENCRYPTIONS = new Set([
@@ -1119,6 +1125,7 @@ export function RouterDetailPage({ id }: { id: string }) {
       setWifi({
         radios: Array.isArray(result.radios) ? result.radios : [],
         interfaces: Array.isArray(result.interfaces) ? result.interfaces : [],
+        hardware: result.hardware,
       });
     } catch (caught) {
       setWifiError(errorMessage(caught));
@@ -3286,18 +3293,44 @@ export function RouterDetailPage({ id }: { id: string }) {
                   size="sm"
                   variant="subtle"
                   onClick={openWifiCreate}
-                  disabled={Boolean(router?.archived_at)}
+                  disabled={
+                    Boolean(router?.archived_at) || wifi?.hardware?.present === false
+                  }
                 >
                   Добавить сеть
                 </Button>
               </>
             }
           >
-            {!versionAtLeast(router?.agent_version, '1.5.51') ? (
+            {!versionAtLeast(router?.agent_version, '1.5.52') ? (
               <InfoBanner tone="warn">
-                Агент {router?.agent_version ?? 'неизвестной версии'} ещё не умеет управлять Wi-Fi.
-                При первой операции панель автоматически обновит его до 1.5.51 — это может занять
-                около минуты.
+                Агент {router?.agent_version ?? 'неизвестной версии'} ещё не умеет определять
+                наличие Wi-Fi модуля. При первом чтении панель автоматически обновит его до 1.5.52 —
+                это может занять около минуты.
+              </InfoBanner>
+            ) : null}
+            {wifi?.hardware ? (
+              <div className="row">
+                <StatusBadge
+                  status={wifi.hardware.present ? 'success' : 'error'}
+                  label={wifi.hardware.present ? 'Wi-Fi модуль есть' : 'Wi-Fi модуль не найден'}
+                />
+                {wifi.hardware.phys && wifi.hardware.phys.length > 0 ? (
+                  <span className="muted-text small">
+                    phy: {wifi.hardware.phys.join(', ')}
+                  </span>
+                ) : null}
+                {wifi.hardware.interfaces && wifi.hardware.interfaces.length > 0 ? (
+                  <span className="muted-text small">
+                    интерфейсы: {wifi.hardware.interfaces.join(', ')}
+                  </span>
+                ) : null}
+              </div>
+            ) : null}
+            {wifi?.hardware && !wifi.hardware.present ? (
+              <InfoBanner tone="warn">
+                На роутере не обнаружен Wi-Fi модуль. Просмотр оставшихся сетей доступен, но
+                создавать и изменять Wi-Fi нельзя.
               </InfoBanner>
             ) : null}
             {wifiError ? <ErrorBanner message={wifiError} /> : null}
@@ -3312,7 +3345,11 @@ export function RouterDetailPage({ id }: { id: string }) {
             {wifi ? (
               <div className="stack">
                 {wifi.interfaces.length === 0 ? (
-                  <Empty>Wi-Fi сети не найдены.</Empty>
+                  <Empty>
+                    {wifi.hardware?.present === false
+                      ? 'Wi-Fi модуль не обнаружен.'
+                      : 'Wi-Fi модуль есть, но сети ещё не настроены.'}
+                  </Empty>
                 ) : (
                   wifi.interfaces.map((iface) => {
                     const radio = wifi.radios.find((item) => item.name === iface.device);
