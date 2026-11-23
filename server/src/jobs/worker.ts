@@ -12,6 +12,7 @@ import {
   type JobRow,
 } from './queue.js';
 import { HANDLERS, JobFailure, type HandlerContext } from './handlers.js';
+import { isRetryableJobFailure, toJobFailure } from './failure.js';
 import { expireCommands } from '../agent/service.js';
 import { runRetention } from '../retention/service.js';
 
@@ -25,8 +26,6 @@ export interface WorkerOptions {
   masterKey: string;
   publicUrl: string;
 }
-
-const RETRYABLE = new Set(['agent_timeout', 'agent_unavailable', 'internal_error', 'db_error']);
 
 /** Фоновый исполнитель задач: один цикл забирает одну задачу. */
 export class JobWorker {
@@ -156,10 +155,7 @@ export class JobWorker {
       await finishJob(this.pool, job.id, 'success', result);
       this.log.info({ job: job.id, type: job.type }, 'задача завершена');
     } catch (error) {
-      const failure =
-        error instanceof JobFailure
-          ? error
-          : new JobFailure('internal_error', (error as Error).message.slice(0, 500));
+      const failure = toJobFailure(error);
 
       if (failure.terminal === 'cancelled') {
         await finishJob(this.pool, job.id, 'cancelled', null, {
@@ -174,7 +170,7 @@ export class JobWorker {
         });
         await this.recordJobError(job, 'error', failure.code, failure.message);
       } else if (
-        RETRYABLE.has(failure.code) &&
+        isRetryableJobFailure(failure) &&
         job.attempt < job.max_attempts &&
         job.type !== 'apply' &&
         job.type !== 'sb_install' &&

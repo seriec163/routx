@@ -53,6 +53,14 @@ queued ──▶ running ──┬──▶ success
 * `apply` и `sb_install` не могут выполняться одновременно на одном роутере.
 * `monitor` не выполняется, если на роутере есть `apply`/`restore`/`sb_install` в `queued|running`.
 
+Классификация ошибок (`server/src/jobs/failure.ts`):
+
+* `HttpError` (валидация, `400/403/404/409`) сохраняет свой код и **не**
+  ретраится — иначе `section_without_connection` превращался в
+  `internal_error` и задача повторялась;
+* ретраятся только `agent_timeout`, `agent_unavailable` и `db_error`;
+* всё остальное — `internal_error` без повторов.
+
 ---
 
 ## 3. Захват и lease
