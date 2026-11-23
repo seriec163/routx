@@ -357,10 +357,11 @@ stderr и итог в `/var/log/routx-agent-update.log`, проверяет ус
 
 Осталось: дальнейшее разбиение `RouterDetail.tsx`. Уже вынесены
 `CompactSecretForm`, `DnsApplyModal`, `CredentialPanel`, `DiffFlowModal`,
-а также вкладки «Задачи», «Снимки» и «Диагностика» в
-`web/src/pages/router-detail/`. Остальные вкладки пока внутри страницы: для них
-нужен общий хук состояния (`useRouterDetail`), иначе получится слишком много
-пропсов.
+вкладки «Обзор», «Метрики», «Задачи», «Снимки» и «Диагностика» в
+`web/src/pages/router-detail/`; страница уменьшилась до ~3 655 строк.
+Остальные вкладки («Обновления», `DNS`, «Правила», «Шаблоны», `sing-box`,
+«Настройки») пока внутри: для них нужен `useRouterDetail`, чтобы не передавать
+по 20–30 пропсов.
 
 1. Ленивая загрузка страниц, `ErrorBoundary`, разбиение `RouterDetail.tsx`.
 2. `AbortController` и защита от гонок в `useApi`, visibility-aware polling,
