@@ -8,7 +8,6 @@ import {
   Field,
   InfoBanner,
   JobProgress,
-  LatencyChart,
   Modal,
   PageHeader,
   Panel,
@@ -38,6 +37,8 @@ import { DiffFlowModal } from './router-detail/DiffFlowModal';
 import { DnsApplyModal } from './router-detail/DnsApplyModal';
 import { DiagnosticsTab } from './router-detail/DiagnosticsTab';
 import { JobsTab } from './router-detail/JobsTab';
+import { MetricsTab } from './router-detail/MetricsTab';
+import { OverviewTab } from './router-detail/OverviewTab';
 import { SnapshotsTab } from './router-detail/SnapshotsTab';
 import type {
   BindingToken,
@@ -1862,157 +1863,25 @@ export function RouterDetailPage({ id }: { id: string }) {
       {detail.error ? <ErrorBanner message={detail.error} onRetry={() => void detail.reload()} /> : null}
 
       {tab === 'overview' ? (
-        <div className="grid-2">
-          <Panel
-            title="Управляемые параметры"
-            subtitle={`${Object.keys(state?.managed ?? {}).length} путей в снимке состояния. Это технические пути UCI: секции в Prokop и панели показываются по label.`}
-            actions={
-              <TextInput
-                value={stateQuery}
-                onChange={setStateQuery}
-                placeholder="Фильтр по пути"
-                type="search"
-              />
-            }
-          >
-            {!state ? (
-              <Empty>Состояние ещё не собрано. Нажмите «Прочитать состояние».</Empty>
-            ) : managedEntries.length === 0 ? (
-              <Empty>Параметров не найдено.</Empty>
-            ) : (
-              <div className="state-list">
-                {managedEntries.slice(0, 200).map(([path, value]) => (
-                  <div key={path} className="state-row">
-                    <code>{path}</code>
-                    <span>{Array.isArray(value) ? value.join(', ') : value ?? '—'}</span>
-                  </div>
-                ))}
-                {managedEntries.length > 200 ? (
-                  <p className="muted-text small">Показаны первые 200 из {managedEntries.length}.</p>
-                ) : null}
-              </div>
-            )}
-          </Panel>
-
-          <div className="stack">
-            <Panel title="Служба и доступность">
-              <div className="kv">
-                <span>Состояние</span>
-                <strong>{serviceText(state?.service)}</strong>
-                <span>Health</span>
-                <strong>{healthText(state?.health)}</strong>
-                <span>Прокси</span>
-                <strong>{proxyHealth(latest?.proxy_health)}</strong>
-                <span>Последний замер</span>
-                <strong>{latest ? formatDate(latest.ts) : '—'}</strong>
-                <span>Источник состояния</span>
-                <strong>{state?.source ?? '—'}</strong>
-                <span>Собрано</span>
-                <strong>{formatDate(state?.collected_at)}</strong>
-                <span>Автозапуск {PRODUCT_LABEL[router.product] ?? ''}</span>
-                <strong>
-                  {!productSvc.present
-                    ? 'нет данных'
-                    : productSvc.enabled === null
-                      ? 'неизвестно'
-                      : productSvc.enabled
-                        ? 'включён'
-                        : 'выключен'}
-                </strong>
-                <span>Автозапуск sing-box</span>
-                <strong>{singBoxAutostartLabel}</strong>
-                <span>Автозапуск пары</span>
-                <strong>{autostartEnabled ? 'включён' : autostartPartial ? 'частично' : 'выключен'}</strong>
-              </div>
-              <div className="row">
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => void serviceAction('restart')}
-                  disabled={!canMutate || serviceBusy !== null}
-                  busy={serviceBusy === 'restart'}
-                >
-                  Перезапустить
-                </Button>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => void serviceAction('start')}
-                  disabled={!canMutate || serviceBusy !== null}
-                  busy={serviceBusy === 'start'}
-                >
-                  Запустить
-                </Button>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => {
-                    if (window.confirm('Остановить службу прокси на роутере?')) void serviceAction('stop');
-                  }}
-                  disabled={!canMutate || serviceBusy !== null}
-                  busy={serviceBusy === 'stop'}
-                >
-                  Остановить
-                </Button>
-              </div>
-              {autostartPartial ? (
-                <InfoBanner tone="warn">
-                  Отдельный автозапуск sing-box включён, но автозапуск {productLabel} выключен.
-                  После перезагрузки sing-box может подняться без управления продуктом. Включите
-                  автостарт {productLabel}, чтобы поднимались обе службы.
-                </InfoBanner>
-              ) : null}
-              {productSvc.present ? (
-                <div className="row" style={{ marginTop: 8 }}>
-                  {autostartEnabled ? (
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => {
-                        if (
-                          window.confirm(
-                            `Выключить автозапуск ${productLabel}? После перезагрузки роутера прокси и sing-box не запустятся автоматически. Сейчас службы продолжат работать.`,
-                          )
-                        ) {
-                          void serviceAction('disable');
-                        }
-                      }}
-                      disabled={!canMutate || serviceBusy !== null}
-                      busy={serviceBusy === 'disable'}
-                    >
-                      Выключить автостарт
-                    </Button>
-                  ) : (
-                    <Button
-                      variant="subtle"
-                      size="sm"
-                      onClick={() => void serviceAction('enable')}
-                      disabled={!canMutate || serviceBusy !== null}
-                      busy={serviceBusy === 'enable'}
-                    >
-                      Включить автостарт
-                    </Button>
-                  )}
-                </div>
-              ) : null}
-              <p className="muted-text small" style={{ margin: '8px 0 0' }}>
-                Автозапуск включает {productLabel}. При старте {productLabel} сам запускает
-                sing-box и намеренно отключает отдельный автозапуск sing-box — так устроены Prokop
-                и Forkop. Поэтому после перезагрузки поднимаются обе службы, а отдельная галочка
-                sing-box не нужна. Включение не запускает службы сразу, выключение не
-                останавливает их.
-              </p>
-            </Panel>
-
-            <Panel title="Возможности агента">
-              {state?.capabilities ? (
-                <pre className="code-block small">{JSON.stringify(state.capabilities, null, 2)}</pre>
-              ) : (
-                <Empty>Агент ещё не сообщал о возможностях.</Empty>
-              )}
-            </Panel>
-          </div>
-        </div>
+        <OverviewTab
+          router={router}
+          state={state}
+          managedEntries={managedEntries}
+          stateQuery={stateQuery}
+          onStateQueryChange={setStateQuery}
+          latest={latest ?? null}
+          serviceLabel={serviceText(state?.service)}
+          healthLabel={healthText(state?.health)}
+          proxyLabel={proxyHealth(latest?.proxy_health)}
+          productSvc={productSvc}
+          productLabel={productLabel}
+          singBoxAutostartLabel={singBoxAutostartLabel}
+          autostartEnabled={autostartEnabled}
+          autostartPartial={autostartPartial}
+          serviceAction={(action) => void serviceAction(action)}
+          serviceBusy={serviceBusy}
+          canMutate={canMutate}
+        />
       ) : null}
 
       {tab === 'dns' ? (
@@ -2278,106 +2147,14 @@ export function RouterDetailPage({ id }: { id: string }) {
       ) : null}
 
       {tab === 'metrics' ? (
-        <div className="stack">
-          <Panel
-            title="Задержка прокси"
-            subtitle="Прокси-здоровье измеряется отдельно от доступности роутера."
-            actions={
-              <div className="toolbar">
-                <Select value={String(hours)} onChange={(value) => setHours(Number(value))}>
-                  <option value="6">6 часов</option>
-                  <option value="24">24 часа</option>
-                  <option value="72">3 суток</option>
-                  <option value="168">7 суток</option>
-                </Select>
-                <Button size="sm" variant="ghost" onClick={() => void metrics.reload()} busy={metrics.loading}>
-                  Обновить
-                </Button>
-              </div>
-            }
-          >
-            {metrics.error ? <ErrorBanner message={metrics.error} onRetry={() => void metrics.reload()} /> : null}
-            {metrics.loading && !metrics.data ? <Spinner /> : <LatencyChart points={chartPoints} />}
-            {latest ? (
-              <p className="muted-text small">
-                Последний замер: {formatDate(latest.ts)} · прокси {proxyHealth(latest.proxy_health)} ·
-                живых соединений: {latest.total_tags !== null && latest.failed_tags !== null
-                  ? `${latest.total_tags - latest.failed_tags}/${latest.total_tags}`
-                  : '—'}
-              </p>
-            ) : null}
-          </Panel>
-
-          <Panel
-            title="Нестабильные соединения"
-            subtitle="Соединения, которые чаще всего не отвечали. Группа остаётся рабочей, если есть живые резервные соединения."
-            actions={
-              <Button
-                size="sm"
-                variant="ghost"
-                onClick={() => void connectionLosses.reload()}
-                busy={connectionLosses.loading}
-              >
-                Обновить
-              </Button>
-            }
-          >
-            {connectionLosses.error ? (
-              <ErrorBanner
-                message={connectionLosses.error}
-                onRetry={() => void connectionLosses.reload()}
-              />
-            ) : null}
-            {connectionLosses.loading && !connectionLosses.data ? (
-              <Spinner />
-            ) : (connectionLosses.data?.items.length ?? 0) === 0 ? (
-              <Empty>За выбранный период потерь связи не было.</Empty>
-            ) : (
-              <div className="table-wrap">
-                <table className="table">
-                  <thead>
-                    <tr>
-                      <th>Соединение</th>
-                      <th>Потерь связи</th>
-                      <th>Неудачных проверок</th>
-                      <th>Последняя потеря</th>
-                      <th>Сейчас</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {connectionLosses.data!.items.map((item) => (
-                      <tr key={item.tag}>
-                        <td>
-                          <code>{item.tag}</code>
-                        </td>
-                        <td>
-                          <strong>{item.losses}</strong>
-                        </td>
-                        <td className="muted-text small">
-                          {item.failed_samples} из {item.total_samples}
-                        </td>
-                        <td className="muted-text small">
-                          {item.last_failure ? formatRelative(item.last_failure) : '—'}
-                        </td>
-                        <td>
-                          {item.down_now ? (
-                            <StatusBadge status="warning" label="не отвечает" />
-                          ) : (
-                            <StatusBadge status="success" label="отвечает" />
-                          )}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
-            <p className="muted-text small">
-              Потерей считается эпизод, когда соединение перестало отвечать и затем
-              восстановилось. Показаны 10 самых нестабильных соединений за выбранный период.
-            </p>
-          </Panel>
-        </div>
+        <MetricsTab
+          hours={hours}
+          onHoursChange={setHours}
+          metrics={metrics}
+          connectionLosses={connectionLosses}
+          chartPoints={chartPoints}
+          latest={latest ?? null}
+        />
       ) : null}
 
       {tab === 'diagnostics' ? (
