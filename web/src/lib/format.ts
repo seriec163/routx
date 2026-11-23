@@ -111,6 +111,8 @@ export const JOB_TYPE: Record<string, string> = {
   bulk_update: 'Комплексное обновление',
   wifi_read: 'Чтение Wi-Fi',
   wifi_update: 'Настройка Wi-Fi',
+  wifi_create: 'Создание Wi-Fi',
+  wifi_delete: 'Удаление Wi-Fi',
   connections_apply: 'Подключения',
   list_connections: 'Чтение подключений',
   manage_connection: 'Изменение подключения',

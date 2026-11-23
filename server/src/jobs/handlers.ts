@@ -1758,6 +1758,43 @@ export async function wifiUpdate(ctx: HandlerContext, job: JobRow): Promise<Json
   return { name: iface, ...raw };
 }
 
+export async function wifiCreate(ctx: HandlerContext, job: JobRow): Promise<Json> {
+  requireRouter(job);
+  const ssid = asString(job.payload.ssid) ?? '';
+  if (!ssid) {
+    throw new JobFailure('invalid_payload', 'Не указан SSID новой Wi-Fi сети');
+  }
+  const radios = Array.isArray(job.payload.radios)
+    ? job.payload.radios.filter((item): item is string => typeof item === 'string')
+    : [];
+  const raw = await runCommand(
+    ctx,
+    job,
+    'wifi_create',
+    {
+      ssid,
+      encryption: asString(job.payload.encryption) ?? 'none',
+      key: asString(job.payload.key) ?? '',
+      hidden: job.payload.hidden === true,
+      disabled: job.payload.disabled === true,
+      isolate: job.payload.isolate === true,
+      radios,
+    },
+    240_000,
+  );
+  return raw;
+}
+
+export async function wifiDelete(ctx: HandlerContext, job: JobRow): Promise<Json> {
+  requireRouter(job);
+  const iface = asString(job.payload.iface) ?? '';
+  if (!/^[A-Za-z0-9_]{1,64}$/.test(iface)) {
+    throw new JobFailure('invalid_payload', 'Некорректное имя Wi-Fi сети');
+  }
+  const raw = await runCommand(ctx, job, 'wifi_delete', { iface }, 180_000);
+  return { name: iface, ...raw };
+}
+
 export async function componentCheck(ctx: HandlerContext, job: JobRow): Promise<Json> {  const routerId = requireRouter(job);
   const router = await ctx.pool.query<{ product: string }>(
     'select product from routers where id = $1',
@@ -2762,6 +2799,8 @@ export const HANDLERS: Record<string, JobHandler> = {
   bulk_update: bulkUpdate,
   wifi_read: wifiRead,
   wifi_update: wifiUpdate,
+  wifi_create: wifiCreate,
+  wifi_delete: wifiDelete,
   dns_benchmark: dnsBenchmark,
   connections_apply: applyRouterConnections,
   list_connections: listConnections,

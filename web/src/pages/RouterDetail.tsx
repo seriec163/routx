@@ -749,6 +749,19 @@ export function RouterDetailPage({ id }: { id: string }) {
   });
   const [wifiSaveBusy, setWifiSaveBusy] = useState(false);
   const wifiAutoLoaded = useRef(false);
+  const [wifiCreateOpen, setWifiCreateOpen] = useState(false);
+  const [wifiCreateForm, setWifiCreateForm] = useState({
+    ssid: '',
+    encryption: 'psk2',
+    key: '',
+    hidden: false,
+    disabled: false,
+    isolate: false,
+    radios: [] as string[],
+  });
+  const [wifiCreateBusy, setWifiCreateBusy] = useState(false);
+  const [wifiDelete, setWifiDelete] = useState<WifiInterface | null>(null);
+  const [wifiDeleteBusy, setWifiDeleteBusy] = useState(false);
 
   const connections = useApi<{ managed_section: string; items: RouterConnection[] }>(
     tab === 'connections' ? `/api/v1/routers/${id}/connections` : null,
@@ -1183,6 +1196,110 @@ export function RouterDetailPage({ id }: { id: string }) {
       toast.error(errorMessage(caught));
     } finally {
       setWifiSaveBusy(false);
+    }
+  }
+
+  function openWifiCreate(): void {
+    setWifiCreateForm({
+      ssid: '',
+      encryption: 'psk2',
+      key: '',
+      hidden: false,
+      disabled: false,
+      isolate: false,
+      radios: wifi?.radios.map((radio) => radio.name) ?? [],
+    });
+    setWifiCreateOpen(true);
+  }
+
+  async function createWifi(): Promise<void> {
+    const ssid = wifiCreateForm.ssid.trim();
+    if (!ssid) {
+      toast.error('Укажите SSID');
+      return;
+    }
+    if (ssid.length > 32) {
+      toast.error('SSID не может быть длиннее 32 символов');
+      return;
+    }
+    const needsKey = WIFI_KEY_ENCRYPTIONS.has(wifiCreateForm.encryption);
+    const key = wifiCreateForm.key.trim();
+    if (needsKey && !key) {
+      toast.error('Для защищённой сети задайте пароль');
+      return;
+    }
+    if (needsKey && key.length < 8) {
+      toast.error('Пароль Wi-Fi должен быть не короче 8 символов');
+      return;
+    }
+    if (wifi && wifi.radios.length > 0 && wifiCreateForm.radios.length === 0) {
+      toast.error('Выберите хотя бы один радиомодуль');
+      return;
+    }
+
+    const body: Record<string, unknown> = {
+      ssid,
+      encryption: wifiCreateForm.encryption,
+      hidden: wifiCreateForm.hidden,
+      disabled: wifiCreateForm.disabled,
+      isolate: wifiCreateForm.isolate,
+    };
+    if (needsKey && key) body.key = key;
+    if (wifiCreateForm.radios.length > 0) body.radios = wifiCreateForm.radios;
+
+    setWifiCreateBusy(true);
+    try {
+      const started = await api<{ job: Job }>(`/api/v1/routers/${id}/wifi`, {
+        method: 'POST',
+        body,
+      });
+      if (!online) {
+        toast.success('Задание в очереди: сеть появится после подключения роутера');
+        setWifiCreateOpen(false);
+        return;
+      }
+      const done = await waitJob(started.job, 300_000);
+      if (done.status !== 'success') {
+        throw new Error(done.error?.message ?? `Создание Wi-Fi завершилось: ${done.status}`);
+      }
+      toast.success('Wi-Fi сеть создана');
+      setWifiCreateOpen(false);
+      await readWifi();
+      void detail.reload();
+    } catch (caught) {
+      toast.error(errorMessage(caught));
+    } finally {
+      setWifiCreateBusy(false);
+    }
+  }
+
+  async function deleteWifi(): Promise<void> {
+    if (!wifiDelete) return;
+    const target = wifiDelete;
+    setWifiDeleteBusy(true);
+    try {
+      const started = await api<{ job: Job }>(`/api/v1/routers/${id}/wifi/${target.name}`, {
+        method: 'DELETE',
+      });
+      if (!online) {
+        toast.success('Задание в очереди: сеть будет удалена после подключения роутера');
+        setWifiDelete(null);
+        setWifiEdit(null);
+        return;
+      }
+      const done = await waitJob(started.job, 240_000);
+      if (done.status !== 'success') {
+        throw new Error(done.error?.message ?? `Удаление Wi-Fi завершилось: ${done.status}`);
+      }
+      toast.success('Wi-Fi сеть удалена');
+      setWifiDelete(null);
+      setWifiEdit(null);
+      await readWifi();
+      void detail.reload();
+    } catch (caught) {
+      toast.error(errorMessage(caught));
+    } finally {
+      setWifiDeleteBusy(false);
     }
   }
 
@@ -3155,15 +3272,25 @@ export function RouterDetailPage({ id }: { id: string }) {
             title="Wi-Fi сети"
             subtitle="Сети читаются через агент из /etc/config/wireless. Текущие пароли не показываются: можно задать новый пароль или оставить поле пустым."
             actions={
-              <Button
-                size="sm"
-                variant="ghost"
-                onClick={() => void readWifi()}
-                busy={wifiBusy}
-                disabled={!online}
-              >
-                Прочитать Wi-Fi
-              </Button>
+              <>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => void readWifi()}
+                  busy={wifiBusy}
+                  disabled={!online}
+                >
+                  Прочитать Wi-Fi
+                </Button>
+                <Button
+                  size="sm"
+                  variant="subtle"
+                  onClick={openWifiCreate}
+                  disabled={Boolean(router?.archived_at)}
+                >
+                  Добавить сеть
+                </Button>
+              </>
             }
           >
             {wifiError ? <ErrorBanner message={wifiError} /> : null}
@@ -3337,12 +3464,169 @@ export function RouterDetailPage({ id }: { id: string }) {
         </div>
       ) : null}
 
+      {wifiCreateOpen ? (
+        <Modal
+          title="Новая Wi-Fi сеть"
+          onClose={() => setWifiCreateOpen(false)}
+          footer={
+            <>
+              <Button
+                variant="ghost"
+                onClick={() => setWifiCreateOpen(false)}
+                disabled={wifiCreateBusy}
+              >
+                Отмена
+              </Button>
+              <Button
+                onClick={() => void createWifi()}
+                busy={wifiCreateBusy}
+                disabled={wifiCreateBusy}
+              >
+                {online ? 'Создать' : 'Поставить в очередь'}
+              </Button>
+            </>
+          }
+        >
+          {!online ? (
+            <InfoBanner>
+              Роутер не в сети. Задание сохранится в очереди и выполнится автоматически, когда
+              роутер подключится.
+            </InfoBanner>
+          ) : null}
+          <InfoBanner tone="warn">
+            Создание и применение сети перезапустит Wi-Fi. Подключённые клиенты могут отключиться;
+            если панель открыта по Wi-Fi, лучше управлять по кабелю.
+          </InfoBanner>
+
+          {wifi && wifi.radios.length > 0 ? (
+            <Field label="Радиомодули" hint="На каких радио создать сеть.">
+              <div className="stack">
+                {wifi.radios.map((radio) => (
+                  <label className="check-row" key={radio.name}>
+                    <input
+                      type="checkbox"
+                      checked={wifiCreateForm.radios.includes(radio.name)}
+                      onChange={(event) =>
+                        setWifiCreateForm((current) => ({
+                          ...current,
+                          radios: event.target.checked
+                            ? [...current.radios, radio.name]
+                            : current.radios.filter((name) => name !== radio.name),
+                        }))
+                      }
+                    />
+                    <span>
+                      {radio.name}
+                      {radio.band ? ` · ${radio.band}` : ''}
+                      {radio.disabled ? ' · сейчас отключён' : ''}
+                    </span>
+                  </label>
+                ))}
+              </div>
+            </Field>
+          ) : (
+            <InfoBanner>
+              Радиомодули ещё не прочитаны. Сеть будет создана на всех доступных радио после
+              подключения роутера.
+            </InfoBanner>
+          )}
+
+          <Field label="SSID" hint="Имя новой Wi-Fi сети, до 32 символов.">
+            <TextInput
+              value={wifiCreateForm.ssid}
+              onChange={(value) =>
+                setWifiCreateForm((current) => ({ ...current, ssid: value }))
+              }
+              placeholder="Например, Guest Wi-Fi"
+              required
+            />
+          </Field>
+          <Field label="Шифрование">
+            <Select
+              value={wifiCreateForm.encryption}
+              onChange={(value) =>
+                setWifiCreateForm((current) => ({ ...current, encryption: value }))
+              }
+            >
+              <option value="none">Без пароля</option>
+              <option value="owe">OWE — шифрование без пароля</option>
+              <option value="psk">WPA-PSK</option>
+              <option value="psk2">WPA2-PSK</option>
+              <option value="psk-mixed">WPA/WPA2 mixed</option>
+              <option value="sae">WPA3-SAE</option>
+              <option value="sae-mixed">WPA2/WPA3 mixed</option>
+            </Select>
+          </Field>
+          {WIFI_KEY_ENCRYPTIONS.has(wifiCreateForm.encryption) ? (
+            <Field label="Пароль" hint="Не короче 8 символов.">
+              <TextInput
+                type="password"
+                value={wifiCreateForm.key}
+                onChange={(value) =>
+                  setWifiCreateForm((current) => ({ ...current, key: value }))
+                }
+                placeholder="Пароль Wi-Fi"
+                autoComplete="new-password"
+              />
+            </Field>
+          ) : null}
+          <div className="stack">
+            <label className="check-row">
+              <input
+                type="checkbox"
+                checked={wifiCreateForm.hidden}
+                onChange={(event) =>
+                  setWifiCreateForm((current) => ({
+                    ...current,
+                    hidden: event.target.checked,
+                  }))
+                }
+              />
+              <span>Скрытая сеть (не показывать SSID)</span>
+            </label>
+            <label className="check-row">
+              <input
+                type="checkbox"
+                checked={wifiCreateForm.disabled}
+                onChange={(event) =>
+                  setWifiCreateForm((current) => ({
+                    ...current,
+                    disabled: event.target.checked,
+                  }))
+                }
+              />
+              <span>Создать отключённой</span>
+            </label>
+            <label className="check-row">
+              <input
+                type="checkbox"
+                checked={wifiCreateForm.isolate}
+                onChange={(event) =>
+                  setWifiCreateForm((current) => ({
+                    ...current,
+                    isolate: event.target.checked,
+                  }))
+                }
+              />
+              <span>Изолировать клиентов друг от друга</span>
+            </label>
+          </div>
+        </Modal>
+      ) : null}
+
       {wifiEdit ? (
         <Modal
           title={`Wi-Fi: ${wifiEdit.ssid || wifiEdit.name}`}
           onClose={() => setWifiEdit(null)}
           footer={
             <>
+              <Button
+                variant="danger"
+                onClick={() => wifiEdit && setWifiDelete(wifiEdit)}
+                disabled={wifiSaveBusy || wifiDeleteBusy}
+              >
+                Удалить
+              </Button>
               <Button
                 variant="ghost"
                 onClick={() => setWifiEdit(null)}
@@ -3459,6 +3743,29 @@ export function RouterDetailPage({ id }: { id: string }) {
             </label>
           </div>
         </Modal>
+      ) : null}
+
+      {wifiDelete ? (
+        <ConfirmDialog
+          title="Удалить Wi-Fi сеть?"
+          danger
+          busy={wifiDeleteBusy}
+          confirmLabel="Удалить"
+          onCancel={() => setWifiDelete(null)}
+          onConfirm={() => void deleteWifi()}
+          message={
+            <>
+              <p>
+                Сеть <strong>{wifiDelete.ssid || wifiDelete.name}</strong> ({wifiDelete.name}) будет
+                удалена из конфигурации роутера.
+              </p>
+              <p className="muted-text">
+                Подключённые к ней клиенты отключатся. Если роутер не в сети, удаление выполнится
+                после подключения.
+              </p>
+            </>
+          }
+        />
       ) : null}
 
       {connectionOpen ? (

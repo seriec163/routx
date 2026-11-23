@@ -33,6 +33,8 @@ export type JobType =
   | 'bulk_update'
   | 'wifi_read'
   | 'wifi_update'
+  | 'wifi_create'
+  | 'wifi_delete'
   | 'connections_apply'
   | 'list_connections'
   | 'manage_connection'

@@ -108,6 +108,41 @@ function backup() {
 		fs.unlink(BACKUP_DIR + "/" + backups[i]);
 }
 
+function uci_bin() {
+	return util.file_exists("/sbin/uci") ? "/sbin/uci" : "/usr/bin/uci";
+}
+
+function uci_run(args) {
+	let bin = uci_bin();
+	if (!util.file_exists(bin))
+		return { ok: false, error: "Не найден uci" };
+	let argv = [ bin ];
+	for (let arg in args)
+		push(argv, arg);
+	return run.run(argv, 20);
+}
+
+function uci_revert() {
+	uci_run([ "revert", CONFIG ]);
+}
+
+function reload_wifi() {
+	let bin = util.file_exists("/sbin/wifi") ? "/sbin/wifi" : "/usr/bin/wifi";
+	if (!util.file_exists(bin))
+		return { applied: false, error: "Не найден /sbin/wifi" };
+	let res = run.run([ bin, "reload" ], 90);
+	return { applied: res.ok, error: res.ok ? "" : run.error_text(res) };
+}
+
+function section_slug(value) {
+	let text = replace(as_string(value), /[^A-Za-z0-9_]+/g, "_");
+	if (length(text) > 24)
+		text = substr(text, 0, 24);
+	if (text == "")
+		text = "wifi";
+	return text;
+}
+
 function valid_key(value) {
 	let key = as_string(value);
 	if (length(key) >= 8 && length(key) <= 63)
@@ -190,17 +225,9 @@ function update(iface, changes) {
 	if (cursor.commit(CONFIG) == null)
 		return { ok: false, error: "Не удалось сохранить /etc/config/wireless" };
 
-	let applied = false;
-	let apply_error = "";
-	let wifi_bin = util.file_exists("/sbin/wifi") ? "/sbin/wifi" : "/usr/sbin/wifi";
-	if (util.file_exists(wifi_bin)) {
-		let res = run.run([ wifi_bin, "reload" ], 90);
-		applied = res.ok;
-		if (!res.ok)
-			apply_error = run.error_text(res);
-	} else {
-		apply_error = "Не найден /sbin/wifi";
-	}
+	let reload = reload_wifi();
+	let applied = reload.applied;
+	let apply_error = reload.error;
 
 	let updated = read_iface(uci.cursor(), name);
 	return {
@@ -213,4 +240,176 @@ function update(iface, changes) {
 	};
 }
 
-return { read, update };
+function create(options) {
+	if (type(options) != "object")
+		return { ok: false, error: "Нет данных новой Wi-Fi сети" };
+	let ssid = trim(as_string(options.ssid));
+	if (ssid == "" || length(ssid) > 32 || has_control_chars(ssid))
+		return { ok: false, error: "SSID должен быть от 1 до 32 символов" };
+	let encryption = as_string(options.encryption) || "none";
+	if (index(ENCRYPTIONS, encryption) < 0)
+		return { ok: false, error: "Неподдерживаемый тип шифрования" };
+	let key = as_string(options.key);
+	if (needs_key(encryption)) {
+		if (key == "" || !valid_key(key))
+			return { ok: false, error: "Пароль Wi-Fi должен быть от 8 до 63 символов или 64 hex" };
+	} else if (key != "") {
+		return { ok: false, error: "Для открытой сети пароль не нужен" };
+	}
+	let hidden = type(options.hidden) == "bool" ? options.hidden : false;
+	let disabled = type(options.disabled) == "bool" ? options.disabled : false;
+	let isolate = type(options.isolate) == "bool" ? options.isolate : false;
+
+	let cursor = uci.cursor();
+	let all = cursor.get_all(CONFIG);
+	if (type(all) != "object")
+		all = {};
+	let devices = [];
+	for (let name, section in all)
+		if (type(section) == "object" && section[".type"] == "wifi-device")
+			push(devices, name);
+	if (length(devices) == 0)
+		return { ok: false, error: "На роутере не найдены Wi-Fi радиомодули" };
+
+	let requested = options.radios;
+	let selected = [];
+	let skipped = [];
+	if (type(requested) == "array" && length(requested) > 0) {
+		for (let item in requested) {
+			let name = as_string(item);
+			if (index(devices, name) >= 0)
+				push(selected, name);
+			else
+				push(skipped, name);
+		}
+	} else {
+		for (let device in devices)
+			push(selected, device);
+	}
+	if (length(selected) == 0)
+		return { ok: false, error: "Выбранные радиомодули не найдены" };
+
+	// Не создаём второй AP с тем же SSID на том же радио.
+	let unique = [];
+	for (let device in selected) {
+		let duplicate = false;
+		for (let name, section in all) {
+			if (type(section) == "object" && section[".type"] == "wifi-iface" &&
+			    as_string(section.device) == device && as_string(section.ssid) == ssid)
+				duplicate = true;
+		}
+		if (duplicate)
+			push(skipped, device);
+		else
+			push(unique, device);
+	}
+	if (length(unique) == 0)
+		return { ok: false, error: "Сеть с таким SSID уже существует на выбранных радиомодулях" };
+
+	let backup_error = "";
+	try {
+		backup();
+	} catch (e) {
+		backup_error = as_string(e);
+	}
+
+	let used = {};
+	let created_meta = [];
+	for (let device in unique) {
+		let add = uci_run([ "add", CONFIG, "wifi-iface" ]);
+		if (!add.ok) {
+			uci_revert();
+			return { ok: false, error: run.error_text(add) || "Не удалось создать секцию Wi-Fi" };
+		}
+		let generated = run.first_line(add.stdout);
+		if (generated == "") {
+			uci_revert();
+			return { ok: false, error: "uci add не вернул имя секции" };
+		}
+		let base = "routx_" + section_slug(ssid) + "_" + device;
+		let name = base;
+		let suffix = 2;
+		while (all[name] != null || used[name]) {
+			name = base + "_" + suffix;
+			suffix++;
+		}
+		used[name] = true;
+		let rename = uci_run([ "rename", CONFIG + "." + generated + "=" + name ]);
+		if (!rename.ok) {
+			uci_revert();
+			return { ok: false, error: run.error_text(rename) || "Не удалось переименовать секцию" };
+		}
+		push(created_meta, { name: name, device: device });
+	}
+
+	// Свежий курсор нужен после uci add/rename: старый не знает о новых
+	// секциях, и set() в него молча не применяется.
+	let writer = uci.cursor();
+	for (let entry in created_meta) {
+		let name = entry.name;
+		writer.set(CONFIG, name, "device", entry.device);
+		writer.set(CONFIG, name, "mode", "ap");
+		writer.set(CONFIG, name, "network", "lan");
+		writer.set(CONFIG, name, "ssid", ssid);
+		writer.set(CONFIG, name, "encryption", encryption);
+		if (needs_key(encryption))
+			writer.set(CONFIG, name, "key", key);
+		writer.set(CONFIG, name, "hidden", hidden ? "1" : "0");
+		writer.set(CONFIG, name, "disabled", disabled ? "1" : "0");
+		writer.set(CONFIG, name, "isolate", isolate ? "1" : "0");
+	}
+	if (writer.commit(CONFIG) == null) {
+		uci_revert();
+		return { ok: false, error: "Не удалось сохранить /etc/config/wireless" };
+	}
+
+	let reload = reload_wifi();
+	let created = [];
+	let read_cursor = uci.cursor();
+	for (let entry in created_meta) {
+		let item = read_iface(read_cursor, entry.name);
+		if (item != null)
+			push(created, item);
+	}
+
+	return {
+		ok: true,
+		created: created,
+		skipped: skipped,
+		applied: reload.applied,
+		error: reload.error,
+		backup_error: backup_error
+	};
+}
+
+function remove(iface) {
+	let name = as_string(iface);
+	if (name == "")
+		return { ok: false, error: "Не указана Wi-Fi сеть" };
+	let cursor = uci.cursor();
+	let all = cursor.get_all(CONFIG);
+	let section = all != null ? all[name] : null;
+	if (type(section) != "object" || section[".type"] != "wifi-iface")
+		return { ok: false, error: "Wi-Fi сеть не найдена" };
+
+	let backup_error = "";
+	try {
+		backup();
+	} catch (e) {
+		backup_error = as_string(e);
+	}
+
+	cursor.delete(CONFIG, name);
+	if (cursor.commit(CONFIG) == null)
+		return { ok: false, error: "Не удалось сохранить /etc/config/wireless" };
+	let reload = reload_wifi();
+	return {
+		ok: true,
+		deleted: name,
+		applied: reload.applied,
+		error: reload.error,
+		backup_error: backup_error
+	};
+}
+
+return { read, update, create, remove };

@@ -19,6 +19,8 @@ export const MUTATING_OPS = new Set([
   'product_switch',
   'component_action',
   'wifi_update',
+  'wifi_create',
+  'wifi_delete',
 ]);
 
 export const READ_OPS = new Set([

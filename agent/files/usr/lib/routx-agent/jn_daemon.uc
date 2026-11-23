@@ -80,6 +80,18 @@ function handle_command(cmd) {
 				return { status: "failed", error: { code: "wifi_update_failed", message: util.as_string(res.error) } };
 			return { status: "success", result: res };
 		}
+		if (op == "wifi_create") {
+			let res = wifi.create(args);
+			if (!res.ok)
+				return { status: "failed", error: { code: "wifi_create_failed", message: util.as_string(res.error) } };
+			return { status: "success", result: res };
+		}
+		if (op == "wifi_delete") {
+			let res = wifi.remove(args.iface);
+			if (!res.ok)
+				return { status: "failed", error: { code: "wifi_delete_failed", message: util.as_string(res.error) } };
+			return { status: "success", result: res };
+		}
 		if (op == "reload") {
 			let res = ops.reload(product);
 			if (!res.ok) return { status: "failed", error: { code: "reload_failed", message: res.error } };
