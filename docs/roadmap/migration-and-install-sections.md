@@ -355,8 +355,10 @@ stderr и итог в `/var/log/routx-agent-update.log`, проверяет ус
 4. Лимиты контейнеров и параметры Postgres в обоих compose-файлах
    (настраиваются через `RC_*_MEM_LIMIT`, `RC_DB_*`).
 
-Осталось: разбиение `RouterDetail.tsx` (4 561 строка) на вкладки и SSE вместо
-опроса — вынесено в отдельную задачу, чтобы не ломать большой UI за один шаг.
+Осталось: дальнейшее разбиение `RouterDetail.tsx` — четыре самостоятельных
+компонента (`CompactSecretForm`, `DnsApplyModal`, `CredentialPanel`,
+`DiffFlowModal`) уже вынесены в `web/src/pages/router-detail/`, страница
+уменьшилась примерно на 500 строк; вкладки пока остаются внутри.
 
 1. Ленивая загрузка страниц, `ErrorBoundary`, разбиение `RouterDetail.tsx`.
 2. `AbortController` и защита от гонок в `useApi`, visibility-aware polling,
