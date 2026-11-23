@@ -3320,11 +3320,6 @@ export function RouterDetailPage({ id }: { id: string }) {
                     phy: {wifi.hardware.phys.join(', ')}
                   </span>
                 ) : null}
-                {wifi.hardware.interfaces && wifi.hardware.interfaces.length > 0 ? (
-                  <span className="muted-text small">
-                    интерфейсы: {wifi.hardware.interfaces.join(', ')}
-                  </span>
-                ) : null}
               </div>
             ) : null}
             {wifi?.hardware && !wifi.hardware.present ? (
