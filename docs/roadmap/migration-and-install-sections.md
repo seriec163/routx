@@ -398,8 +398,11 @@ stderr и итог в `/var/log/routx-agent-update.log`, проверяет ус
   `server/src/agent/schemas.ts`, `npm run contract:agent` генерирует
   `docs/architecture/agent-openapi.json`; CI проверяет, что файл не устарел.
   Общий контракт для пользовательского API (все `/api/v1`) — следующий этап.
-* 4 — добавлен ESLint (`npm run lint`) и шаг в CI; разбиение
-  `jobs/handlers.ts` и `routers/routes.ts` на домены — отдельная задача.
+* 4 — добавлен ESLint (`npm run lint`) и шаг в CI. `jobs/handlers.ts`
+  разбит: 2 680 → ~82 строки (реестр), домены вынесены в
+  `jobs/handlers/{wifi,agent,monitor,operations,apply,connections,singbox,products}.ts`,
+  общие части — в `jobs/{helpers,state,errors}.ts`. Осталось разбиение
+  `routers/routes.ts`.
 * 5 — архитектура зеркала вынесена в `RC_MIRROR_ARCH`; кэшированные ассеты
   отдаются потоком (`findCachedAsset` + `createReadStream`), а не буфером.
   Ленивая загрузка «только нужных файлов» остаётся.
