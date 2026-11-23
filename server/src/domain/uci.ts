@@ -427,6 +427,40 @@ export function sectionStates(managed: Record<string, UciValue>): Map<string, Se
 }
 
 /**
+ * Собирает минимальное описание секций из `managed`, если агент ещё не
+ * присылал полный `read_state` (например, сразу после установки). Полные
+ * подписки/ссылки/списки подтянет первый `refresh_state`.
+ */
+export interface ManagedSectionSummary {
+  section: string;
+  options: Record<string, UciValue>;
+  subscriptions: unknown[];
+  links: unknown[];
+  lists: Record<string, unknown>;
+}
+
+export function sectionsFromManaged(managed: Record<string, UciValue>): ManagedSectionSummary[] {
+  const collected = new Map<string, Record<string, UciValue>>();
+  for (const [path, value] of Object.entries(managed ?? {})) {
+    const match = /^section\.([A-Za-z0-9_.-]{1,64})\.([A-Za-z0-9_]{1,64})$/.exec(path);
+    if (!match) continue;
+    const name = match[1]!;
+    const options = collected.get(name) ?? {};
+    options[match[2]!] = value;
+    collected.set(name, options);
+  }
+  return [...collected.entries()]
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([section, options]) => ({
+      section,
+      options,
+      subscriptions: [],
+      links: [],
+      lists: {},
+    }));
+}
+
+/**
  * Выбирает основную секцию роутера без привязки к конкретному имени.
  *
  * Если текущая секция существует и включена — оставляем её. Если она пустая,
@@ -591,6 +625,36 @@ export function mapTemplateSections(
   if (missing.length === 0) {
     return { payload, sectionMap: {}, warnings: [] };
   }
+
+  const options = enabledConnectionSections();
+
+  // Чистая установка: на роутере ещё нет ни одной секции с подключением.
+  // Секции шаблона с действием создаются агентом (creatableSections), поэтому
+  // не требуем сначала заводить подключение вручную.
+  if (options.length === 0) {
+    const creatable = new Set(creatableSections(payload));
+    const cannotCreate = missing
+      .map(([name]) => name)
+      .filter((name) => !creatable.has(name));
+    if (cannotCreate.length === 0) {
+      return {
+        payload,
+        sectionMap: {},
+        warnings: [
+          `На роутере нет секций с подключением. Будут созданы: ${missing
+            .map(([name]) => `«${name}»`)
+            .join(', ')}.`,
+        ],
+      };
+    }
+    throw badRequest(
+      'section_without_connection',
+      `Секция «${cannotCreate[0]}» с действием «${String(
+        payload.sections[cannotCreate[0]!]?.action,
+      )}» не существует на роутере, и нет секции с подключением, к которой её можно привязать. Добавьте подписку или VLESS, затем повторите сравнение.`,
+    );
+  }
+
   if (missing.length > 1) {
     throw badRequest(
       'section_mapping_required',
@@ -599,13 +663,6 @@ export function mapTemplateSections(
   }
 
   const [sourceName, sourceOptions] = missing[0]!;
-  const options = enabledConnectionSections();
-  if (options.length === 0) {
-    throw badRequest(
-      'section_without_connection',
-      `Секция «${sourceName}» с действием «${String(sourceOptions.action)}» не существует на роутере, и нет секции с подключением, к которой её можно привязать. Добавьте подписку или VLESS, затем повторите сравнение.`,
-    );
-  }
   if (options.length > 1) {
     throw badRequest(
       'section_ambiguous',

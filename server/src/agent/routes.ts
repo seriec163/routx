@@ -17,6 +17,8 @@ import {
   type AgentAuthContext,
 } from './service.js';
 import { sanitizeAgentState } from '../domain/uci.js';
+import { syncManagedSection } from '../domain/managed-section.js';
+import { enqueueJob } from '../jobs/queue.js';
 import { createMobileLink } from '../mobile/service.js';
 import { notifyRouterOwner } from '../notifications.js';
 
@@ -901,6 +903,23 @@ export async function registerAgentRoutes(
         );
         await client.query('commit');
 
+        // Сразу после привязки читаем полное состояние: `probe` приносит только
+        // `managed`, а подписки, ссылки и списки появляются из `read_state`.
+        void enqueueJob(pool, {
+          type: 'refresh_state',
+          routerId: target.id,
+          requestedBy: token.created_by,
+          timeoutSeconds: 90,
+          maxAttempts: 1,
+          payload: {},
+          idempotencyKey: `bind-refresh:${target.id}:${token.id}`,
+        }).catch((error) => {
+          request.log.warn(
+            { err: error, router: target.id },
+            'не удалось поставить задачу первичного чтения состояния',
+          );
+        });
+
         const settings = await loadSettings(pool);
 
         await audit(pool, {
@@ -1036,14 +1055,21 @@ export async function registerAgentRoutes(
 
         if (body.managed) {
           const managed = sanitizeAgentState(body.managed);
-          const { stateHash } = await import('../domain/uci.js');
+          const { stateHash, sectionsFromManaged } = await import('../domain/uci.js');
+          const sections = sectionsFromManaged(managed);
           await client.query(
-            `insert into router_state (router_id, managed, state_hash, health, service, capabilities, collected_at, source)
-             values ($1,$2::jsonb,$3,$4::jsonb,$5::jsonb,$6::jsonb, now(), 'probe')
+            `insert into router_state (router_id, managed, state_hash, health, service, capabilities, sections, collected_at, source)
+             values ($1,$2::jsonb,$3,$4::jsonb,$5::jsonb,$6::jsonb,$7::jsonb, now(), 'probe')
              on conflict (router_id) do update
                set managed = excluded.managed, state_hash = excluded.state_hash,
                    health = excluded.health, service = excluded.service,
-                   capabilities = excluded.capabilities, collected_at = now(),
+                   capabilities = excluded.capabilities,
+                   sections = case
+                     when router_state.sections is null
+                       or jsonb_array_length(router_state.sections) = 0
+                     then excluded.sections
+                     else router_state.sections end,
+                   collected_at = now(),
                    source = 'probe'`,
             [
               agent.routerId,
@@ -1052,8 +1078,10 @@ export async function registerAgentRoutes(
               JSON.stringify(body.health ?? {}),
               JSON.stringify(body.service ?? {}),
               JSON.stringify(body.capabilities ?? {}),
+              JSON.stringify(sections),
             ],
           );
+          await syncManagedSection(client, agent.routerId, managed);
         }
         await client.query('commit');
       } catch (error) {

@@ -571,7 +571,7 @@ export async function registerRouterRoutes(app: FastifyInstance, ctx: RouteConte
     const params = z.object({ id: z.string().uuid() }).parse(request.params);
     await getRouter(pool, auth, params.id);
     const result = await pool.query(
-      'select managed, state_hash, health, service, capabilities, collected_at, source from router_state where router_id = $1',
+      'select managed, state_hash, health, service, capabilities, sections, collected_at, source from router_state where router_id = $1',
       [params.id],
     );
     return { state: result.rows[0] ?? null };

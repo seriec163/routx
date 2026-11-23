@@ -4,6 +4,7 @@ import {
   computePlan,
   mapTemplateSections,
   resolveManagedSection,
+  sectionsFromManaged,
   templatePayloadSchema,
 } from '../src/domain/uci.js';
 
@@ -229,15 +230,40 @@ describe('план шаблона', () => {
     expect(mapped.payload.sections.router_control).toBeUndefined();
   });
 
-  it('останавливает diff, если секции с подключением нет', () => {
-    expect(() =>
-      mapTemplateSections(payload({ create_sections: [], manual_entries: {} }), {
-        'section.other.action': 'reject',
-      }),
-    ).toThrow(/нет секции с подключением/);
+  it('создаёт секцию на чистой установке вместо ошибки', () => {
+    const mapped = mapTemplateSections(payload({ create_sections: ['router_control'] }), {});
+
+    expect(mapped.sectionMap).toEqual({});
+    expect(mapped.payload.sections.router_control?.action).toBe('connection');
+    expect(mapped.warnings.join(' ')).toMatch(/Будут созданы/);
+
+    const plan = computePlan(mapped.payload, {}, []);
+    expect(
+      plan.items.some((item) => item.op === 'add' && item.path === 'section.router_control.action'),
+    ).toBe(true);
+    expect(plan.createSections).toContain('router_control');
   });
 
-  it('останавливает diff, если подходящих секций несколько', () => {
+  it('создаёт несколько секций на чистой установке', () => {
+    const mapped = mapTemplateSections(
+      payload({
+        sections: {
+          first: { action: 'connection', enabled: '1' },
+          second: { action: 'connection', enabled: '1' },
+        },
+        create_sections: [],
+        manual_entries: {},
+      }),
+      {},
+    );
+
+    expect(Object.keys(mapped.payload.sections).sort()).toEqual(['first', 'second']);
+    expect(mapped.sectionMap).toEqual({});
+    expect(mapped.warnings.join(' ')).toMatch(/«first»/);
+    expect(mapped.warnings.join(' ')).toMatch(/«second»/);
+  });
+
+  it('по-прежнему останавливает diff при неоднозначной привязке', () => {
     expect(() =>
       mapTemplateSections(payload({ create_sections: [], manual_entries: {} }), {
         'section.gga.action': 'connection',
@@ -246,6 +272,25 @@ describe('план шаблона', () => {
         'subscription_url.cfg2.section': 'vpn',
       }),
     ).toThrow(/несколько секций с подключением/);
+  });
+
+  it('собирает минимальные секции из managed без read_state', () => {
+    const sections = sectionsFromManaged({
+      'section.rc_main.action': 'connection',
+      'section.rc_main.enabled': '1',
+      'section.rc_main.label': 'RoutX',
+      'settings.log_level': 'warn',
+    });
+
+    expect(sections).toEqual([
+      {
+        section: 'rc_main',
+        options: { action: 'connection', enabled: '1', label: 'RoutX' },
+        subscriptions: [],
+        links: [],
+        lists: {},
+      },
+    ]);
   });
 
   it('строит diff с add для новой секции', () => {

@@ -1,4 +1,4 @@
-import type { Pool } from 'pg';
+import type { Pool, PoolClient } from 'pg';
 import { resolveManagedSection, type UciValue } from './uci.js';
 
 /**
@@ -46,6 +46,32 @@ export async function resolveRouterSection(
 
   if (resolved && resolved !== current) {
     await pool.query('update routers set managed_section = $2, updated_at = now() where id = $1', [
+      routerId,
+      resolved,
+    ]);
+  }
+  return resolved;
+}
+
+/**
+ * Синхронизирует `routers.managed_section` с присланным состоянием агента.
+ *
+ * Используется и полным `read_state`, и коротким `probe` сразу после установки:
+ * иначе свежий роутер остаётся с пустым `managed_section` до ручного обновления.
+ */
+export async function syncManagedSection(
+  db: Pool | PoolClient,
+  routerId: string,
+  managed: Record<string, UciValue> | null | undefined,
+): Promise<string | null> {
+  const router = await db.query<{ managed_section: string | null }>(
+    'select managed_section from routers where id = $1',
+    [routerId],
+  );
+  const current = router.rows[0]?.managed_section ?? null;
+  const resolved = resolveManagedSection(managed ?? {}, current);
+  if (resolved && resolved !== current) {
+    await db.query('update routers set managed_section = $2, updated_at = now() where id = $1', [
       routerId,
       resolved,
     ]);

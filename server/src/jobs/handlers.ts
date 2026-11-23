@@ -23,7 +23,7 @@ import {
 } from '../domain/uci.js';
 import type { PlatformSettings } from '../settings.js';
 import { normalizeTemplateLists } from '../domain/community-lists.js';
-import { resolveRouterSection } from '../domain/managed-section.js';
+import { resolveRouterSection, syncManagedSection } from '../domain/managed-section.js';
 import { createCommand, waitForCommand } from '../agent/service.js';
 import { enqueueJob, isCancelRequested } from './queue.js';
 import type { JobRow } from './queue.js';
@@ -181,18 +181,7 @@ async function saveState(
   // Секции на роутере не обязаны называться router_control/main. Как только
   // агент присылает состояние, выбираем реальную активную секцию и запоминаем
   // её, чтобы дальше не создавать пустой дубль.
-  const current = await pool.query<{ managed_section: string | null }>(
-    'select managed_section from routers where id = $1',
-    [routerId],
-  );
-  const currentSection = current.rows[0]?.managed_section ?? null;
-  const resolved = resolveManagedSection(managed, currentSection);
-  if (resolved && resolved !== currentSection) {
-    await pool.query('update routers set managed_section = $2, updated_at = now() where id = $1', [
-      routerId,
-      resolved,
-    ]);
-  }
+  await syncManagedSection(pool, routerId, managed);
 
   return managed;
 }
