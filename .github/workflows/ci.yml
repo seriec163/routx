@@ -151,6 +151,8 @@ jobs:
       LOG_LEVEL: warn
       CI_ADMIN_EMAIL: ci@example.com
       CI_ADMIN_PASSWORD: 'Ci-Password-2026!'
+      CI_USER_EMAIL: ci-user@example.com
+      CI_USER_PASSWORD: 'Ci-User-Password-2026!'
 
     steps:
       - name: Checkout
@@ -173,6 +175,29 @@ jobs:
 
       - name: Bootstrap admin
         run: npm run bootstrap -- "$CI_ADMIN_EMAIL" "$CI_ADMIN_PASSWORD"
+
+      - name: Create regular test user (no 2FA)
+        run: |
+          node --input-type=module -e '
+            import { hashPassword } from "./server/dist/lib/password.js";
+            import pg from "pg";
+            const pool = new pg.Pool({ connectionString: process.env.DATABASE_URL });
+            const hash = await hashPassword(process.env.CI_USER_PASSWORD);
+            await pool.query(
+              `insert into users (id, email, password_hash, role, status)
+               values (gen_random_uuid(), $1, $2, $3, $4)
+               on conflict (email) do update
+                 set password_hash = excluded.password_hash, role = excluded.role, status = excluded.status`,
+              [process.env.CI_USER_EMAIL, hash, "user", "active"],
+            );
+            await pool.query(
+              `insert into settings (key, value, updated_at)
+               values ($1, $2::jsonb, now())
+               on conflict (key) do update set value = excluded.value, updated_at = now()`,
+              ["security.mfa_policy", "\"admins\""],
+            );
+            await pool.end();
+          '
 
       - name: Install Playwright browser
         run: npx playwright install --with-deps chromium
@@ -198,8 +223,8 @@ jobs:
         run: npm run verify:agent-flow
         env:
           ROUTX_URL: http://127.0.0.1:3000
-          ROUTX_EMAIL: ${{ env.CI_ADMIN_EMAIL }}
-          ROUTX_PASSWORD: ${{ env.CI_ADMIN_PASSWORD }}
+          ROUTX_EMAIL: ${{ env.CI_USER_EMAIL }}
+          ROUTX_PASSWORD: ${{ env.CI_USER_PASSWORD }}
 
       - name: Server log on failure
         if: failure()
