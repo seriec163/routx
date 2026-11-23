@@ -620,6 +620,41 @@ function rewriteReleaseBody(
   return JSON.stringify(copy);
 }
 
+/**
+ * Ищет ассет в зеркале и возвращает путь для потоковой отдачи. Содержимое в
+ * память не читается; `null` — «в кэше нет или файла нет на диске».
+ */
+export async function findCachedAsset(
+  pool: Pool,
+  dataDir: string,
+  owner: string,
+  repo: string,
+  tag: string,
+  file: string,
+): Promise<{ row: PackageRow; path: string } | null> {
+  if (!isAllowedRepo(owner, repo)) return null;
+  const key = repoKey(owner, repo);
+  let resolvedTag = tag;
+  if (tag === 'latest') {
+    const latest = await loadPackageRow(pool, 'release_json', { repo: key });
+    if (!latest) return null;
+    resolvedTag = latest.tag;
+  }
+  const row = await loadPackageRow(pool, 'asset', {
+    repo: key,
+    name: file,
+    tag: resolvedTag,
+  });
+  if (!row) return null;
+  const full = path.join(dataDir, row.storage_path);
+  try {
+    await stat(full);
+  } catch {
+    return null;
+  }
+  return { row, path: full };
+}
+
 export async function getAssetByPath(
   pool: Pool,
   dataDir: string,

@@ -1,10 +1,12 @@
 import type { FastifyInstance, FastifyReply } from 'fastify';
+import { createReadStream } from 'node:fs';
 import type { Pool } from 'pg';
 import { z } from 'zod';
 import { audit } from '../audit.js';
 import { requireSuperadmin } from '../auth/service.js';
 import { notFound } from '../lib/errors.js';
 import {
+  findCachedAsset,
   getAssetById,
   getAssetByPath,
   getPackageStatus,
@@ -112,13 +114,24 @@ export async function registerPackageRoutes(
     }
     if (!tag || !file) throw notFound('Файл не найден');
 
+    const name = decodeURIComponent(file);
+    const cached = await findCachedAsset(pool, dataDir, owner, repo, tag, name);
+    if (cached) {
+      reply.header('content-type', 'application/octet-stream');
+      reply.header('content-length', String(cached.row.size_bytes));
+      reply.header('content-disposition', `attachment; filename="${name.replace(/"/g, '')}"`);
+      reply.header('etag', `"${cached.row.sha256}"`);
+      reply.header('cache-control', 'public, max-age=3600');
+      return reply.send(createReadStream(cached.path));
+    }
+
     const asset = await getAssetByPath(
       pool,
       dataDir,
       owner,
       repo,
       tag,
-      decodeURIComponent(file),
+      name,
     );
     if (!asset) throw notFound('Файл не найден в зеркале и на GitHub');
     return sendBuffer(
