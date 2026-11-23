@@ -187,3 +187,46 @@ export async function rebootRouter(ctx: HandlerContext, job: JobRow): Promise<Js
   await ctx.pool.query('update routers set reboot_requested_at = now() where id = $1', [routerId]);
   return { scheduled: true, result: raw };
 }
+
+export async function accessCheck(ctx: HandlerContext, job: JobRow): Promise<Json> {
+  const target =
+    asString(job.payload.target) || 'https://www.youtube.com/generate_204';
+  const raw = await runCommand(ctx, job, 'access_check', { target }, 45_000);
+
+  if (raw.ok === false) {
+    throw new JobFailure(
+      asString(raw.error) || 'access_check_failed',
+      asString(raw.message) || 'Запрос через прокси не прошёл',
+    );
+  }
+
+  return {
+    ok: true,
+    target: asString(raw.target) || target,
+    proxy_tag: asString(raw.proxy_tag),
+    group: asString(raw.group),
+    latency_ms: asNumber(raw.latency_ms),
+  };
+}
+
+export async function siteCheck(ctx: HandlerContext, job: JobRow): Promise<Json> {
+  const routerId = requireRouter(job);
+  const targets = Array.isArray(job.payload.targets)
+    ? job.payload.targets.map((value) => asString(value)).filter(Boolean)
+    : [];
+  if (targets.length === 0) {
+    throw new JobFailure('no_targets', 'Нет адресов для проверки');
+  }
+
+  const raw = await runCommand(ctx, job, 'site_probe', { targets }, 90_000);
+  if (raw.ok === false) {
+    throw new JobFailure(
+      asString(raw.error) || 'site_check_failed',
+      asString(raw.message) || 'Не удалось проверить сайты',
+    );
+  }
+
+  const results = Array.isArray(raw.results) ? raw.results : [];
+  return { router_id: routerId, results };
+}
+
