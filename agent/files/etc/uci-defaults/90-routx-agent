@@ -1,0 +1,47 @@
+#!/bin/sh
+# RoutX agent: перенос данных со старого JanusNew и создание конфигурации.
+CONFIG=/etc/config/routx
+OLD_CONFIG=/etc/config/janusnew
+STATE=/etc/routx-agent
+OLD_STATE=/etc/janusnew
+
+# 1. Конфигурация: старый файл -> новый (токен и router_id сохраняются).
+if [ -f "$OLD_CONFIG" ] && [ ! -f "$CONFIG" ]; then
+	cp -p "$OLD_CONFIG" "$CONFIG" 2>/dev/null || true
+fi
+[ -f "$CONFIG" ] || \
+	/usr/bin/ucode -L /usr/lib/routx-agent -e 'require("jn_config").ensure_file();' 2>/dev/null || true
+chmod 600 "$CONFIG" 2>/dev/null
+
+# 2. Рабочие данные: списки Prokop ссылаются на /etc/janusnew/lists,
+#    поэтому оставляем совместимую ссылку со старого пути.
+if [ -d "$OLD_STATE" ] && [ ! -L "$OLD_STATE" ]; then
+	if [ ! -d "$STATE" ]; then
+		mv "$OLD_STATE" "$STATE" 2>/dev/null || true
+	else
+		cp -a "$OLD_STATE/." "$STATE/" 2>/dev/null || true
+		rm -rf "$OLD_STATE" 2>/dev/null || true
+	fi
+	ln -s "$STATE" "$OLD_STATE" 2>/dev/null || true
+fi
+
+# 3. Runtime-каталог.
+mkdir -p /var/run/routx-agent 2>/dev/null
+rm -rf /var/run/janusnew 2>/dev/null
+
+# 4. Старый агент: службы и файлы (пакет снимается установщиком).
+if [ -x /etc/init.d/janusnew ]; then
+	/etc/init.d/janusnew stop 2>/dev/null || true
+	/etc/init.d/janusnew disable 2>/dev/null || true
+fi
+rm -f /usr/bin/janusnew /usr/libexec/janusnew-exec /etc/init.d/janusnew 2>/dev/null
+rm -rf /usr/lib/janusnew 2>/dev/null
+rm -rf /www/luci-static/resources/view/janusnew 2>/dev/null
+rm -f /usr/share/luci/menu.d/luci-app-janusnew.json 2>/dev/null
+rm -f /usr/share/rpcd/acl.d/luci-app-janusnew.json 2>/dev/null
+
+# 5. Кеши LuCI/rpcd.
+rm -f /tmp/luci-indexcache* 2>/dev/null
+[ -x /etc/init.d/rpcd ] && /etc/init.d/rpcd reload 2>/dev/null
+
+exit 0
