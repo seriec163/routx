@@ -67,6 +67,7 @@ services:
       RC_WORKER_CONCURRENCY: ${RC_WORKER_CONCURRENCY:-2}
       RC_QUEUED_JOB_TTL_DAYS: ${RC_QUEUED_JOB_TTL_DAYS:-7}
       RC_METRICS_TOKEN: ${RC_METRICS_TOKEN:-}
+      RC_MIRROR_ARCH: ${RC_MIRROR_ARCH:-aarch64_cortex-a53}
     ports:
       # Только loopback: снаружи панель доступна через Caddy по HTTPS.
       - "127.0.0.1:3000:3000"

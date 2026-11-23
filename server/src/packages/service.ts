@@ -4,7 +4,7 @@ import path from 'node:path';
 import type { Pool } from 'pg';
 import { uuidv7 } from '../lib/ids.js';
 
-const ARCH = 'aarch64_cortex-a53';
+const ARCH = process.env.RC_MIRROR_ARCH?.trim() || 'aarch64_cortex-a53';
 const GITHUB_API = 'https://api.github.com';
 const GITHUB_RAW = 'https://raw.githubusercontent.com';
 const GITHUB_DOWNLOAD = 'https://github.com';
