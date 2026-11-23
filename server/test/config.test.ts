@@ -13,6 +13,7 @@ describe('конфигурация', () => {
       TRUST_PROXY: false,
       RC_JOBS_PAUSED: false,
       RC_WORKER_CONCURRENCY: 2,
+      RC_QUEUED_JOB_TTL_DAYS: 7,
       LOG_LEVEL: 'info',
       isProduction: false,
     });

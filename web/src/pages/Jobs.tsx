@@ -124,6 +124,9 @@ export function JobsPage() {
                     <td className="small">{job.router_id ? names.get(job.router_id) ?? job.router_id.slice(0, 8) : '—'}</td>
                     <td>
                       <StatusBadge status={job.status} label={JOB_STATUS[job.status] ?? job.status} />
+                      {job.waiting_for_router ? (
+                        <div className="muted-text small">Ожидает роутер</div>
+                      ) : null}
                       {job.error ? <div className="muted-text small">{job.error.message}</div> : null}
                     </td>
                     <td className="small">

@@ -100,6 +100,7 @@ export interface Job {
   finished_at: string | null;
   error: { code: string; message: string } | null;
   created_at: string;
+  waiting_for_router?: boolean;
 }
 
 export interface TemplateListItem {

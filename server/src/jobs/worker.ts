@@ -4,6 +4,7 @@ import { randomUUID } from 'node:crypto';
 import type { PlatformSettings } from '../settings.js';
 import {
   claimJob,
+  expireQueuedJobs,
   finishJob,
   recoverOrphanedJobs,
   renewLease,
@@ -29,6 +30,8 @@ export interface WorkerOptions {
   paused?: boolean;
   /** Сколько задач обрабатывать параллельно (1–8). */
   concurrency?: number;
+  /** Сколько дней задача может ждать офлайн-роутер (по умолчанию 7). */
+  queuedTtlDays?: number;
 }
 
 /** Фоновый исполнитель задач: один цикл забирает одну задачу. */
@@ -43,6 +46,7 @@ export class JobWorker {
   private readonly publicUrl: string;
   private readonly paused: boolean;
   private readonly concurrency: number;
+  private readonly queuedTtlDays: number;
   private stopped = false;
   private loopPromises: Promise<void>[] = [];
   private recovery: Promise<void> | null = null;
@@ -60,6 +64,7 @@ export class JobWorker {
     this.publicUrl = options.publicUrl;
     this.paused = options.paused ?? false;
     this.concurrency = Math.min(8, Math.max(1, options.concurrency ?? 1));
+    this.queuedTtlDays = Math.min(90, Math.max(1, options.queuedTtlDays ?? 7));
   }
 
   updateSettings(settings: PlatformSettings): void {
@@ -330,11 +335,7 @@ export class JobWorker {
           and created_at < now() - interval '10 minutes'`,
     );
 
-    await this.pool.query(
-      `update jobs set status = 'timeout', finished_at = now(),
-              error_code = 'lease_expired', error_detail = 'Задача не была выполнена вовремя'
-        where status = 'queued' and created_at < now() - interval '2 hours'`,
-    );
+    await expireQueuedJobs(this.pool, this.queuedTtlDays);
 
     await timeoutStaleJobs(this.pool);
     await expireCommands(this.pool);

@@ -63,6 +63,8 @@ export interface JobRow {
   error_code: string | null;
   error_detail: string | null;
   created_at: Date;
+  /** Подмешивается join'ом: нужен, чтобы показать «ожидает роутер». */
+  router_status?: string | null;
 }
 
 export interface EnqueueInput {
@@ -100,6 +102,11 @@ export function jobJson(row: JobRow & { events?: unknown[] }) {
       : null,
     created_at: row.created_at.toISOString(),
     events: row.events,
+    waiting_for_router:
+      row.status === 'queued' &&
+      row.router_id !== null &&
+      row.router_status != null &&
+      row.router_status !== 'online',
   };
 }
 
@@ -337,6 +344,28 @@ export async function isCancelRequested(pool: Pool, jobId: string): Promise<bool
   return Boolean(result.rows[0]);
 }
 
+/**
+ * Отменяет задачи, которые так и не дождались роутера. Мониторинг сюда не
+ * попадает: у него свой короткий срок в планировщике.
+ */
+export async function expireQueuedJobs(pool: Pool, ttlDays: number): Promise<number> {
+  const detail = `Роутер не вышел на связь за ${ttlDays} дн.: задача отменена`;
+  const result = await pool.query<{ id: string }>(
+    `update jobs
+        set status = 'cancelled', finished_at = now(),
+            error_code = 'queue_expired', error_detail = $2
+      where status = 'queued'
+        and type <> 'monitor'
+        and created_at < now() - ($1 || ' days')::interval
+      returning id`,
+    [ttlDays, detail],
+  );
+  for (const row of result.rows) {
+    await addJobEvent(pool, row.id, 'cancelled', 'queue_expired', detail);
+  }
+  return result.rowCount ?? 0;
+}
+
 export async function timeoutStaleJobs(pool: Pool): Promise<number> {
   const result = await pool.query<{ id: string }>(
     `update jobs
@@ -484,7 +513,13 @@ async function markDependentState(
 }
 
 export async function getJob(pool: Pool, id: string): Promise<(JobRow & { events: unknown[] }) | null> {
-  const result = await pool.query<JobRow>('select * from jobs where id = $1', [id]);
+  const result = await pool.query<JobRow>(
+    `select j.*, r.status as router_status
+       from jobs j
+       left join routers r on r.id = j.router_id
+      where j.id = $1`,
+    [id],
+  );
   const job = result.rows[0];
   if (!job) return null;
   const events = await pool.query(

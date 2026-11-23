@@ -85,6 +85,7 @@ const worker = new JobWorker({
   publicUrl: config.RC_PUBLIC_URL,
   paused: config.RC_JOBS_PAUSED,
   concurrency: config.RC_WORKER_CONCURRENCY,
+  queuedTtlDays: config.RC_QUEUED_JOB_TTL_DAYS,
 });
 worker.start();
 

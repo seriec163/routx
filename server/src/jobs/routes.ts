@@ -25,7 +25,9 @@ export async function registerJobRoutes(app: FastifyInstance, ctx: RouteContext)
       .parse(request.query);
 
     const result = await pool.query(
-      `select j.* from jobs j
+      `select j.*, r.status as router_status
+         from jobs j
+         left join routers r on r.id = j.router_id
         where ($1::uuid is null or j.router_id = $1)
           and ($2::text is null or j.status = $2)
           and ($3::text is null or j.type = $3)
