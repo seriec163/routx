@@ -20,6 +20,7 @@
     "typecheck": "npm run typecheck -w @routx/server && npm run typecheck -w @routx/web",
     "lint": "eslint .",
     "test": "npm run test -w @routx/server",
+    "test:e2e": "playwright test",
     "db:migrate": "npm run db:migrate -w @routx/server",
     "bootstrap": "npm run bootstrap -w @routx/server --",
     "password-reset": "npm run password-reset -w @routx/server --",
@@ -29,6 +30,7 @@
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
+    "@playwright/test": "^1.65.1",
     "concurrently": "^10.0.6",
     "eslint": "^10.15.0",
     "typescript-eslint": "^8.74.0"
