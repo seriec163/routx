@@ -1,5 +1,4 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Link } from '../components/link';
 import {
   Button,
   ConfirmDialog,
@@ -10,7 +9,6 @@ import {
   JobProgress,
   Modal,
   PageHeader,
-  Panel,
   Select,
   Spinner,
   Stat,
@@ -32,11 +30,12 @@ import {
 import { navigate } from '../lib/router';
 import { RouterRulesPanel } from './RouterRules';
 import { CompactSecretForm } from './router-detail/CompactSecretForm';
-import { CredentialPanel } from './router-detail/CredentialPanel';
 import { DiffFlowModal } from './router-detail/DiffFlowModal';
 import { DnsTab } from './router-detail/DnsTab';
 import { DiagnosticsTab } from './router-detail/DiagnosticsTab';
 import { JobsTab } from './router-detail/JobsTab';
+import { SettingsTab } from './router-detail/SettingsTab';
+import { WIFI_KEY_ENCRYPTIONS, type WifiInterface, type WifiState } from './router-detail/wifi';
 import { MetricsTab } from './router-detail/MetricsTab';
 import { OverviewTab } from './router-detail/OverviewTab';
 import { TACHYON_COMPONENTS, versionAtLeast, type TachyonComponentInfo } from './router-detail/tachyon';
@@ -142,71 +141,6 @@ interface ProductServiceInfo {
   running: boolean | null;
   enabled: boolean | null;
   status: string | null;
-}
-
-interface WifiRadio {
-  name: string;
-  type?: string;
-  path?: string;
-  band?: string;
-  channel?: string;
-  htmode?: string;
-  country?: string;
-  txpower?: string;
-  disabled: boolean;
-}
-
-interface WifiInterface {
-  name: string;
-  device: string;
-  mode: string;
-  network: string;
-  ssid: string;
-  encryption: string;
-  key_set: boolean;
-  hidden: boolean;
-  disabled: boolean;
-  isolate: boolean;
-  ifname?: string;
-  wds?: boolean;
-}
-
-interface WifiState {
-  radios: WifiRadio[];
-  interfaces: WifiInterface[];
-  hardware?: {
-    present: boolean;
-    phys?: string[];
-    interfaces?: string[];
-    configured_radios?: string[];
-  };
-}
-
-const WIFI_KEY_ENCRYPTIONS = new Set([
-  'psk',
-  'psk2',
-  'psk-mixed',
-  'sae',
-  'sae-mixed',
-]);
-
-function wifiEncryptionLabel(value: string): string {
-  switch (value) {
-    case 'none':
-      return 'без пароля';
-    case 'psk':
-      return 'WPA-PSK';
-    case 'psk2':
-      return 'WPA2-PSK';
-    case 'psk-mixed':
-      return 'WPA/WPA2 mixed';
-    case 'sae':
-      return 'WPA3-SAE';
-    case 'sae-mixed':
-      return 'WPA2/WPA3 mixed';
-    default:
-      return value || 'не задано';
-  }
 }
 
 function flagValue(value: unknown): boolean | null {
@@ -1932,233 +1866,37 @@ export function RouterDetailPage({ id }: { id: string }) {
       {tab === 'jobs' ? <JobsTab jobs={jobs} /> : null}
 
       {tab === 'settings' ? (
-        <div className="stack">
-          <Panel
-            title="Wi-Fi сети"
-            subtitle="Сети читаются через агент из /etc/config/wireless. Текущие пароли не показываются: можно задать новый пароль или оставить поле пустым."
-            actions={
-              <>
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  onClick={() => void readWifi()}
-                  busy={wifiBusy}
-                  disabled={!online}
-                >
-                  Прочитать Wi-Fi
-                </Button>
-                <Button
-                  size="sm"
-                  variant="subtle"
-                  onClick={openWifiCreate}
-                  disabled={
-                    Boolean(router?.archived_at) || wifi?.hardware?.present === false
-                  }
-                >
-                  Добавить сеть
-                </Button>
-              </>
-            }
-          >
-            {!versionAtLeast(router?.agent_version, '1.5.52') ? (
-              <InfoBanner tone="warn">
-                Агент {router?.agent_version ?? 'неизвестной версии'} ещё не умеет определять
-                наличие Wi-Fi модуля. При первом чтении панель автоматически обновит его до 1.5.52 —
-                это может занять около минуты.
-              </InfoBanner>
-            ) : null}
-            {wifi?.hardware ? (
-              <div className="row">
-                <StatusBadge
-                  status={wifi.hardware.present ? 'success' : 'error'}
-                  label={wifi.hardware.present ? 'Wi-Fi модуль есть' : 'Wi-Fi модуль не найден'}
-                />
-                {wifi.hardware.phys && wifi.hardware.phys.length > 0 ? (
-                  <span className="muted-text small">
-                    phy: {wifi.hardware.phys.join(', ')}
-                  </span>
-                ) : null}
-              </div>
-            ) : null}
-            {wifi?.hardware && !wifi.hardware.present ? (
-              <InfoBanner tone="warn">
-                На роутере не обнаружен Wi-Fi модуль. Просмотр оставшихся сетей доступен, но
-                создавать и изменять Wi-Fi нельзя.
-              </InfoBanner>
-            ) : null}
-            {wifiError ? <ErrorBanner message={wifiError} /> : null}
-            {wifiBusy && !wifi ? <Spinner label="Читаем Wi-Fi…" /> : null}
-            {!wifi && !wifiBusy ? (
-              <Empty>
-                {online
-                  ? 'Нажмите «Прочитать Wi-Fi», чтобы загрузить существующие сети.'
-                  : 'Роутер не в сети — Wi-Fi можно прочитать после подключения.'}
-              </Empty>
-            ) : null}
-            {wifi ? (
-              <div className="stack">
-                {wifi.interfaces.length === 0 ? (
-                  <Empty>
-                    {wifi.hardware?.present === false
-                      ? 'Wi-Fi модуль не обнаружен.'
-                      : 'Wi-Fi модуль есть, но сети ещё не настроены.'}
-                  </Empty>
-                ) : (
-                  wifi.interfaces.map((iface) => {
-                    const radio = wifi.radios.find((item) => item.name === iface.device);
-                    return (
-                      <div
-                        key={iface.name}
-                        style={{
-                          border: '1px solid var(--line, rgba(120,90,120,.16))',
-                          borderRadius: 12,
-                          padding: 12,
-                        }}
-                      >
-                        <div
-                          style={{
-                            display: 'flex',
-                            justifyContent: 'space-between',
-                            gap: 12,
-                            alignItems: 'flex-start',
-                            flexWrap: 'wrap',
-                          }}
-                        >
-                          <div>
-                            <strong>{iface.ssid || '(без SSID)'}</strong>
-                            <div className="muted-text small">
-                              {iface.name} · {iface.device}
-                              {radio?.band ? ` · ${radio.band}` : ''} · {iface.mode} ·{' '}
-                              {iface.network || '—'} · {wifiEncryptionLabel(iface.encryption)}
-                              {iface.key_set ? ' · пароль задан' : ''}
-                            </div>
-                          </div>
-                          <div className="row">
-                            {iface.hidden ? (
-                              <StatusBadge status="warning" label="скрытая" />
-                            ) : null}
-                            {iface.disabled ? (
-                              <StatusBadge status="offline" label="отключена" />
-                            ) : null}
-                            {radio?.disabled ? (
-                              <StatusBadge status="offline" label="радио off" />
-                            ) : null}
-                            <Button
-                              size="sm"
-                              variant="ghost"
-                              onClick={() => openWifiEdit(iface)}
-                            >
-                              Изменить
-                            </Button>
-                          </div>
-                        </div>
-                      </div>
-                    );
-                  })
-                )}
-                {wifi.radios.length > 0 ? (
-                  <p className="muted-text small">
-                    Радиомодули:{' '}
-                    {wifi.radios
-                      .map(
-                        (radio) =>
-                          `${radio.name}${radio.band ? ` (${radio.band})` : ''}${
-                            radio.disabled ? ' — off' : ''
-                          }`,
-                      )
-                      .join(' · ')}
-                  </p>
-                ) : null}
-              </div>
-            ) : null}
-          </Panel>
-
-          <div className="grid-2">
-            <div className="stack">
-            <Panel title="Имя и мониторинг">
-              <div className="kv">
-                <span>Текущее имя</span>
-                <strong>{router.name}</strong>
-                <span>Мониторинг</span>
-                <strong>{router.monitoring_enabled ? 'включён' : 'выключен'}</strong>
-                <span>Владелец</span>
-                <strong>{router.owner_email ?? '—'}</strong>
-                <span>Создан</span>
-                <strong>{formatDate(router.created_at)}</strong>
-              </div>
-              <div className="row">
-                <Button variant="ghost" size="sm" onClick={() => setRenameOpen(true)}>
-                  Переименовать
-                </Button>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => void toggleMonitoring(!router.monitoring_enabled)}
-                >
-                  {router.monitoring_enabled ? 'Выключить мониторинг' : 'Включить мониторинг'}
-                </Button>
-                <Link className="btn btn-subtle btn-sm" to="/routers">
-                  К списку
-                </Link>
-              </div>
-            </Panel>
-
-            <Panel title="Учётные данные агента">
-              <CredentialPanel routerId={id} />
-              <Button variant="ghost" size="sm" onClick={() => void rotateCredential()}>
-                Ротировать токен агента
-              </Button>
-            </Panel>
-          </div>
-
-          <div className="stack">
-            <Panel title="Привязка агента">
-              <p className="page-sub">
-                Токен привязки действует 5 минут и показывается один раз. Роутер сам устанавливает
-                исходящее TLS-соединение.
-              </p>
-              <Button size="sm" onClick={() => void issueBinding()}>
-                Выпустить токен привязки
-              </Button>
-            </Panel>
-
-            <Panel title="Архивирование">
-              <p className="page-sub">
-                Архив отключает мониторинг и отзывает учётные данные. Forkop/Prokop/Podkop на устройстве
-                остаются без изменений.
-              </p>
-              <div className="row">
-                <Button
-                  variant="danger"
-                  size="sm"
-                  onClick={async () => {
-                    if (!window.confirm(`Архивировать роутер «${router.name}»?`)) return;
-                    try {
-                      await api(`/api/v1/routers/${id}`, { method: 'DELETE' });
-                      toast.success('Роутер архивирован');
-                      navigate('/routers');
-                    } catch (caught) {
-                      toast.error(errorMessage(caught));
-                    }
-                  }}
-                >
-                  Архивировать роутер
-                </Button>
-                <Button
-                  variant="danger"
-                  size="sm"
-                  onClick={() => {
-                    setPurgeName('');
-                    setPurgeOpen(true);
-                  }}
-                >
-                  Удалить навсегда
-                </Button>
-              </div>
-            </Panel>
-          </div>
-        </div>
-        </div>
+        <SettingsTab
+          router={router}
+          routerId={id}
+          online={online}
+          wifi={wifi}
+          wifiBusy={wifiBusy}
+          wifiError={wifiError}
+          onReadWifi={() => void readWifi()}
+          onCreateWifi={openWifiCreate}
+          onEditWifi={openWifiEdit}
+          onRename={() => setRenameOpen(true)}
+          onToggleMonitoring={(enabled) => void toggleMonitoring(enabled)}
+          onRotateCredential={() => void rotateCredential()}
+          onIssueBinding={() => void issueBinding()}
+          onArchive={() => {
+            if (!window.confirm(`???????????? ?????? ?${router.name}??`)) return;
+            void (async () => {
+              try {
+                await api(`/api/v1/routers/${id}`, { method: 'DELETE' });
+                toast.success('?????? ???????????');
+                navigate('/routers');
+              } catch (caught) {
+                toast.error(errorMessage(caught));
+              }
+            })();
+          }}
+          onPurge={() => {
+            setPurgeName('');
+            setPurgeOpen(true);
+          }}
+        />
       ) : null}
 
       {wifiCreateOpen ? (
