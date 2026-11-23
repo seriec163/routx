@@ -1332,7 +1332,13 @@ export async function agentUpdate(ctx: HandlerContext, job: JobRow): Promise<Jso
   const routerId = requireRouter(job);
   const before = await agentVersionOf(ctx, routerId);
   const base = ctx.publicUrl.replace(/\/+$/, '');
-  const raw = await runCommand(ctx, job, 'self_update', { base_url: base }, 120_000);
+  const raw = await runCommand(
+    ctx,
+    job,
+    'self_update',
+    { base_url: base, version: bundledAgentVersion() ?? '' },
+    120_000,
+  );
   if (raw.ok === false) {
     throw new JobFailure(
       asString(raw.error) || 'agent_update_failed',
@@ -1800,7 +1806,13 @@ async function selfUpdateForWifi(ctx: HandlerContext, job: JobRow): Promise<void
   await setJobPhase(ctx, job.id, 'Агент не поддерживает Wi-Fi — обновляем RoutX', 3);
   const before = await agentVersionOf(ctx, requireRouter(job));
   const base = ctx.publicUrl.replace(/\/+$/, '');
-  const update = await runCommand(ctx, job, 'self_update', { base_url: base }, 180_000);
+  const update = await runCommand(
+    ctx,
+    job,
+    'self_update',
+    { base_url: base, version: bundledAgentVersion() ?? '' },
+    180_000,
+  );
   if (update.ok === false) {
     throw new JobFailure(
       'agent_update_failed',

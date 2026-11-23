@@ -54,31 +54,54 @@ function expected_checksum(text, kind) {
 }
 
 function update_script(kind, version) {
+	let pkg = util.shell_quote(UPDATE_DIR + "/package." + kind);
 	return join("\n", [
 		"#!/bin/sh",
 		"sleep 2",
+		"LOG=/var/log/routx-agent-update.log",
+		"EXPECTED=\"" + version + "\"",
+		"KIND=\"" + kind + "\"",
 		"rc=1",
-		"# Новому агенту нужны модули ucode, которых может не быть на старых",
-		"# установках: ставим их до замены пакета.",
+		"verified=\"skipped\"",
+		"TO=\"\"",
+		"command -v timeout >/dev/null 2>&1 && TO=\"timeout 120\"",
+		"log() { echo \"$(date '+%Y-%m-%d %H:%M:%S') $*\" >> \"$LOG\"; }",
+		"# apk-tools 3 иногда держит блокировку после неудачного update.",
+		"# Ставим только отсутствующие модули и не ждём бесконечно.",
 		"if [ -x /usr/bin/apk ] || [ -x /sbin/apk ]; then",
 		"  APK=$(command -v apk)",
-		"  \"$APK\" update >/dev/null 2>&1",
-		"  \"$APK\" add ucode-mod-digest ucode-mod-fs ucode-mod-uci >/dev/null 2>&1",
-		"else",
-		"  opkg update >/dev/null 2>&1",
-		"  opkg install ucode-mod-digest ucode-mod-fs ucode-mod-uci >/dev/null 2>&1",
-		"fi",
-		"if [ -x /usr/bin/apk ] || [ -x /sbin/apk ]; then",
-		"  APK=$(command -v apk)",
-		"  \"$APK\" add --allow-untrusted " + util.shell_quote(UPDATE_DIR + "/package." + kind),
+		"  $TO \"$APK\" update >>\"$LOG\" 2>&1 || log \"apk update failed, продолжаем\"",
+		"  for m in ucode-mod-digest ucode-mod-fs ucode-mod-uci; do",
+		"    \"$APK\" info -e \"$m\" >/dev/null 2>&1 || $TO \"$APK\" add \"$m\" >>\"$LOG\" 2>&1",
+		"  done",
+		"  $TO \"$APK\" add --allow-untrusted " + pkg + " >>\"$LOG\" 2>&1",
 		"  rc=$?",
 		"  if [ \"$rc\" != \"0\" ]; then",
-		"    \"$APK\" add --allow-untrusted --force-overwrite " + util.shell_quote(UPDATE_DIR + "/package." + kind),
+		"    log \"apk add failed rc=$rc, повтор с --force-overwrite\"",
+		"    $TO \"$APK\" add --allow-untrusted --force-overwrite " + pkg + " >>\"$LOG\" 2>&1",
 		"    rc=$?",
 		"  fi",
+		"  if [ \"$rc\" = \"0\" ] && [ -n \"$EXPECTED\" ]; then",
+		"    if \"$APK\" info -v routx-agent 2>/dev/null | grep -q \"$EXPECTED\"; then",
+		"      verified=\"ok\"",
+		"    else",
+		"      verified=\"failed\"",
+		"    fi",
+		"  fi",
 		"else",
-		"  opkg install --force-reinstall --force-depends " + util.shell_quote(UPDATE_DIR + "/package." + kind),
+		"  $TO opkg update >>\"$LOG\" 2>&1 || log \"opkg update failed, продолжаем\"",
+		"  for m in ucode-mod-digest ucode-mod-fs ucode-mod-uci; do",
+		"    opkg list-installed 2>/dev/null | grep -q \"^$m \" || $TO opkg install \"$m\" >>\"$LOG\" 2>&1",
+		"  done",
+		"  $TO opkg install --force-reinstall --force-depends " + pkg + " >>\"$LOG\" 2>&1",
 		"  rc=$?",
+		"  if [ \"$rc\" = \"0\" ] && [ -n \"$EXPECTED\" ]; then",
+		"    if opkg status routx-agent 2>/dev/null | grep -q \"Version: $EXPECTED\"; then",
+		"      verified=\"ok\"",
+		"    else",
+		"      verified=\"failed\"",
+		"    fi",
+		"  fi",
 		"fi",
 		"if [ \"$rc\" = \"0\" ]; then",
 		"  /etc/init.d/routx-agent enable 2>/dev/null",
@@ -86,7 +109,7 @@ function update_script(kind, version) {
 		"# prerm останавливает старый агент до установки. Перезапускаем его",
 		"# даже при ошибке opkg, иначе роутер останется без связи с панелью.",
 		"/etc/init.d/routx-agent restart 2>/dev/null",
-		"echo \"$(date) rc=$rc kind=" + kind + " version=" + version + "\" >> /var/log/routx-agent-update.log",
+		"log \"rc=$rc kind=$KIND version=$EXPECTED verified=$verified\"",
 		"rm -rf " + util.shell_quote(UPDATE_DIR),
 		"",
 	]);
@@ -102,6 +125,9 @@ function handle(product, args) {
 	if (kind != "ipk" && kind != "apk")
 		return fail("unsupported_package_manager", "Не найден opkg или apk");
 	let version = trim(util.as_string(args.version));
+	// Версия попадает в shell-скрипт и в лог: пропускаем только безопасные символы.
+	if (version != "" && match(version, /^[0-9A-Za-z._+-]{1,40}$/) == null)
+		return fail("invalid_version", "Некорректная версия агента");
 
 	cleanup();
 	util.mkdir_p(UPDATE_DIR, 0700);
