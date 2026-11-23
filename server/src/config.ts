@@ -33,6 +33,7 @@ const schema = z.object({
   RC_MASTER_KEY_FILE: z.string().optional(),
   RC_DATA_DIR: z.string().optional(),
   RC_PACKAGE_SYNC: booleanFromEnv.default(true),
+  RC_JOBS_PAUSED: booleanFromEnv.default(false),
   WEB_DIST: z.string().optional(),
   MIGRATIONS_DIR: z.string().optional(),
   MIGRATE_ON_START: booleanFromEnv.default(false),

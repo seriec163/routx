@@ -25,6 +25,8 @@ export interface WorkerOptions {
   leaseSeconds?: number;
   masterKey: string;
   publicUrl: string;
+  /** Не забирать задачи и не планировать мониторинг (переезд, обслуживание). */
+  paused?: boolean;
 }
 
 /** Фоновый исполнитель задач: один цикл забирает одну задачу. */
@@ -37,6 +39,7 @@ export class JobWorker {
   private readonly leaseSeconds: number;
   private readonly masterKey: string;
   private readonly publicUrl: string;
+  private readonly paused: boolean;
   private stopped = false;
   private loopPromise: Promise<void> | null = null;
   private schedulerTimer: NodeJS.Timeout | null = null;
@@ -51,6 +54,7 @@ export class JobWorker {
     this.leaseSeconds = options.leaseSeconds ?? 600;
     this.masterKey = options.masterKey;
     this.publicUrl = options.publicUrl;
+    this.paused = options.paused ?? false;
   }
 
   updateSettings(settings: PlatformSettings): void {
@@ -59,6 +63,15 @@ export class JobWorker {
 
   start(): void {
     if (this.loopPromise) return;
+    if (this.paused) {
+      // Источник миграции: агенты уже смотрят на новый инстанс, и старый не
+      // должен ни забирать задачи, ни помечать роутеры offline.
+      this.log.warn(
+        { worker: this.workerId },
+        'исполнитель задач приостановлен (RC_JOBS_PAUSED=true)',
+      );
+      return;
+    }
     this.stopped = false;
     this.loopPromise = this.startLoop();
     this.schedulerTimer = setInterval(() => {

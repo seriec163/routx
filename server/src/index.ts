@@ -83,6 +83,7 @@ const worker = new JobWorker({
   log: app.log,
   masterKey,
   publicUrl: config.RC_PUBLIC_URL,
+  paused: config.RC_JOBS_PAUSED,
 });
 worker.start();
 

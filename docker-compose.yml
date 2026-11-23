@@ -47,6 +47,9 @@ services:
       RC_VAPID_SUBJECT: ${RC_VAPID_SUBJECT:-mailto:admin@example.com}
       MIGRATE_ON_START: "false"
       TRUST_PROXY: ${TRUST_PROXY:-false}
+      RC_PACKAGE_SYNC: ${RC_PACKAGE_SYNC:-true}
+      # true — не забирать задачи и не планировать мониторинг (переезд/обслуживание).
+      RC_JOBS_PAUSED: ${RC_JOBS_PAUSED:-false}
     ports:
       - "${RC_BIND_ADDR:-127.0.0.1}:${RC_PORT:-3000}:3000"
     volumes:

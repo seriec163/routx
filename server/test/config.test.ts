@@ -11,6 +11,7 @@ describe('конфигурация', () => {
       PORT: 3000,
       MIGRATE_ON_START: false,
       TRUST_PROXY: false,
+      RC_JOBS_PAUSED: false,
       LOG_LEVEL: 'info',
       isProduction: false,
     });
