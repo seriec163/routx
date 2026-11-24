@@ -391,9 +391,10 @@ stderr и итог в `/var/log/routx-agent-update.log`, проверяет ус
   bind → probe → refresh → state → cleanup через API; описан в
   `docs/runbooks/agent-flow-check.md`. Автоматический запуск в CI — следующий
   шаг (нужно перенести миграции до тестов и поднимать приложение).
-* 2 — добавлен каркас Playwright (`playwright.config.ts`, `e2e/login.spec.ts`,
-  `npm run test:e2e`, runbook `docs/runbooks/e2e.md`). В CI не подключён:
-  нужен тестовый инстанс и пользователь без 2FA.
+* 2 — E2E в CI: отдельный джоб поднимает Postgres, применяет миграции,
+  собирает панель, создаёт обычного пользователя (без 2FA), запускает сервер,
+  гоняет Playwright и `verify:agent-flow` (bind → probe → refresh → секция).
+  Прогон зелёный на ветке `routx-2.0`.
 * 3 — контракт агентского API: схемы вынесены в
   `server/src/agent/schemas.ts`, `npm run contract:agent` генерирует
   `docs/architecture/agent-openapi.json`; CI проверяет, что файл не устарел.
