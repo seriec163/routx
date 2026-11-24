@@ -982,6 +982,7 @@ function RuleCard(props: {
             label={rule.enabled ? 'включено' : 'выключено'}
           />
           {isEmptySection ? <StatusBadge status="neutral" label="пустая" /> : null}
+          {props.isManaged ? <StatusBadge status="neutral" label="основная" /> : null}
         </div>
       </header>
 
@@ -1140,15 +1141,21 @@ function RuleCard(props: {
         <Button size="sm" variant="ghost" onClick={props.onToggle} disabled={props.disabled}>
           {rule.enabled ? 'Выключить' : 'Включить'}
         </Button>
-        {!props.isManaged ? (
-          <Button
-            size="sm"
-            variant="ghost"
-            onClick={props.onDeleteSection}
-            disabled={props.disabled}
-          >
-            Удалить секцию
-          </Button>
+        <Button
+          size="sm"
+          variant="ghost"
+          onClick={props.onDeleteSection}
+          disabled={props.disabled || props.isManaged}
+          title={
+            props.isManaged
+              ? 'Основную секцию удалить нельзя: сначала назначьте основной другую секцию.'
+              : undefined
+          }
+        >
+          Удалить секцию
+        </Button>
+        {props.isManaged ? (
+          <span className="muted-text small">Основная секция — удалить нельзя</span>
         ) : null}
       </footer>
     </article>
