@@ -319,7 +319,7 @@ const document = {
   openapi: '3.1.0',
   info: {
     title: 'RoutX API',
-    version: '2.1.0',
+    version: '2.1.1',
     description:
       'Пользовательский API панели RoutX. Аутентификация — cookie rc_session; ' +
       'для POST/PUT/PATCH/DELETE нужен заголовок x-csrf-token из cookie rc_csrf.',
