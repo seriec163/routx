@@ -1063,11 +1063,12 @@ export async function registerRouterRoutes(app: FastifyInstance, ctx: RouteConte
           version: z
             .string()
             .trim()
-            .regex(/^\d+(\.\d+){2,3}$/)
+            .regex(/^v?\d+(\.\d+){2,3}(-[0-9A-Za-z][0-9A-Za-z.-]*)?$/)
             .optional(),
         })
         .strict()
         .parse(request.body);
+      const requestedVersion = body.version ? body.version.replace(/^v/i, '') : null;
       const router = await getRouter(pool, auth, params.id);
       if (router.archived_at) throw forbidden('Роутер архивирован');
       // Смена продукта — единственная операция, которая может устранить
@@ -1087,8 +1088,8 @@ export async function registerRouterRoutes(app: FastifyInstance, ctx: RouteConte
         requestedBy: auth.userId,
         timeoutSeconds: 1900,
         maxAttempts: 1,
-        idempotencyKey: `product_switch:${router.id}:${body.product}:${body.version ?? 'latest'}:${Date.now()}`,
-        payload: { product: body.product, version: body.version ?? null },
+        idempotencyKey: `product_switch:${router.id}:${body.product}:${requestedVersion ?? 'latest'}:${Date.now()}`,
+        payload: { product: body.product, version: requestedVersion },
       });
 
       await audit(pool, {
@@ -1104,7 +1105,7 @@ export async function registerRouterRoutes(app: FastifyInstance, ctx: RouteConte
         metadata: {
           from: router.product,
           to: body.product,
-          version: body.version ?? null,
+          version: requestedVersion,
           job_id: job.id,
         },
       });

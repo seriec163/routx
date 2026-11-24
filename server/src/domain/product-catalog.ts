@@ -9,6 +9,7 @@ export type ProductId = 'tachyon' | 'forkop' | 'podkop' | 'prokop';
 export interface ProductRelease {
   version: string;
   tag: string;
+  install_version: string;
   name: string;
   published_at: string | null;
   prerelease: boolean;
@@ -20,6 +21,7 @@ export interface ProductCatalogItem {
   repo: string;
   current_version: string | null;
   latest_version: string | null;
+  latest_install_version: string | null;
   update_available: boolean;
   releases: ProductRelease[];
   error: string | null;
@@ -53,6 +55,61 @@ export function compareVersions(a: string, b: string): number {
   return 0;
 }
 
+interface ParsedProductVersion {
+  parts: number[];
+  prerelease: string | null;
+}
+
+function parseProductVersion(value: string | null | undefined): ParsedProductVersion {
+  const clean = String(value ?? '')
+    .trim()
+    .replace(/^v/i, '');
+  const [base, ...rest] = clean.split('+')[0]!.split('-');
+  return {
+    parts: base!.split('.').map((part) => Number(part) || 0),
+    prerelease: rest.length > 0 ? rest.join('-') : null,
+  };
+}
+
+function comparePrerelease(a: string, b: string): number {
+  const left = a.split(/[.-]/);
+  const right = b.split(/[.-]/);
+  const length = Math.max(left.length, right.length);
+  for (let index = 0; index < length; index += 1) {
+    const l = left[index];
+    const r = right[index];
+    if (l === undefined) return -1;
+    if (r === undefined) return 1;
+    const ln = Number(l);
+    const rn = Number(r);
+    if (Number.isFinite(ln) && Number.isFinite(rn)) {
+      if (ln !== rn) return ln - rn;
+      continue;
+    }
+    const cmp = l.localeCompare(r, 'en', { numeric: true });
+    if (cmp !== 0) return cmp;
+  }
+  return 0;
+}
+
+/** Стабильная версия считается новее release candidate с той же базой. */
+export function compareProductVersions(a: string, b: string): number {
+  const left = parseProductVersion(a);
+  const right = parseProductVersion(b);
+  const length = Math.max(left.parts.length, right.parts.length);
+  for (let index = 0; index < length; index += 1) {
+    const diff = (left.parts[index] ?? 0) - (right.parts[index] ?? 0);
+    if (diff !== 0) return diff;
+  }
+  if (!left.prerelease && right.prerelease) return 1;
+  if (left.prerelease && !right.prerelease) return -1;
+  if (left.prerelease && right.prerelease) {
+    const cmp = comparePrerelease(left.prerelease, right.prerelease);
+    return cmp === 0 ? 0 : cmp > 0 ? 1 : -1;
+  }
+  return 0;
+}
+
 async function githubReleases(repo: string): Promise<ProductRelease[]> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 15_000);
@@ -71,11 +128,12 @@ async function githubReleases(repo: string): Promise<ProductRelease[]> {
       .map((item) => ({
         version: normalizeVersion(String(item.tag_name)),
         tag: String(item.tag_name),
+        install_version: String(item.tag_name).replace(/^v/i, ''),
         name: String(item.name ?? item.tag_name ?? ''),
         published_at: typeof item.published_at === 'string' ? item.published_at : null,
         prerelease: item.prerelease === true,
       }))
-      .filter((item) => /^\d+(\.\d+){1,3}$/.test(item.version));
+      .filter((item) => /^\d+(\.\d+){1,3}/.test(item.version));
   } finally {
     clearTimeout(timer);
   }
@@ -102,7 +160,10 @@ export async function productCatalog(
       cache.set(meta.product, cached);
     }
     const releases = cached.releases;
-    const latest = releases.find((item) => !item.prerelease) ?? releases[0] ?? null;
+    const stable = releases
+      .filter((item) => !item.prerelease)
+      .sort((a, b) => compareProductVersions(b.install_version, a.install_version));
+    const latest = stable[0] ?? releases[0] ?? null;
     const currentRaw = currentVersions[meta.product] ?? null;
     const current = currentRaw ? normalizeVersion(currentRaw) : null;
     items.push({
@@ -111,8 +172,9 @@ export async function productCatalog(
       repo: meta.repo,
       current_version: current,
       latest_version: latest?.version ?? null,
+      latest_install_version: latest?.install_version ?? null,
       update_available:
-        current != null && latest != null ? compareVersions(current, latest.version) < 0 : false,
+        currentRaw && latest ? compareProductVersions(currentRaw, latest.install_version) < 0 : false,
       releases,
       error: cached.error,
     });

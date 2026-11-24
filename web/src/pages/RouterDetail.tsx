@@ -125,10 +125,12 @@ interface ProductCatalogItem {
   repo: string;
   current_version: string | null;
   latest_version: string | null;
+  latest_install_version: string | null;
   update_available: boolean;
   releases: Array<{
     version: string;
     tag: string;
+    install_version: string;
     name: string;
     published_at: string | null;
     prerelease: boolean;
@@ -1137,7 +1139,8 @@ export function RouterDetailPage({ id }: { id: string }) {
       setProductItems(response.items);
       const defaults: Record<string, string> = {};
       for (const item of response.items) {
-        defaults[item.product] = item.latest_version ?? item.releases[0]?.version ?? '';
+        defaults[item.product] =
+          item.latest_install_version ?? item.latest_version ?? item.releases[0]?.install_version ?? '';
       }
       setProductVersions(defaults);
     } catch (caught) {
@@ -2858,7 +2861,7 @@ export function RouterDetailPage({ id }: { id: string }) {
                 </div>
                 <p className="muted-text small" style={{ margin: '8px 0 4px' }}>
                   Установлено: {same ? installedVersion ?? '—' : '—'} ·
-                  Последняя: {item.latest_version ?? '—'}
+                  Последняя стабильная: {item.latest_install_version ?? item.latest_version ?? '—'}
                 </p>
                 {installed?.packages && installed.packages.length > 0 ? (
                   <p className="muted-text small">
@@ -2873,15 +2876,36 @@ export function RouterDetailPage({ id }: { id: string }) {
                         setProductVersions((current) => ({ ...current, [item.product]: value }))
                       }
                     >
-                      {(item.releases.length > 0 ? item.releases : [{ version: selected, tag: selected, name: '', published_at: null, prerelease: false }]).map(
-                        (release) => (
-                          <option key={release.version} value={release.version}>
-                            {release.version}
-                            {release.prerelease ? ' · beta' : ''}
-                          </option>
-                        ),
-                      )}
+                      {item.releases.length === 0 ? (
+                        <option value={selected}>{selected}</option>
+                      ) : null}
+                      {item.releases.some((release) => !release.prerelease) ? (
+                        <optgroup label="Стабильные">
+                          {item.releases
+                            .filter((release) => !release.prerelease)
+                            .map((release) => (
+                              <option key={release.tag} value={release.install_version}>
+                                {release.tag}
+                              </option>
+                            ))}
+                        </optgroup>
+                      ) : null}
+                      {item.releases.some((release) => release.prerelease) ? (
+                        <optgroup label="Release candidates">
+                          {item.releases
+                            .filter((release) => release.prerelease)
+                            .map((release) => (
+                              <option key={release.tag} value={release.install_version}>
+                                {release.tag} · RC
+                              </option>
+                            ))}
+                        </optgroup>
+                      ) : null}
                     </Select>
+                    <p className="muted-text small">
+                      Можно выбрать любую старую версию — это откат. Перед установкой
+                      создаётся снимок; при ошибке RoutX вернёт конфигурацию.
+                    </p>
                   </Field>
                 ) : (
                   <p className="muted-text small">

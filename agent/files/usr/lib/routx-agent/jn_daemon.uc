@@ -151,7 +151,7 @@ function handle_command(cmd) {
 				panel = replace(panel, /\/+$/, "");
 			if (target != "tachyon" && target != "forkop" && target != "podkop" && target != "prokop")
 				return { status: "failed", error: { code: "unsupported_product_switch", message: "Переключение на " + target + " пока не поддерживается" } };
-			if (version != "" && match(version, /^[0-9]+([.][0-9]+){2,3}$/) == null)
+			if (version != "" && match(version, /^[0-9]+([.][0-9]+){2,3}(-[0-9A-Za-z][0-9A-Za-z.-]*)?$/) == null)
 				return { status: "failed", error: { code: "invalid_product_version", message: "Некорректная версия продукта" } };
 			let current = platform.detect_product();
 			let captured = { ok: true, sections: 0, subscriptions: 0, links: 0 };
