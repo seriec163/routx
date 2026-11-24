@@ -376,39 +376,32 @@ export async function registerRouterConnectionRoutes(
         [router.id],
       );
       const managed = state.rows[0]?.managed ?? {};
-      const prefix = `section.${params.section}.`;
-      if (String(managed[`${prefix}enabled`] ?? '1') !== '0') {
-        throw badRequest('section_not_empty', 'Удалять можно только выключенные секции');
-      }
-      const allowed = new Set([
-        'enabled',
-        'label',
-        'action',
-        'connection_type',
-        'proxy_config_type',
-      ]);
-      for (const path of Object.keys(managed)) {
-        if (!path.startsWith(prefix)) continue;
-        const option = path.slice(prefix.length);
-        if (!allowed.has(option)) {
-          throw badRequest('section_not_empty', 'В секции есть настройки, списки или ресурсы');
-        }
-      }
+
+      // Разрешаем удалять и непустые секции: снимок создаётся в обработчике,
+      // а привязки RoutX к секции удаляются после успешного удаления на роутере.
+      // Нельзя удалить основную секцию и последнюю включённую с подключением:
+      // продукт не сможет собрать конфигурацию.
+      const sections = new Map<string, { action: string; enabled: string }>();
       for (const [path, value] of Object.entries(managed)) {
-        if (
-          (path.startsWith('subscription_url.') || path.startsWith('outbound_source.')) &&
-          path.endsWith('.section') &&
-          value === params.section
-        ) {
-          throw badRequest('section_not_empty', 'В секции есть подписка или подключение');
-        }
+        const match = /^section\.([A-Za-z0-9_.-]{1,64})\.(action|enabled)$/.exec(path);
+        if (!match) continue;
+        const entry = sections.get(match[1]!) ?? { action: '', enabled: '1' };
+        if (match[2] === 'action') entry.action = String(value ?? '');
+        else entry.enabled = String(value ?? '1');
+        sections.set(match[1]!, entry);
       }
-      const connections = await pool.query(
-        'select 1 from router_connections where router_id = $1 and section = $2 limit 1',
-        [router.id, params.section],
-      );
-      if ((connections.rowCount ?? 0) > 0) {
-        throw badRequest('section_not_empty', 'В секции есть подключения RoutX');
+      const connectionActions = new Set(['connection', 'proxy', 'outbound', 'vpn']);
+      const target = sections.get(params.section);
+      if (target && target.enabled !== '0') {
+        const enabledCount = [...sections.values()].filter(
+          (section) => section.enabled !== '0' && connectionActions.has(section.action),
+        ).length;
+        if (enabledCount <= 1) {
+          throw badRequest(
+            'section_last_enabled',
+            'Нельзя удалить последнюю включённую секцию: продукт не сможет собрать конфигурацию. Сначала включите другую секцию.',
+          );
+        }
       }
 
       const job = await enqueueJob(pool, {

@@ -871,7 +871,7 @@ export function RouterRulesPanel(props: {
 
       {deleteSectionTarget ? (
         <ConfirmDialog
-          title="Удалить пустую секцию?"
+          title="Удалить секцию?"
           busy={deleteSectionBusy}
           confirmLabel="Удалить"
           onCancel={() => setDeleteSectionTarget(null)}
@@ -880,11 +880,14 @@ export function RouterRulesPanel(props: {
             <>
               <p>
                 Секция <strong>{deleteSectionTarget.label}</strong> будет удалена с роутера
-                вместе с её дочерними объектами. Перед удалением создаётся снимок; при ошибке
-                RoutX восстановит конфигурацию.
+                вместе с её правилами и подключениями (
+                {deleteSectionTarget.subscriptions.length + deleteSectionTarget.links.length}{' '}
+                подключений в панели). Перед удалением создаётся снимок; при ошибке RoutX
+                восстановит конфигурацию.
               </p>
               <p className="muted-text small">
-                Удалять можно только выключенные секции без подписок, ссылок и ресурсов.
+                Основную секцию удалить нельзя. Последнюю включённую секцию удалить также
+                нельзя — сначала включите другую.
               </p>
               {deleteSectionJob ? (
                 <JobProgress job={deleteSectionJob} label="Удаляем секцию" />
@@ -1137,14 +1140,14 @@ function RuleCard(props: {
         <Button size="sm" variant="ghost" onClick={props.onToggle} disabled={props.disabled}>
           {rule.enabled ? 'Выключить' : 'Включить'}
         </Button>
-        {isEmptySection && !props.isManaged ? (
+        {!props.isManaged ? (
           <Button
             size="sm"
             variant="ghost"
             onClick={props.onDeleteSection}
             disabled={props.disabled}
           >
-            Удалить пустую
+            Удалить секцию
           </Button>
         ) : null}
       </footer>

@@ -265,10 +265,20 @@ export async function sectionDelete(ctx: HandlerContext, job: JobRow): Promise<J
     // read_state не отдаёт список секций с подписками; старый кэш sections
     // иначе продолжит показывать удалённую секцию.
     await ctx.pool.query('update router_state set sections = null where router_id = $1', [routerId]);
+    const removedConnections = await ctx.pool.query(
+      'delete from router_connections where router_id = $1 and section = $2',
+      [routerId, section],
+    );
     await ctx.pool.query('update routers set last_error = null, updated_at = now() where id = $1', [
       routerId,
     ]);
-    return { section, deleted: true, snapshot: snapshotRef, snapshot_id: snapshotId };
+    return {
+      section,
+      deleted: true,
+      snapshot: snapshotRef,
+      snapshot_id: snapshotId,
+      connections_removed: removedConnections.rowCount ?? 0,
+    };
   } catch (error) {
     const message = error instanceof Error ? error.message : 'не удалось удалить секцию';
     let rollback = 'failed';
