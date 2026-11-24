@@ -329,6 +329,26 @@ routx-agent status
 
 ## Частые ошибки установки
 
+`Unable to lock database: Resource temporarily unavailable`:
+
+базу `apk` держит другой процесс (часто зависшая установка Tachyon).
+Агент 1.5.55 ждёт освобождения до 5 минут и пишет держателя в
+`/var/log/routx-agent-update.log`. Если lock не освобождается:
+
+```sh
+fuser -v /lib/apk/db/lock
+for p in /proc/[0-9]*; do
+  ls -l "$p/fd" 2>/dev/null | grep -q /lib/apk/db/lock && echo "${p#/proc/}:$(cat "$p/comm")"
+done
+```
+
+Завершите зависший `apk`/`opkg` или перезагрузите роутер. Если процессов нет:
+
+```sh
+rm -f /lib/apk/db/lock
+apk update
+```
+
 `pkg_hash_check_unresolved: cannot find dependency ucode-mod-digest`:
 
 ```sh
