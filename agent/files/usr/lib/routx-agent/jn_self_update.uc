@@ -141,7 +141,7 @@ function update_script(kind, version) {
 		"  done",
 		"  install_apk && rc=0 || rc=1",
 		"  if [ \"$rc\" = \"0\" ] && [ -n \"$EXPECTED\" ]; then",
-		"    if \"$APK\" info -v routx-agent 2>/dev/null | grep -q \"$EXPECTED\"; then",
+		"    if \"$APK\" list -I routx-agent 2>/dev/null | grep -q \"$EXPECTED\"; then",
 		"      verified=\"ok\"",
 		"    else",
 		"      verified=\"failed\"",
