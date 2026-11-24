@@ -648,32 +648,43 @@ function delete_section(product, args) {
 	let sect = cursor.get_all(product, section);
 	if (type(sect) != "object" || sect[".type"] != "section")
 		return { ok: false, error: "section_missing" };
-	if (util.as_string(sect.enabled) != "0")
+	let force = args.force == true;
+	if (!force && util.as_string(sect.enabled) != "0")
 		return { ok: false, error: "section_enabled" };
 
-	// Разрешаем только служебные поля секции. Любая настройка или ресурс
-	// означают, что секция не пустая.
-	for (let key in sect) {
-		if (key == "" || substr(key, 0, 1) == ".")
-			continue;
-		if (key == "enabled" || key == "label" || key == "action" ||
-		    key == "connection_type" || key == "proxy_config_type")
-			continue;
-		return { ok: false, error: "section_not_empty" };
+	// Без force разрешаем только служебные поля секции. С force панель уже
+	// проверила, что секция не основная и не последняя включённая, поэтому
+	// удаляем секцию вместе с её настройками.
+	if (!force) {
+		for (let key in sect) {
+			if (key == "" || substr(key, 0, 1) == ".")
+				continue;
+			if (key == "enabled" || key == "label" || key == "action" ||
+			    key == "connection_type" || key == "proxy_config_type")
+				continue;
+			return { ok: false, error: "section_not_empty" };
+		}
 	}
 
 	// Дочерние объекты (подписки, outbound_source, section_interface и т.п.)
-	// удалять вместе с секцией нельзя без явного согласия пользователя.
+	// без force удалять нельзя. С force удаляем вместе с секцией.
+	let removed_children = 0;
 	let all = cursor.get_all(product);
 	if (type(all) == "object") {
 		for (let name in all) {
 			let item = all[name];
 			if (type(item) != "object" || name == section)
 				continue;
-			if (util.as_string(item.section) == section)
-				return { ok: false, error: "section_has_children" };
+			if (util.as_string(item.section) == section) {
+				if (!force)
+					return { ok: false, error: "section_has_children" };
+				cursor.delete(product, name);
+				removed_children++;
+			}
 		}
 	}
+	if (force && removed_children > 0 && cursor.commit(product) == null)
+		return { ok: false, error: "uci commit failed" };
 
 	if (product == "tachyon") {
 		let res = run.run_product("tachyon", [ "delete_section", section ], 90);
@@ -683,6 +694,7 @@ function delete_section(product, args) {
 			ok: true,
 			section: section,
 			deleted: true,
+			children_removed: removed_children,
 			output: util.truncate_text(res.stdout, 2000)
 		};
 	}
@@ -693,7 +705,7 @@ function delete_section(product, args) {
 	let reload_res = reload(product);
 	if (!reload_res.ok)
 		return { ok: false, error: reload_res.error };
-	return { ok: true, section: section, deleted: true };
+	return { ok: true, section: section, deleted: true, children_removed: removed_children };
 }
 
 function manage_connection(product, args) {

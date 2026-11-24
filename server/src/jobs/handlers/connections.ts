@@ -17,6 +17,7 @@ import {
 } from '../helpers.js';
 import { type JobRow } from '../queue.js';
 import { loadListExtras, saveState } from '../state.js';
+import { selfUpdateAgent } from './wifi.js';
 
 export async function applyRouterConnections(ctx: HandlerContext, job: JobRow): Promise<Json> {
   const routerId = requireRouter(job);
@@ -258,7 +259,14 @@ export async function sectionDelete(ctx: HandlerContext, job: JobRow): Promise<J
 
   try {
     await setJobPhase(ctx, job.id, 'delete', 40);
-    await runCommand(ctx, job, 'delete_section', { section }, 120_000);
+    try {
+      await runCommand(ctx, job, 'delete_section', { section, force: true }, 120_000);
+    } catch (error) {
+      if (!(error instanceof JobFailure) || error.code !== 'agent_outdated') throw error;
+      await setJobPhase(ctx, job.id, 'Обновляем агент для удаления секции', 25);
+      await selfUpdateAgent(ctx, job);
+      await runCommand(ctx, job, 'delete_section', { section, force: true }, 120_000);
+    }
     await setJobPhase(ctx, job.id, 'verify', 80);
     const raw = await runCommand(ctx, job, 'read_state', {}, 60_000);
     await saveState(ctx.pool, routerId, raw, 'section_delete');

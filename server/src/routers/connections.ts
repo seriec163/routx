@@ -410,7 +410,7 @@ export async function registerRouterConnectionRoutes(
         requestedBy: auth.userId,
         timeoutSeconds: 300,
         maxAttempts: 1,
-        payload: { section: params.section },
+        payload: { section: params.section, force: true },
       });
       await audit(pool, {
         actorId: auth.userId,

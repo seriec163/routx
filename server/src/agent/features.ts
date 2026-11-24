@@ -16,6 +16,7 @@ export const AGENT_FEATURES: Record<string, AgentFeature> = {
   wifi_update: { op: 'wifi_update', minVersion: '1.5.52', label: 'изменение Wi-Fi' },
   wifi_create: { op: 'wifi_create', minVersion: '1.5.52', label: 'создание Wi-Fi' },
   wifi_delete: { op: 'wifi_delete', minVersion: '1.5.52', label: 'удаление Wi-Fi' },
+  delete_section: { op: 'delete_section', minVersion: '1.5.54', label: 'удаление секции' },
 };
 
 export function compareVersions(left: string, right: string): number {

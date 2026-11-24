@@ -25,6 +25,17 @@ describe('возможности агента', () => {
   it('не ограничивает операции без явного требования', () => {
     expect(featureForOp('read_state')).toBeNull();
     expect(featureForOp('apply_uci')).toBeNull();
-    expect(Object.keys(AGENT_FEATURES).every((op) => op.startsWith('wifi_'))).toBe(true);
+    expect(
+      Object.keys(AGENT_FEATURES).every(
+        (op) => op.startsWith('wifi_') || op === 'delete_section',
+      ),
+    ).toBe(true);
+  });
+
+  it('требует 1.5.54 для удаления непустой секции', () => {
+    const feature = featureForOp('delete_section');
+    expect(feature?.minVersion).toBe('1.5.54');
+    expect(supportsFeature('1.5.53', feature!)).toBe(false);
+    expect(supportsFeature('1.5.54', feature!)).toBe(true);
   });
 });

@@ -14,7 +14,7 @@ import {
 } from '../helpers.js';
 import type { JobRow } from '../queue.js';
 
-async function selfUpdateForWifi(ctx: HandlerContext, job: JobRow): Promise<void> {
+export async function selfUpdateAgent(ctx: HandlerContext, job: JobRow): Promise<void> {
   await setJobPhase(ctx, job.id, 'Агент не поддерживает Wi-Fi — обновляем RoutX', 3);
   const before = await agentVersionOf(ctx, requireRouter(job));
   const base = ctx.publicUrl.replace(/\/+$/, '');
@@ -63,7 +63,7 @@ async function runWifiCommand(
   // механизмом self_update, затем повторяем операцию — пользователю не нужно
   // вручную искать версию агента.
   try {
-    await selfUpdateForWifi(ctx, job);
+    await selfUpdateAgent(ctx, job);
   } catch (error) {
     const message = error instanceof Error ? error.message : 'неизвестная ошибка';
     throw new JobFailure(
@@ -96,7 +96,7 @@ export async function wifiRead(ctx: HandlerContext, job: JobRow): Promise<Json> 
   // Обновляем такой агент и повторяем чтение, чтобы панель получила hardware.
   if (raw.hardware == null || typeof raw.hardware !== 'object') {
     try {
-      await selfUpdateForWifi(ctx, job);
+      await selfUpdateAgent(ctx, job);
       raw = await runCommand(ctx, job, 'wifi_read', {}, 60_000);
     } catch (error) {
       ctx.log.warn({ err: error, jobId: job.id }, 'не удалось обновить агент для определения Wi-Fi');
