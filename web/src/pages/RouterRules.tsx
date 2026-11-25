@@ -595,45 +595,71 @@ export function RouterRulesPanel(props: {
       CONNECTION_ACTIONS.has(body.action) &&
       pending.length > 0 &&
       existingSources === 0;
+
+    // Tachyon 2.x удаляет пустое правило соединения без источника при reload —
+    // оно не переживает проверку после применения. Просим сначала добавить
+    // подписку или ссылку; секция создастся вместе с источником.
+    if (
+      !existingRule &&
+      !bootstrap &&
+      CONNECTION_ACTIONS.has(body.action) &&
+      !hasOutbound
+    ) {
+      toast.error('Сначала добавьте подписку или ссылку: пустое правило Tachyon не сохраняет');
+      return;
+    }
+
+    // Новую секцию с подключением создаём сразу через apply_connections.
+    // Tachyon 2.x не сохраняет пустую выключенную секцию после reload, поэтому
+    // создавать её отдельным diff и потом добавлять источник нельзя.
+    if (bootstrap) {
+      setEditor(null);
+      void (async () => {
+        try {
+          await addPendingConnections(body.section, pending);
+          await applyRuleBody({
+            ...body,
+            create: false,
+            enabled: userEnabled,
+            outbound_json: undefined,
+            proxy_config_type: undefined,
+          });
+          toast.success(
+            pending.length === 1
+              ? 'Подключение добавлено'
+              : `Добавлено подключений: ${pending.length}`,
+          );
+          await readLive();
+          props.onChanged();
+        } catch (caught) {
+          toast.error(errorMessage(caught));
+        }
+      })();
+      return;
+    }
+
     const diffBody = hasOutbound
       ? {
           ...body,
-          enabled: bootstrap ? false : body.enabled,
           outbound_json: undefined,
           proxy_config_type: undefined,
         }
-      : bootstrap
-        ? { ...body, enabled: false }
-        : body;
-    const afterApply =
-      pending.length > 0 || hasOutbound
-        ? async () => {
-            if (pending.length > 0) {
-              await addPendingConnections(body.section, pending);
-            }
-            if (hasOutbound) {
-              await applyPodkopOutbound(body.section, body.outbound_json!.trim());
-            }
-            // apply_connections/outbound включают секцию, когда появился источник.
-            // Если пользователь создавал правило выключенным — возвращаем 0.
-            if (!userEnabled) {
-              await applyRuleBody({
-                ...body,
-                create: false,
-                enabled: false,
-                outbound_json: undefined,
-                proxy_config_type: undefined,
-              });
-            }
-            toast.success(
-              hasOutbound
-                ? 'Outbound JSON сохранён'
-                : pending.length === 1
-                  ? 'Подключение добавлено'
-                  : `Добавлено подключений: ${pending.length}`,
-            );
+      : body;
+    const afterApply = hasOutbound
+      ? async () => {
+          await applyPodkopOutbound(body.section, body.outbound_json!.trim());
+          if (!userEnabled) {
+            await applyRuleBody({
+              ...body,
+              create: false,
+              enabled: false,
+              outbound_json: undefined,
+              proxy_config_type: undefined,
+            });
           }
-        : undefined;
+          toast.success('Outbound JSON сохранён');
+        }
+      : undefined;
     setEditor(null);
     setDiffRequest({
       title: body.create ? `Создать правило «${body.label}»` : `Изменить правило «${body.label}»`,
