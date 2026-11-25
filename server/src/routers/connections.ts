@@ -392,7 +392,9 @@ export async function registerRouterConnectionRoutes(
       }
       const connectionActions = new Set(['connection', 'proxy', 'outbound', 'vpn']);
       const target = sections.get(params.section);
-      if (target && target.enabled !== '0') {
+      // Правило block/bypass/dns можно удалять всегда: продукту не нужен
+      // включённый connection-секции ради такого правила.
+      if (target && target.enabled !== '0' && connectionActions.has(target.action)) {
         const enabledCount = [...sections.values()].filter(
           (section) => section.enabled !== '0' && connectionActions.has(section.action),
         ).length;

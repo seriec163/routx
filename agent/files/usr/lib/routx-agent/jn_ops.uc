@@ -786,6 +786,23 @@ function delete_section(product, args) {
 		return { ok: false, error: "uci commit failed" };
 
 	if (product == "tachyon") {
+		// Tachyon 2.x: секция живёт в UCI-проекции store, поэтому удаляем её
+		// здесь и импортируем оставшийся UCI через мост. CLI delete_section
+		// в 2.x отсутствует.
+		if (tachyon_is_v2()) {
+			cursor.delete(product, section);
+			if (cursor.commit(product) == null)
+				return { ok: false, error: "uci commit failed" };
+			let res = reload(product);
+			if (!res.ok)
+				return res;
+			return {
+				ok: true,
+				section: section,
+				deleted: true,
+				children_removed: removed_children
+			};
+		}
 		let res = run.run_product("tachyon", [ "delete_section", section ], 90);
 		if (!res.ok)
 			return { ok: false, error: run.error_text(res) };
