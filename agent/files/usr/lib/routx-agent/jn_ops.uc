@@ -191,29 +191,78 @@ function tachyon_v2_port() {
 	return port;
 }
 
+function tachyon_v2_settings() {
+	let data = util.json_parse(util.read_file("/etc/tachyon/tachyon.json", ""));
+	return data != null && type(data.settings) == "object" ? data.settings : {};
+}
+
+function tachyon_v2_tokens() {
+	let tokens = [];
+	let paths = [
+		"/var/run/tachyon/ipc.token",
+		"/tmp/tachyon-rs/ipc.token",
+		"/tmp/run/tachyon/ipc.token"
+	];
+	for (let path in paths) {
+		let value = trim(util.read_file(path, ""));
+		if (value != "")
+			push(tokens, { source: path, value: value });
+	}
+	// Tachyon выбирает runtime-каталог по /proc/mounts (/var/run, /run или
+	// /tmp/tachyon-rs), поэтому на разных прошивках путь отличается.
+	for (let root in [ "/var/run", "/run", "/tmp" ]) {
+		let entries = fs.lsdir(root) || [];
+		for (let entry in entries) {
+			let name = util.as_string(entry);
+			if (index(name, "tachyon") < 0)
+				continue;
+			let path = root + "/" + name + "/ipc.token";
+			let value = trim(util.read_file(path, ""));
+			if (value != "")
+				push(tokens, { source: path, value: value });
+		}
+	}
+	let api = util.as_string(tachyon_v2_settings().agent_api_token);
+	if (api != "")
+		push(tokens, { source: "agent_api_token", value: api });
+	return tokens;
+}
+
 function tachyon_v2_apply() {
-	let token = trim(util.read_file("/var/run/tachyon/ipc.token", ""));
-	if (token == "")
-		return { ok: false, error: "tachyon_ipc_token_missing" };
-	let res = http_client.post({
-		server: "http://127.0.0.1:" + tachyon_v2_port(),
-		verify_tls: false,
-		agent_token: ""
-	}, "/cgi-bin/luci/admin/uci/apply_unchecked", {}, {
-		timeout: 60,
-		unauthenticated: true,
-		headers: [ "X-Tachyon-Local-Token: " + token ]
-	});
-	if (res.ok)
-		return { ok: true };
+	let candidates = tachyon_v2_tokens();
+	push(candidates, { source: "no-token", value: "" });
+	let attempted = [];
+	let last = null;
+	for (let candidate in candidates) {
+		let headers = candidate.value == "" ? [] : [ "X-Tachyon-Local-Token: " + candidate.value ];
+		let res = http_client.post({
+			server: "http://127.0.0.1:" + tachyon_v2_port(),
+			verify_tls: false,
+			agent_token: ""
+		}, "/cgi-bin/luci/admin/uci/apply_unchecked", {}, {
+			timeout: 60,
+			unauthenticated: true,
+			headers: headers
+		});
+		if (res.ok)
+			return { ok: true };
+		push(attempted, candidate.source + ":" + res.status);
+		last = res;
+		if (res.status != 401 && res.status != 403)
+			break;
+	}
 	let message = "";
-	if (type(res.json) == "object")
-		message = util.as_string(res.json.error);
-	if (message == "" && res.body != "")
-		message = util.truncate_text(res.body, 400);
+	if (last != null && type(last.json) == "object")
+		message = util.as_string(last.json.error);
+	if (message == "" && last != null && last.body != "")
+		message = util.truncate_text(last.body, 300);
 	if (message == "")
-		message = res.stderr != "" ? res.stderr : "HTTP " + res.status;
-	return { ok: false, error: "tachyon_apply_failed: " + util.truncate_text(message, 500) };
+		message = last != null && last.stderr != "" ? last.stderr : "HTTP " + (last == null ? 0 : last.status);
+	return {
+		ok: false,
+		error: "tachyon_apply_failed: " + util.truncate_text(message, 400) +
+			" [" + join(",", attempted) + "]"
+	};
 }
 
 function reload(product) {
