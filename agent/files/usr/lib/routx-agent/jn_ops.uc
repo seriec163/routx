@@ -6,6 +6,7 @@ const allow = require("jn_allowlist");
 const run = require("jn_run");
 const state = require("jn_uci_state");
 const product_api = require("jn_product_api");
+const http_client = require("jn_http");
 
 /**
  * Prokop не может собрать конфигурацию, если не осталось ни одной включённой
@@ -172,7 +173,56 @@ function podkop_reload_check() {
 	return { ok: true };
 }
 
+function tachyon_is_v2() {
+	if (!util.file_exists("/etc/tachyon/tachyon.json"))
+		return false;
+	let res = run.run_product("tachyon", ["version"], 10);
+	if (res.ok && match(trim(res.stdout), /^tachyon\s+2\./) != null)
+		return true;
+	return false;
+}
+
+function tachyon_v2_port() {
+	let data = util.json_parse(util.read_file("/etc/tachyon/tachyon.json", ""));
+	let raw = data != null && type(data.settings) == "object" ? data.settings.listen_port : null;
+	let port = util.as_int(raw, 1680);
+	if (port < 1 || port > 65535)
+		port = 1680;
+	return port;
+}
+
+function tachyon_v2_apply() {
+	let token = trim(util.read_file("/var/run/tachyon/ipc.token", ""));
+	if (token == "")
+		return { ok: false, error: "tachyon_ipc_token_missing" };
+	let res = http_client.post({
+		server: "http://127.0.0.1:" + tachyon_v2_port(),
+		verify_tls: false,
+		agent_token: ""
+	}, "/cgi-bin/luci/admin/uci/apply_unchecked", {}, {
+		timeout: 60,
+		unauthenticated: true,
+		headers: [ "X-Tachyon-Local-Token: " + token ]
+	});
+	if (res.ok)
+		return { ok: true };
+	let message = "";
+	if (type(res.json) == "object")
+		message = util.as_string(res.json.error);
+	if (message == "" && res.body != "")
+		message = util.truncate_text(res.body, 400);
+	if (message == "")
+		message = res.stderr != "" ? res.stderr : "HTTP " + res.status;
+	return { ok: false, error: "tachyon_apply_failed: " + util.truncate_text(message, 500) };
+}
+
 function reload(product) {
+	// Tachyon 2.x держит конфигурацию в своём store (/etc/tachyon/tachyon.json),
+	// а /etc/config/tachyon — его проекция. Штатный `tachyon reload` перезаписывает
+	// UCI из store и стирает наши правки, поэтому импортируем UCI через локальный
+	// HTTP-мост (как это делает LuCI): apply_unchecked = UCI -> store -> core.
+	if (product == "tachyon" && tachyon_is_v2())
+		return tachyon_v2_apply();
 	if (product == "podkop") {
 		let res = run.run_product("podkop", ["reload"], 120);
 		let check = podkop_reload_check();

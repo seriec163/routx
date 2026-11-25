@@ -151,6 +151,13 @@ function request(cfg, method, path, body, options) {
 		push(lines, "resolve = " + curl_quote(resolve));
 	push(lines, "request = " + curl_quote(method));
 	push(lines, "header = " + curl_quote(opts.accept == null ? "Accept: application/json" : opts.accept));
+	if (type(opts.headers) == "array") {
+		for (let header in opts.headers) {
+			let text = util.as_string(header);
+			if (text != "")
+				push(lines, "header = " + curl_quote(text));
+		}
+	}
 	push(lines, "output = " + curl_quote(resp_path));
 	push(lines, "write-out = " + curl_quote("%{http_code}"));
 	push(lines, "silent");
