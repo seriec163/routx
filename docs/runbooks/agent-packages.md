@@ -330,6 +330,12 @@ routx-agent status
   сетевых индексов; при нехватке зависимостей — повтор с сетью.
 - **1.5.57+** — проверка установленной версии через `apk list -I` (в apk-tools 3
   `apk info -v` не печатает версию); в логе теперь `verified=ok`.
+- **1.5.59+** — поддержка Tachyon 2.x: конфигурация хранится в
+  `/etc/tachyon/tachyon.json`, а `/etc/config/tachyon` — её проекция. Агент
+  после `uci commit` не вызывает `tachyon reload` (он перезаписывает UCI из
+  store и стирает правки), а импортирует UCI через локальный мост
+  `POST /cgi-bin/luci/admin/uci/apply_unchecked` с токеном
+  `/var/run/tachyon/ipc.token`.
 
 ## Частые ошибки установки
 

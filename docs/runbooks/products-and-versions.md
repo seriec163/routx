@@ -104,3 +104,14 @@ Forkop, Podkop и Prokop не принимают версию, поэтому д
 
 Для установки RC нужен агент **1.5.58+** — он принимает версию с суффиксом
 `-rc.N` в `product_switch`.
+
+### Tachyon 2.x
+
+Начиная с `2.0.0-rc.1` Tachyon хранит конфигурацию в собственном store
+(`/etc/tachyon/tachyon.json`), а `/etc/config/tachyon` — только проекция.
+Поэтому RoutX не вызывает `tachyon reload` напрямую: он пишет UCI и
+импортирует его через локальный мост Tachyon
+`POST /cgi-bin/luci/admin/uci/apply_unchecked` (заголовок
+`X-Tachyon-Local-Token` из `/var/run/tachyon/ipc.token`). Это поддерживает
+агент **1.5.59+**. Без него правки RoutX на Tachyon 2.x откатываются самим
+Tachyon и панель показывает `verify_mismatch`.
