@@ -1888,8 +1888,37 @@ function apply_tachyon_subscription(section, subscriptions, args) {
 			push(keep, value);
 	}
 	stage = "delete_sources";
-	for (let sname in source_ids)
+	// Источники, на которые ссылаются другие секции, не трогаем: иначе
+	// создание подписки в новой секции ломает уже настроенные правила.
+	let protected_sources = {};
+	for (let sname in all) {
+		let other = all[sname];
+		if (type(other) != "object" || other[".type"] != "outbound_source")
+			continue;
+		let owner = util.as_string(other.section);
+		if (owner != "" && owner != section)
+			protected_sources[sname] = true;
+	}
+	for (let sname in all) {
+		if (sname == section)
+			continue;
+		let other = all[sname];
+		if (type(other) != "object" || other.outbound_source_refs == null)
+			continue;
+		let other_refs = other.outbound_source_refs;
+		if (type(other_refs) != "array")
+			other_refs = [ other_refs ];
+		for (let ref in other_refs) {
+			let value = util.as_string(ref);
+			if (value != "")
+				protected_sources[value] = true;
+		}
+	}
+	for (let sname in source_ids) {
+		if (protected_sources[sname] === true)
+			continue;
 		cursor.delete("tachyon", sname);
+	}
 	for (let key in [ "selector_proxy_links", "proxy_links", "outbound_jsons", "outbound_json" ])
 		cursor.delete("tachyon", section, key);
 
