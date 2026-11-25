@@ -70,3 +70,23 @@ curl -s http://127.0.0.1:3000/healthz
 ```
 
 Старые образы остаются локально, поэтому откат не требует сборки.
+
+## Место на диске
+
+Каждый образ RoutX занимает около 230 МБ, а промежуточные слои сборки —
+больше. На NanoPI `/opt` всего 26 ГБ, и несколько сборок подряд заполняют
+раздел: Postgres не может писать WAL, уходит в recovery, и переключение
+падает с `container routx-db-1 is unhealthy`.
+
+Перед серией сборок и после неё:
+
+```bash
+df -h /opt
+docker image prune -f              # только dangling-слои, безопасно
+docker images --format '{{.Repository}}:{{.Tag}} {{.Size}}' | grep routx:
+# удалить старые теги, оставив текущий и предыдущий
+rm -rf /opt/routx-build-<старая версия> /opt/routx-<старая версия>-src.tgz
+```
+
+Если база уже в recovery: освободить место и `docker restart routx-db-1`,
+дождаться `healthy`, затем повторить `switch-version.sh`.
